@@ -178,10 +178,19 @@ function build() {
   // do with today's work. The founder, reasonably: "how the fuck did we go from
   // 40 something tasks to 66 then 233".
   //
-  // The current phase is the LAST one in the file, which is the one being
-  // built. The all-time figure is kept, demoted to a subline, because it is
-  // still true and still occasionally useful — it just is not the headline.
-  const currentPhase = d.phases[d.phases.length - 1];
+  // The current phase comes from config.activePhase, falling back to the LAST
+  // phase in the file. It used to be the last phase unconditionally, which was
+  // right for a board whose newest phase was always the live one and wrong the
+  // first time a board listed its phases in build order — this repo's own,
+  // where the last phase is the one that ships LAST. It reported 0% of Layer 6
+  // as the headline while all the real work sat in Layer 1, and it disagreed
+  // with the dashboard, which had honoured activePhase all along. Two tools
+  // giving two answers about the same board is worse than either answer.
+  //
+  // The all-time figure is kept, demoted to a subline, because it is still true
+  // and still occasionally useful — it just is not the headline.
+  const currentPhase =
+    d.phases.find((p) => p.name === CFG.activePhase) ?? d.phases[d.phases.length - 1];
   const current = progress(currentPhase.tasks);
   const currentPct = current.total ? Math.round((current.done / current.total) * 100) : 0;
 
@@ -310,7 +319,8 @@ if (!cmd || cmd === "status") {
   // hook and the dashboard were quoting three different figures for the same
   // board. Founder, 2026-08-29: "We were at 34% not at 24, that board is
   // fucking useless." He was reading 35% on the dashboard and 23% here.
-  const cur = d.phases[d.phases.length - 1];
+  const cur =
+    d.phases.find((p) => p.name === CFG.activePhase) ?? d.phases[d.phases.length - 1];
   const cp = progress(cur.tasks);
   console.log(`\n  ${cp.pct}%  ${cp.done}/${cp.total}  ${cur.name}`);
   console.log(`         all phases ever, incl. pre-V1 scope: ${o.done}/${o.total} (${o.pct}%)\n`);
