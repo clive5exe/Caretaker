@@ -14,7 +14,7 @@ order: 2
   <div class="boardmeta">
     <b>Layer 0 — The spec format &middot; 0 of 5 tasks closed through the full gate</b>
     <span>0 more are built and waiting only on reviewer / qa / security verdicts &middot; launch target <b>Invalid Date</b></span>
-    <span>All phases ever, including pre-V1 scope: 1 of 29 (3%)</span>
+    <span>All phases ever, including pre-V1 scope: 1 of 30 (3%)</span>
   </div>
 </div>
 <div class="pbar big"><div class="pfill" style="width:0%"></div></div>
@@ -22,7 +22,7 @@ order: 2
   <span class="chip ok">Done 1</span>
   <span class="chip warn">In progress 0</span>
   <span class="chip bad">Blocked 2</span>
-  <span class="chip neutral">To do 26</span>
+  <span class="chip neutral">To do 27</span>
   
 </div>
 </div>
@@ -47,12 +47,13 @@ undefined
 
 ## Layer 1 — Environment
 
-<div class="phasebar"><div class="phasemeta"><b>Invalid Date &rarr; Invalid Date</b> &middot; 0/6 done &middot; 8d remaining</div><div class="pbar "><div class="pfill" style="width:0%"></div></div></div>
+<div class="phasebar"><div class="phasemeta"><b>Invalid Date &rarr; Invalid Date</b> &middot; 0/7 done &middot; 8d remaining</div><div class="pbar "><div class="pfill" style="width:0%"></div></div></div>
 
 undefined
 
-<div class="task todo"><div class="taskhead"><code class="tid">E-1</code><span class="ttitle">Container runner: podman, resource limits, repo bind-mount</span><span class="chip neutral">To do</span></div><div class="taskmeta"><span class="tmi"><b>backend</b></span><span class="tmi">1d</span><span class="tmi">after P-1</span></div><div class="acc"><b>Accept:</b> an agent runs inside a container with --memory, --cpus and --pids-limit enforced, a read-only root, the repo bind-mounted, and NO container socket; a test proves each limit actually binds rather than being passed and ignored</div></div>
-<div class="task todo"><div class="taskhead"><code class="tid">E-2</code><span class="ttitle">Egress allowlist proxy, generated from the spec</span><span class="chip neutral">To do</span></div><div class="taskmeta"><span class="tmi"><b>security</b></span><span class="tmi">2d</span><span class="tmi">after E-1, P-1</span></div><div class="acc"><b>Accept:</b> the container has no route to the internet and reaches only the hosts the spec declared, through a proxy; a test proves an undeclared host is refused and logged, and proves the repo cannot be POSTed anywhere</div></div>
+<div class="task todo"><div class="taskhead"><code class="tid">E-0</code><span class="ttitle">Podman is the assumption; missing means install it</span><span class="chip neutral">To do</span></div><div class="taskmeta"><span class="tmi"><b>devops</b></span><span class="tmi">4h</span> <span class="chip ok" title="first attempt">qa pass</span></div><div class="acc"><b>Accept:</b> the runner uses podman; if it is absent the tool offers the correct install command for the platform and runs it on confirmation; Docker is used ONLY when explicitly asked for, and that run prints what the weaker isolation means</div><div class="tnote"><b>Latest:</b> NOT A GRACEFUL FALLBACK. If the security claim is the product, the tool must not quietly accept a weaker runtime because it happened to find one on the box - that is how a guarantee becomes a default nobody checked. Rootless podman means an escape lands unprivileged; Docker's usual daemon runs as root and an escape ends the argument. Docker stays supported because someone's machine will only have it, but it is opt-in and it says what it costs. Install friction is real and is the reason this is its own task: Linux needs a package manager and probably sudo, macOS needs brew plus podman machine init, which is a VM. An installer that asks for sudo has to explain itself first.</div></div>
+<div class="task todo"><div class="taskhead"><code class="tid">E-1</code><span class="ttitle">Container runner: podman, resource limits, repo bind-mount</span><span class="chip neutral">To do</span></div><div class="taskmeta"><span class="tmi"><b>backend</b></span><span class="tmi">1d</span><span class="tmi">after P-1</span> <span class="chip ok" title="first attempt">qa pass</span></div><div class="acc"><b>Accept:</b> an agent runs inside a container with --memory, --cpus and --pids-limit enforced, a read-only root, the repo bind-mounted, and NO container socket; a test proves each limit actually binds rather than being passed and ignored</div><div class="tnote"><b>Latest:</b> Unblocked by ADR-0001: build rather than adopt. Fabro's container wrapper is 179 lines of create/inspect/list/delete; adopting it would mean taking their graph model and server to get something we can write, and it would not get us the egress control we actually need.</div></div>
+<div class="task todo"><div class="taskhead"><code class="tid">E-2</code><span class="ttitle">Egress allowlist proxy, generated from the spec</span><span class="chip neutral">To do</span></div><div class="taskmeta"><span class="tmi"><b>security</b></span><span class="tmi">2d</span><span class="tmi">after E-1, P-1</span></div><div class="acc"><b>Accept:</b> the container has no route to the internet and reaches only the hosts the spec declared, through a proxy; a test proves an undeclared host is refused and logged, and proves the repo cannot be POSTed anywhere</div><div class="tnote"><b>Latest:</b> ADR-0001: Fabro was evaluated by reading its source, not its README, and does NOT have this. Their Docker provider errors on cidr_allow_list - it is all-or-nothing, default bridge or no network at all - and docker.rs is 179 lines with no networking in it. The allowlist that exists is typed DaytonaNetwork, serialised into a paid third-party cloud API and enforced there, and it is CIDR, which is the wrong unit for api.stripe.com behind a CDN. This task is the load-bearing piece of the product because it is the part nobody else has.</div></div>
 <div class="task todo"><div class="taskhead"><code class="tid">E-3</code><span class="ttitle">Prove the sandbox by attacking it</span><span class="chip neutral">To do</span></div><div class="taskmeta"><span class="tmi"><b>security</b></span><span class="tmi">1d</span><span class="tmi">after E-2</span></div><div class="acc"><b>Accept:</b> written attempts to (a) write outside the repo mount, (b) exhaust host memory, (c) reach an undeclared host and (d) reach the container socket each fail, with the command and its output recorded</div><div class="tnote"><b>Latest:</b> A sandbox nobody has tried to break is a claim, not a control. This task never gets dropped as obviously fine.</div></div>
 <div class="task todo"><div class="taskhead"><code class="tid">E-4</code><span class="ttitle">Target a box you own, not only a PaaS</span><span class="chip neutral">To do</span></div><div class="taskmeta"><span class="tmi"><b>devops</b></span><span class="tmi">2d</span><span class="tmi">after E-2</span></div><div class="acc"><b>Accept:</b> the environment layer can produce a deployable for a plain Linux host with its own Postgres and a Prometheus scrape config, not only a managed platform</div><div class="tnote"><b>Latest:</b> Follows from the thesis rather than being bolted on. Every agent tool on the market assumes a PaaS. The migration failure that started this - ten migrations missing from a live database with no ledger anywhere, while the test suite stayed green because it replayed onto a throwaway cluster - happened because managed convenience meant nobody owned the migration path.</div></div>
 <div class="task todo"><div class="taskhead"><code class="tid">E-5</code><span class="ttitle">The sandbox is rebuilt from the spec every run</span><span class="chip neutral">To do</span></div><div class="taskmeta"><span class="tmi"><b>backend</b></span><span class="tmi">4h</span><span class="tmi">after E-1, P-1</span></div><div class="acc"><b>Accept:</b> a run gets a container built from the spec and destroyed after, and a package installed by hand inside one is gone on the next run; nothing persists between runs except the repo</div><div class="tnote"><b>Latest:</b> THE ANSWER TO 'ENVIRONMENTS CHANGE' AT THIS LAYER IS THAT THEY DO NOT. Immutable rebuild makes drift structurally impossible rather than detectable: if something is needed, the spec changes and the image is rebuilt. Terraform and Ansible are the wrong shape here - a state file for a thing created fifty times an hour is overhead and a lock contention point, and convergence assumes a host that persists.</div></div>
@@ -117,7 +118,7 @@ undefined
 |---|---|---|
 | `backend` | 13 | 13d |
 | `architect` | 7 | 12d |
-| `devops` | 4 | 9d |
+| `devops` | 5 | 10d |
 | `security` | 2 | 3d |
 | `frontend` | 2 | 8d |
 | `you` | 1 | 0d |
