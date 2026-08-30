@@ -59,6 +59,32 @@ tighter list.
 adopting their graph model and their server to obtain a container wrapper we can
 write ourselves.
 
+**And it is bound to the Docker API.** `docker.rs` uses `bollard`, which talks to
+the Docker socket. Our decision is rootless podman, so adopting their runner
+would mean enabling podman's Docker-compatibility socket — a shim, and on
+rootless podman a user service that has to stay alive. That is a compatibility
+layer dragged into the one part of the system that most needs to be simple and
+inspectable.
+
+Everything above describes Docker because Docker is what Fabro implements. The
+finding is about hostname-level egress control, which is absent either way.
+
+## Why podman, since this discusses Docker throughout
+
+Asserted earlier without being written down, so it is written down here.
+
+- **Rootless.** A container escape lands as an unprivileged user. With Docker's
+  usual setup the daemon runs as root and an escape ends the argument.
+- **No daemon.** Nothing long-lived and privileged to compromise; containers are
+  child processes.
+- **Already present** on the development box, 5.8.2, already running an
+  unrelated rootless container.
+
+The honest cost: some tooling assumes the `docker` binary by name, and rootless
+networking (pasta or slirp4netns) behaves differently enough to notice. Neither
+is disqualifying, and for the egress design it does not matter — `--network=none`
+plus a proxy is the same mechanism on both.
+
 ## Decision
 
 **Build the environment layer. Take the technique, not the code.**
