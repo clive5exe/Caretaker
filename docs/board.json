@@ -4,6 +4,32 @@
   },
   "phases": [
     {
+      "name": "Layer 0 \u2014 The spec format",
+      "tasks": [
+        {
+          "id": "P-1",
+          "title": "A spec schema the environment can be derived from",
+          "owner": "architect",
+          "est": "1d",
+          "status": "todo",
+          "deps": [],
+          "spec": "docs/architecture.md",
+          "ac": "a spec carries a structured block declaring runtime, services and external hosts, with prose below it, and a parser turns that block into an image spec and an egress allowlist without a human editing either",
+          "note": "FIRST, because everything downstream reads it. Free-text specs make environment derivation impossible, and the egress allowlist is the control that makes the sandbox real. This is also what turns allowlisting from a chore nobody maintains into a byproduct of writing the spec you were writing anyway."
+        },
+        {
+          "id": "P-2",
+          "title": "Appended gate verdicts, before there is data to lose",
+          "owner": "backend",
+          "est": "2h",
+          "status": "todo",
+          "deps": [],
+          "ac": "a gate records every verdict rather than the latest, and rework rate and first-pass rate are computable from the board",
+          "note": "CHEAP NOW, IMPOSSIBLE RETROACTIVELY. The board keeps one verdict per gate, so a task that failed qa three times and passed once reads as a pass. Two of the KPIs that matter most are therefore unmeasurable, and the dashboard already prints a warning saying so."
+        }
+      ]
+    },
+    {
       "name": "Layer 1 \u2014 Environment",
       "tasks": [
         {
@@ -12,21 +38,24 @@
           "owner": "backend",
           "est": "1d",
           "status": "todo",
-          "deps": [],
+          "deps": [
+            "P-1"
+          ],
           "spec": "docs/architecture.md",
           "ac": "an agent runs inside a container with --memory, --cpus and --pids-limit enforced, a read-only root, the repo bind-mounted, and NO container socket; a test proves each limit actually binds rather than being passed and ignored"
         },
         {
           "id": "E-2",
-          "title": "Egress allowlist proxy: the container has no route to the internet",
+          "title": "Egress allowlist proxy, generated from the spec",
           "owner": "security",
           "est": "2d",
           "status": "todo",
           "deps": [
-            "E-1"
+            "E-1",
+            "P-1"
           ],
           "spec": "docs/architecture.md",
-          "ac": "the container reaches the model API and the package registry through a proxy and NOTHING else; a test proves an arbitrary host is refused and the refusal is logged, and proves the repo cannot be POSTed anywhere"
+          "ac": "the container has no route to the internet and reaches only the hosts the spec declared, through a proxy; a test proves an undeclared host is refused and logged, and proves the repo cannot be POSTed anywhere"
         },
         {
           "id": "E-3",
@@ -37,7 +66,20 @@
           "deps": [
             "E-2"
           ],
-          "ac": "a written attempt to (a) write outside the repo mount, (b) exhaust host memory, (c) reach an unlisted host, and (d) reach the container socket, each fails, with the command and its output recorded"
+          "ac": "written attempts to (a) write outside the repo mount, (b) exhaust host memory, (c) reach an undeclared host and (d) reach the container socket each fail, with the command and its output recorded",
+          "note": "A sandbox nobody has tried to break is a claim, not a control. This task never gets dropped as obviously fine."
+        },
+        {
+          "id": "E-4",
+          "title": "Target a box you own, not only a PaaS",
+          "owner": "devops",
+          "est": "2d",
+          "status": "todo",
+          "deps": [
+            "E-2"
+          ],
+          "ac": "the environment layer can produce a deployable for a plain Linux host with its own Postgres and a Prometheus scrape config, not only a managed platform",
+          "note": "Follows from the thesis rather than being bolted on. Every agent tool on the market assumes a PaaS. The migration failure that started this - ten migrations missing from a live database with no ledger anywhere, while the test suite stayed green because it replayed onto a throwaway cluster - happened because managed convenience meant nobody owned the migration path."
         }
       ]
     },
@@ -66,6 +108,18 @@
             "H-1"
           ],
           "ac": "a second agent CLI runs behind the same interface with no change above it; if the interface had to change, that change is recorded as what the first vendor had baked in"
+        },
+        {
+          "id": "H-3",
+          "title": "Adversarial verify as a first-class step",
+          "owner": "architect",
+          "est": "1d",
+          "status": "todo",
+          "deps": [
+            "H-1"
+          ],
+          "ac": "a run can be declared as an attempt to REFUTE another run's result, and its verdict can fail the task rather than merely commenting on it",
+          "note": "The technique behind grill-me, without the branding. Every defect worth finding in the project this came from was found by one agent refusing to take another's word: a security review that failed a rate-limit fix and found an OTP brute-force bypass, a qa run that found the paid checkout path returning 500 on every order. Neither came from an agent doing work."
         }
       ]
     },
@@ -82,11 +136,24 @@
             "H-1"
           ],
           "ac": "a project can point at any repo following skills/<category>/<name>/SKILL.md and have those skills available to a run; no second format is invented"
+        },
+        {
+          "id": "S-2",
+          "title": "Derive skills from the project rather than installing them",
+          "owner": "architect",
+          "est": "1w",
+          "status": "todo",
+          "deps": [
+            "S-1",
+            "P-2"
+          ],
+          "ac": "after a run of closed tasks, the tool can emit a skill describing how THIS repo does a recurring thing, citing the incident that made the rule, and a human can accept or reject it",
+          "note": "The version of 'your own skills' that is not just rewriting someone else's in your voice. A generic migration skill is worth less than one that says how migrations work HERE and what went wrong the day the rule was written. It cannot be sold to you; it can only be grown."
         }
       ]
     },
     {
-      "name": "Layer 4 \u2014 Board",
+      "name": "Layer 4 \u2014 Board and tracking",
       "tasks": [
         {
           "id": "B-1",
@@ -97,45 +164,85 @@
           "completed": "2026-08-30",
           "deps": [],
           "ac": "done is refused until the gate verdicts exist, and the dashboard reports effort, ETA and cost",
-          "note": "Built in the Encore repo and extracted here. Installed and verified end to end against a fresh repo: refusal, verdicts, close, run log, dashboard, pause guard.",
           "gate": {
             "reviewer": {
               "verdict": "pass",
               "at": "2026-08-30",
-              "note": "extracted, installed into a clean repo, and exercised end to end"
+              "note": "extracted, installed into a clean repo, exercised end to end"
             },
             "qa": {
               "verdict": "pass",
               "at": "2026-08-30",
-              "note": "install.sh run against two throwaway repos; the gate refusal, the close path and the PAUSED guard all reproduced"
+              "note": "install.sh run against two throwaway repos; refusal, close path and PAUSED guard all reproduced"
             }
           }
         },
         {
           "id": "B-2",
-          "title": "A task can point at its spec, and a stale doc is visible",
+          "title": "Estimate in tokens, not hours",
+          "owner": "backend",
+          "est": "1d",
+          "status": "todo",
+          "deps": [
+            "P-2"
+          ],
+          "ac": "a task's estimate is in tokens, actuals come from the run log automatically, and a calibration factor per task type re-estimates the open work with no human input",
+          "note": "Hours are what humans spend and require a human to report, so the calibration loop never closes. Tokens are measured exactly at the end of every run. Hours stay as a secondary display for people who think in days."
+        },
+        {
+          "id": "B-3",
+          "title": "A task points at its spec, and a stale doc is visible",
           "owner": "backend",
           "est": "4h",
           "status": "todo",
-          "deps": [],
+          "deps": [
+            "P-1"
+          ],
           "ac": "a task carries a spec path rendered as a link on its card, and a check compares each doc's claimed updated: date against the last commit that touched it and names the ones that lie"
+        },
+        {
+          "id": "B-4",
+          "title": "KPIs: delivery and AI, and the anti-KPIs left out on purpose",
+          "owner": "backend",
+          "est": "2d",
+          "status": "todo",
+          "deps": [
+            "B-2",
+            "P-2"
+          ],
+          "ac": "the dashboard reports deploy frequency, lead time, change failure rate and time to restore from git and the board; and tokens per closed task, cost per merged diff line, first-pass gate rate, rework rate, model mix, estimate calibration and human intervention rate from the run log",
+          "note": "Lines of code, agents spawned and tasks-per-day without effort weighting are deliberately absent. Each rewards exactly the wrong behaviour."
         }
       ]
     },
     {
-      "name": "Layer 5 \u2014 UI",
+      "name": "Layer 5 \u2014 TUI",
       "tasks": [
         {
           "id": "U-1",
-          "title": "Watch a run and steer it mid-flight",
+          "title": "The walkthrough: folder, spec, environment, harness, repo, loop",
           "owner": "frontend",
           "est": "1w",
           "status": "blocked",
           "deps": [
-            "H-1"
+            "H-1",
+            "P-1"
           ],
-          "blockedReason": "Deliberately last. It needs a daemon, a websocket and auth, which turns a static file into a service to operate. Building it before the harness works is the standard way this dies.",
-          "ac": "a running agent's output streams to a browser and a human can interrupt or redirect it without killing the run"
+          "blockedReason": "Needs the spec format and a working harness underneath it. Building the cockpit before the engine runs is the standard way this dies.",
+          "ac": "starting in an empty or existing folder, a person is walked through writing the spec, standing up the environment derived from it, choosing a harness, and starting the loop, without editing a config file by hand"
+        },
+        {
+          "id": "U-2",
+          "title": "Watch a run and steer it mid-flight",
+          "owner": "frontend",
+          "est": "3d",
+          "status": "blocked",
+          "deps": [
+            "U-1"
+          ],
+          "blockedReason": "Follows U-1.",
+          "ac": "a running agent's output streams to the terminal and a person can interrupt or redirect it without killing the run",
+          "note": "TUI rather than a web UI on purpose: no daemon, no auth, no port, and it works over SSH. The static HTML dashboard is not a competitor to this, it is the artifact you send to someone who is not in a terminal."
         }
       ]
     },
@@ -149,10 +256,12 @@
           "est": "3d",
           "status": "todo",
           "deps": [
-            "B-2"
+            "B-3",
+            "E-4"
           ],
           "spec": "docs/architecture.md",
-          "ac": "a graduate command emits a workflow file built from the commands the gates really ran, a docs site from the specs really written, and a decision index from the ADRs really recorded; nothing in the output is a template placeholder"
+          "ac": "a graduate command emits a workflow file built from the commands the gates really ran, a docs site from the specs really written, and a decision index from the ADRs really recorded; nothing in the output is a template placeholder",
+          "note": "Every scaffolder emits CI at init, when it knows nothing about the project. During a build CI is friction; at handoff its absence is what makes a project unmaintainable."
         }
       ]
     }
