@@ -1,0 +1,34 @@
+{
+  "name": "Project",
+  "board": "docs/board.json",
+  "boardMarkdown": "docs/board.md",
+  "statusMarkdown": "docs/board-status.md",
+  "agentsDir": ".claude/agents",
+  "runs": "ops/foreman/runs.jsonl",
+  "history": "ops/foreman/history.jsonl",
+  "out": "docs/board.html",
+  "repo": ".",
+  "activePhase": "Phase 1",
+  "gates": [
+    "reviewer",
+    "qa"
+  ],
+  "columns": [
+    {
+      "key": "doing",
+      "label": "Working"
+    },
+    {
+      "key": "todo",
+      "label": "Queued"
+    },
+    {
+      "key": "blocked",
+      "label": "Blocked"
+    },
+    {
+      "key": "done",
+      "label": "Done"
+    }
+  ]
+}

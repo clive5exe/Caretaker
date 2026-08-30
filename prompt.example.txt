@@ -1,0 +1,19 @@
+Continue the work. Pick the next unblocked task off docs/board.json,
+do it, commit it with explicit paths, then rebuild and republish the dashboard:
+node ops/foreman/board.mjs build && node ops/foreman/dashboard.mjs
+
+You are running UNATTENDED from cron. Nobody is watching, so:
+
+- Do NOT deploy. A deploy with nobody watching is the one action that cannot be
+  undone from here.
+- Do NOT merge to the protected branch. That is a deliberate hold.
+- Do NOT push through a red suite. If the test suite fails, fix it or stop; never
+  commit on top of a failure and never disable a gate to get green.
+- Stage explicit paths, never `git add -A`. Other agents may have half-written
+  files on disk.
+- If the next task needs a decision, a credential, or database access you do not
+  have, write what is needed into the task note and move to the next unblocked
+  one rather than guessing.
+
+Report at the end in two or three sentences: what you did, and anything a human
+needs to decide.
