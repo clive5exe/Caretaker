@@ -3,3 +3,8 @@ node_modules/
 runs.jsonl
 history.jsonl
 PAUSED
+
+# Event logs are append-only run records, not source. Named by pattern because
+# they rotate daily — an entry per file would go stale the next morning.
+ops/foreman/events/
+events-*.jsonl
