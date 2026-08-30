@@ -340,21 +340,67 @@ const byOwner = (() => {
   return [...m.entries()].sort((a, b) => b[1].h - a[1].h);
 })();
 
-/** Every gate verdict on the board, by role. The adversarial roles' hit rate. */
+/**
+ * Every gate verdict ever recorded, by role — including the ones that were
+ * superseded.
+ *
+ * THIS USED TO READ THE LATEST VERDICT ONLY, and so it counted a task that
+ * failed qa three times and passed once as a single pass. The fail-rate column
+ * understated rework by construction and the page had to carry a caveat saying
+ * so. P-2 made verdicts append, so the history is here and the caveat is gone.
+ */
 const gateStats = (() => {
   const m = new Map(GATES.map((g) => [g, { pass: 0, fail: 0 }]));
   for (const p of phases) {
     for (const t of p.tasks ?? []) {
       for (const g of GATES) {
-        const v = (t.gate ?? {})[g]?.verdict;
-        if (!v) continue;
+        const rec = (t.gate ?? {})[g];
+        if (!rec?.verdict) continue;
         const cur = m.get(g);
-        if (v === "pass") cur.pass += 1;
-        else cur.fail += 1;
+        for (const v of [...(rec.history ?? []).map((h) => h.verdict), rec.verdict]) {
+          if (v === "pass") cur.pass += 1;
+          else cur.fail += 1;
+        }
       }
     }
   }
   return [...m.entries()];
+})();
+
+/**
+ * First-pass rate and rework, the two quality metrics that actually predict
+ * anything and that were unmeasurable before verdicts appended.
+ *
+ * COUNTED OVER TASKS THAT REACHED A GATE AT ALL, not over every task. A task
+ * nobody has reviewed is not a first-pass success, and including it would make
+ * the number improve every time work is skipped.
+ */
+const quality = (() => {
+  let gated = 0;
+  let firstPass = 0;
+  let reworked = 0;
+  let attempts = 0;
+  for (const p of phases) {
+    for (const t of p.tasks ?? []) {
+      const recs = GATES.map((g) => (t.gate ?? {})[g]).filter((r) => r?.verdict);
+      if (!recs.length) continue;
+      gated += 1;
+      const everFailed = recs.some(
+        (r) => r.verdict !== "pass" || (r.history ?? []).some((h) => h.verdict !== "pass"),
+      );
+      if (everFailed) reworked += 1;
+      else firstPass += 1;
+      attempts += recs.reduce((n, r) => n + 1 + (r.history ?? []).length, 0);
+    }
+  }
+  return {
+    gated,
+    firstPass,
+    reworked,
+    attempts,
+    firstPassPct: gated ? Math.round((firstPass / gated) * 100) : 0,
+    reworkPct: gated ? Math.round((reworked / gated) * 100) : 0,
+  };
 })();
 
 const runList = runs();
@@ -848,9 +894,14 @@ footer{margin-top:34px;color:var(--faint);font-size:13px;line-height:1.7;
     <div class="panel"><h2>Gate verdicts recorded</h2>
       <table><tr><th>gate</th><th class="num">pass</th><th class="num">fail</th>
         <th class="num">fail rate</th></tr>${gateRows}</table>
-      <p class="cav">Current verdicts only. A gate that failed and was later re-run as a pass
-        shows as a pass, because the board keeps one verdict per role rather than a history.
-        So this UNDERSTATES rework and cannot be read as a defect-find rate.</p></div>
+      <p class="cav">Every verdict ever recorded, superseded ones included, so this is the
+        real find rate rather than a snapshot of the latest.<br><br>
+        Of ${quality.gated} task${quality.gated === 1 ? "" : "s"} that reached a gate,
+        <b>${quality.firstPassPct}% passed first time</b> and ${quality.reworkPct}% needed
+        rework, across ${quality.attempts} attempt${quality.attempts === 1 ? "" : "s"}.
+        Counted over tasks that reached a gate at all &mdash; a task nobody reviewed is not a
+        first-pass success, and counting it would make the number improve every time work is
+        skipped.</p></div>
     <div class="panel"><h2>${tokenStats ? "Tokens by agent" : "What is not measured here"}</h2>
       ${
         tokenStats
@@ -871,8 +922,9 @@ footer{margin-top:34px;color:var(--faint);font-size:13px;line-height:1.7;
         calendar time from the first commit naming a task. A 2h task opened Monday and closed
         Friday reads as four days. That measures how long work SITS, which is what the ETA
         actually depends on, but it is not hours worked and must not be read as such.<br><br>
-        <b>Rework.</b> See the gate note. Recording each verdict instead of the latest one would
-        make it measurable.</p></div>
+        <b>Rework is measured now</b> and is no longer on this list. Verdicts append, so the
+        gate panel reports the real first-pass and rework rates rather than a snapshot of the
+        latest verdict.</p></div>
   </div>
   <div class="panel" style="margin-top:15px">
     <h2>Slowest closed tasks &middot; estimate against elapsed</h2>

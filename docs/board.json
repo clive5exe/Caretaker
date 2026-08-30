@@ -1,10 +1,11 @@
 {
   "meta": {
-    "name": "Foreman"
+    "name": "Foreman",
+    "updated": "2026-08-30"
   },
   "phases": [
     {
-      "name": "Layer 0 \u2014 The spec format",
+      "name": "Layer 0 — The spec format",
       "tasks": [
         {
           "id": "P-1",
@@ -25,7 +26,14 @@
           "status": "todo",
           "deps": [],
           "ac": "a gate records every verdict rather than the latest, and rework rate and first-pass rate are computable from the board",
-          "note": "CHEAP NOW, IMPOSSIBLE RETROACTIVELY. The board keeps one verdict per gate, so a task that failed qa three times and passed once reads as a pass. Two of the KPIs that matter most are therefore unmeasurable, and the dashboard already prints a warning saying so."
+          "note": "CHEAP NOW, IMPOSSIBLE RETROACTIVELY. The board keeps one verdict per gate, so a task that failed qa three times and passed once reads as a pass. Two of the KPIs that matter most are therefore unmeasurable, and the dashboard already prints a warning saying so.",
+          "gate": {
+            "qa": {
+              "verdict": "pass",
+              "at": "2026-08-30",
+              "note": "appended verdicts proven: a fail then a pass records both, the terminal reports 'attempt 2; previous: fail', and the dashboard computes first-pass and rework from the history"
+            }
+          }
         },
         {
           "id": "P-3",
@@ -41,7 +49,7 @@
         },
         {
           "id": "P-4",
-          "title": "Three tiers: decision, spec, log \u2014 separated, not one docs pile",
+          "title": "Three tiers: decision, spec, log — separated, not one docs pile",
           "owner": "architect",
           "est": "1d",
           "status": "todo",
@@ -68,7 +76,7 @@
       ]
     },
     {
-      "name": "Layer 1 \u2014 Environment",
+      "name": "Layer 1 — Environment",
       "tasks": [
         {
           "id": "E-1",
@@ -122,7 +130,7 @@
       ]
     },
     {
-      "name": "Layer 2 \u2014 Harness",
+      "name": "Layer 2 — Harness",
       "tasks": [
         {
           "id": "H-1",
@@ -213,7 +221,7 @@
       ]
     },
     {
-      "name": "Layer 3 \u2014 Skills",
+      "name": "Layer 3 — Skills",
       "tasks": [
         {
           "id": "S-1",
@@ -242,7 +250,7 @@
       ]
     },
     {
-      "name": "Layer 4 \u2014 Board and tracking",
+      "name": "Layer 4 — Board and tracking",
       "tasks": [
         {
           "id": "B-1",
@@ -318,7 +326,7 @@
       ]
     },
     {
-      "name": "Layer 5 \u2014 TUI",
+      "name": "Layer 5 — TUI",
       "tasks": [
         {
           "id": "U-1",
@@ -349,7 +357,7 @@
       ]
     },
     {
-      "name": "Layer 6 \u2014 Graduate",
+      "name": "Layer 6 — Graduate",
       "tasks": [
         {
           "id": "G-1",

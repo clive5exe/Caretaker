@@ -128,7 +128,15 @@ function taskBlock(t) {
   const g = t.gate || {};
   const gates = ["reviewer", "qa", "security"]
     .filter((k) => g[k])
-    .map((k) => `<span class="chip ${g[k].verdict === "pass" ? "ok" : "bad"}">${k} ${g[k].verdict}</span>`)
+    .map((k) => {
+      // A gate that passed on the fourth attempt is not the same fact as one that
+      // passed first time, and until P-2 the board could not tell them apart.
+      const tries = (g[k].history || []).length + 1;
+      const suffix = tries > 1 ? ` (${tries})` : "";
+      return `<span class="chip ${g[k].verdict === "pass" ? "ok" : "bad"}" title="${
+        tries > 1 ? `attempt ${tries}; earlier: ${(g[k].history || []).map((h) => h.verdict).join(", ")}` : "first attempt"
+      }">${k} ${g[k].verdict}${suffix}</span>`;
+    })
     .join(" ");
   const meta = [
     `<span class="tmi"><b>${esc(t.owner)}</b></span>`,
@@ -349,12 +357,32 @@ if (!cmd || cmd === "status") {
     console.error("verdict must be pass or fail:  node ops/foreman/board.mjs " + cmd + " " + id + " pass");
     process.exit(1);
   }
+  // APPEND, NEVER OVERWRITE (P-2). This used to replace the verdict, so a task
+  // that failed qa three times and passed once recorded a single pass. Rework
+  // rate and first-pass rate — the two quality metrics that actually predict
+  // anything — were therefore not computable from the board at all, and the
+  // dashboard had to print a caveat saying its fail-rate column understated
+  // reality. Cheap to fix while there is no history to lose; impossible after.
+  //
+  // The shape stays BACKWARD COMPATIBLE. `gate.reviewer` is still an object with
+  // `.verdict`, and it is still the LATEST one, so every existing reader keeps
+  // working untouched. The history lives beside it in `gate.reviewer.history`,
+  // oldest first, and is only read by the code that wants it.
   hit.t.gate = hit.t.gate || {};
-  hit.t.gate[cmd] = { verdict, at: today(), note: rest.slice(1).join(" ") || undefined };
+  const previous = hit.t.gate[cmd];
+  const entry = { verdict, at: today(), note: rest.slice(1).join(" ") || undefined };
+  const history = previous
+    ? [...(previous.history || []), { verdict: previous.verdict, at: previous.at, note: previous.note }]
+    : [];
+  hit.t.gate[cmd] = { ...entry, ...(history.length ? { history } : {}) };
   d.meta.updated = today();
   save(d);
   build();
-  console.log(`${hit.t.id} · ${cmd} → ${verdict}`);
+  const attempts = (hit.t.gate[cmd].history || []).length + 1;
+  console.log(
+    `${hit.t.id} · ${cmd} → ${verdict}` +
+      (attempts > 1 ? `   (attempt ${attempts}; previous: ${(hit.t.gate[cmd].history || []).map((h) => h.verdict).join(", ")})` : ""),
+  );
 } else if (["done", "start", "block", "todo", "note"].includes(cmd)) {
   if (!id) { console.error("need a task id, e.g. T-012"); process.exit(1); }
   const d = load();
