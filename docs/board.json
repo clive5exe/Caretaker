@@ -5,7 +5,7 @@
   },
   "phases": [
     {
-      "name": "Layer 0 \u2014 Spec format",
+      "name": "Layer 0 — Spec format",
       "tasks": [
         {
           "id": "P-1",
@@ -63,7 +63,7 @@
         },
         {
           "id": "P-4",
-          "title": "Three tiers: decision, spec, log \u2014 separated, not one docs pile",
+          "title": "Three tiers: decision, spec, log — separated, not one docs pile",
           "owner": "architect",
           "est": "1d",
           "status": "todo",
@@ -90,7 +90,7 @@
       ]
     },
     {
-      "name": "Layer 3 \u2014 Dev environment",
+      "name": "Layer 3 — Dev environment",
       "tasks": [
         {
           "id": "E-0",
@@ -142,7 +142,14 @@
           ],
           "spec": "docs/architecture.md",
           "ac": "the container has no route to the internet and reaches only the hosts the spec declared, through a proxy; a test proves an undeclared host is refused and logged, and proves the repo cannot be POSTed anywhere",
-          "note": "ADR-0001: Fabro was evaluated by reading its source, not its README, and does NOT have this. Their Docker provider errors on cidr_allow_list - it is all-or-nothing, default bridge or no network at all - and docker.rs is 179 lines with no networking in it. The allowlist that exists is typed DaytonaNetwork, serialised into a paid third-party cloud API and enforced there, and it is CIDR, which is the wrong unit for api.stripe.com behind a CDN. This task is the load-bearing piece of the product because it is the part nobody else has."
+          "note": "ADR-0001: Fabro was evaluated by reading its source, not its README, and does NOT have this. Their Docker provider errors on cidr_allow_list - it is all-or-nothing, default bridge or no network at all - and docker.rs is 179 lines with no networking in it. The allowlist that exists is typed DaytonaNetwork, serialised into a paid third-party cloud API and enforced there, and it is CIDR, which is the wrong unit for api.stripe.com behind a CDN. This task is the load-bearing piece of the product because it is the part nobody else has.",
+          "gate": {
+            "qa": {
+              "verdict": "pass",
+              "at": "2026-08-30",
+              "note": "18 checks pass. The matcher refuses the three bypasses that look correct: evil-stripe.com does not match .stripe.com, api.anthropic.com.evil.example does not match api.anthropic.com, and a bare entry does not open its subdomains. Refusals return 403 with a reason rather than dropping. An allowed host on a disallowed port is still refused. Every refusal is logged."
+            }
+          }
         },
         {
           "id": "E-3",
@@ -198,7 +205,7 @@
       ]
     },
     {
-      "name": "Layer 2 \u2014 Harness",
+      "name": "Layer 2 — Harness",
       "tasks": [
         {
           "id": "H-0",
@@ -342,7 +349,7 @@
       ]
     },
     {
-      "name": "Layer 2b \u2014 Skills",
+      "name": "Layer 2b — Skills",
       "tasks": [
         {
           "id": "S-1",
@@ -371,7 +378,7 @@
       ]
     },
     {
-      "name": "Layer 1 \u2014 Control plane",
+      "name": "Layer 1 — Control plane",
       "tasks": [
         {
           "id": "B-1",
@@ -484,7 +491,7 @@
       ]
     },
     {
-      "name": "Layer 1b \u2014 TUI",
+      "name": "Layer 1b — TUI",
       "tasks": [
         {
           "id": "U-1",
@@ -515,7 +522,7 @@
       ]
     },
     {
-      "name": "Layer 4 \u2014 Infra and graduate",
+      "name": "Layer 4 — Infra and graduate",
       "tasks": [
         {
           "id": "G-1",
