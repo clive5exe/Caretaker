@@ -14,7 +14,7 @@ order: 2
   <div class="boardmeta">
     <b>Layer 0 — The spec format &middot; 0 of 5 tasks closed through the full gate</b>
     <span>0 more are built and waiting only on reviewer / qa / security verdicts &middot; launch target <b>Invalid Date</b></span>
-    <span>All phases ever, including pre-V1 scope: 1 of 26 (4%)</span>
+    <span>All phases ever, including pre-V1 scope: 1 of 29 (3%)</span>
   </div>
 </div>
 <div class="pbar big"><div class="pfill" style="width:0%"></div></div>
@@ -22,7 +22,7 @@ order: 2
   <span class="chip ok">Done 1</span>
   <span class="chip warn">In progress 0</span>
   <span class="chip bad">Blocked 2</span>
-  <span class="chip neutral">To do 23</span>
+  <span class="chip neutral">To do 26</span>
   
 </div>
 </div>
@@ -39,15 +39,15 @@ order: 2
 
 undefined
 
-<div class="task todo"><div class="taskhead"><code class="tid">P-1</code><span class="ttitle">A spec schema the environment can be derived from</span><span class="chip neutral">To do</span></div><div class="taskmeta"><span class="tmi"><b>architect</b></span><span class="tmi">1d</span></div><div class="acc"><b>Accept:</b> a spec carries a structured block declaring runtime, services and external hosts, with prose below it, and a parser turns that block into an image spec and an egress allowlist without a human editing either</div><div class="tnote"><b>Latest:</b> FIRST, because everything downstream reads it. Free-text specs make environment derivation impossible, and the egress allowlist is the control that makes the sandbox real. This is also what turns allowlisting from a chore nobody maintains into a byproduct of writing the spec you were writing anyway.</div></div>
+<div class="task todo"><div class="taskhead"><code class="tid">P-1</code><span class="ttitle">A spec schema the environment can be derived from</span><span class="chip neutral">To do</span></div><div class="taskmeta"><span class="tmi"><b>architect</b></span><span class="tmi">1d</span> <span class="chip ok" title="first attempt">qa pass</span></div><div class="acc"><b>Accept:</b> a spec carries a structured block declaring runtime, services and external hosts, with prose below it, and a parser turns that block into an image spec and an egress allowlist without a human editing either</div><div class="tnote"><b>Latest:</b> FIRST, because everything downstream reads it. Free-text specs make environment derivation impossible, and the egress allowlist is the control that makes the sandbox real. This is also what turns allowlisting from a chore nobody maintains into a byproduct of writing the spec you were writing anyway.</div></div>
 <div class="task todo"><div class="taskhead"><code class="tid">P-2</code><span class="ttitle">Appended gate verdicts, before there is data to lose</span><span class="chip neutral">To do</span></div><div class="taskmeta"><span class="tmi"><b>backend</b></span><span class="tmi">2h</span> <span class="chip ok" title="first attempt">qa pass</span></div><div class="acc"><b>Accept:</b> a gate records every verdict rather than the latest, and rework rate and first-pass rate are computable from the board</div><div class="tnote"><b>Latest:</b> CHEAP NOW, IMPOSSIBLE RETROACTIVELY. The board keeps one verdict per gate, so a task that failed qa three times and passed once reads as a pass. Two of the KPIs that matter most are therefore unmeasurable, and the dashboard already prints a warning saying so.</div></div>
-<div class="task todo"><div class="taskhead"><code class="tid">P-3</code><span class="ttitle">A spec declares which paths it governs</span><span class="chip neutral">To do</span></div><div class="taskmeta"><span class="tmi"><b>architect</b></span><span class="tmi">4h</span><span class="tmi">after P-1</span></div><div class="acc"><b>Accept:</b> the spec's structured block names the paths it is the authority for, and a tool can answer 'which spec governs this file' for any path in the repo</div><div class="tnote"><b>Latest:</b> Same block the environment derives from, one more field. This is what makes drift detectable mechanically rather than by someone remembering.</div></div>
+<div class="task todo"><div class="taskhead"><code class="tid">P-3</code><span class="ttitle">A spec declares which paths it governs</span><span class="chip neutral">To do</span></div><div class="taskmeta"><span class="tmi"><b>architect</b></span><span class="tmi">4h</span><span class="tmi">after P-1</span> <span class="chip ok" title="first attempt">qa pass</span></div><div class="acc"><b>Accept:</b> the spec's structured block names the paths it is the authority for, and a tool can answer 'which spec governs this file' for any path in the repo</div><div class="tnote"><b>Latest:</b> Same block the environment derives from, one more field. This is what makes drift detectable mechanically rather than by someone remembering.</div></div>
 <div class="task todo"><div class="taskhead"><code class="tid">P-4</code><span class="ttitle">Three tiers: decision, spec, log — separated, not one docs pile</span><span class="chip neutral">To do</span></div><div class="taskmeta"><span class="tmi"><b>architect</b></span><span class="tmi">1d</span><span class="tmi">after P-1</span></div><div class="acc"><b>Accept:</b> decisions are immutable and superseded rather than edited, specs carry current state only, and the log is append-only; a tool can answer 'why is this like this' from the decisions without reading the log</div><div class="tnote"><b>Latest:</b> They rot at completely different speeds and want opposite treatment. A spec that accumulates a changelog becomes unreadable, unreadable specs are not consulted, and unconsulted specs drift. An ADR that gets edited stops being a record of what was decided.</div></div>
 <div class="task todo"><div class="taskhead"><code class="tid">P-5</code><span class="ttitle">Staleness is computed, never declared</span><span class="chip neutral">To do</span></div><div class="taskmeta"><span class="tmi"><b>backend</b></span><span class="tmi">1d</span><span class="tmi">after P-3</span></div><div class="acc"><b>Accept:</b> a check reports stale (the doc's updated: is older than the last commit touching the paths it GOVERNS), orphaned (governs paths that no longer exist) and unowned (code no spec claims), with no manual freshness flag anywhere</div><div class="tnote"><b>Latest:</b> A manual 'is this current?' flag stops being updated the first time someone is in a hurry, and then there is no way to tell a current doc from an abandoned one. Comparing against the governed paths rather than the doc's own last commit is the stronger check: a doc can be true and untouched while the code under it moves.</div></div>
 
 ## Layer 1 — Environment
 
-<div class="phasebar"><div class="phasemeta"><b>Invalid Date &rarr; Invalid Date</b> &middot; 0/4 done &middot; 6d remaining</div><div class="pbar "><div class="pfill" style="width:0%"></div></div></div>
+<div class="phasebar"><div class="phasemeta"><b>Invalid Date &rarr; Invalid Date</b> &middot; 0/6 done &middot; 8d remaining</div><div class="pbar "><div class="pfill" style="width:0%"></div></div></div>
 
 undefined
 
@@ -55,6 +55,8 @@ undefined
 <div class="task todo"><div class="taskhead"><code class="tid">E-2</code><span class="ttitle">Egress allowlist proxy, generated from the spec</span><span class="chip neutral">To do</span></div><div class="taskmeta"><span class="tmi"><b>security</b></span><span class="tmi">2d</span><span class="tmi">after E-1, P-1</span></div><div class="acc"><b>Accept:</b> the container has no route to the internet and reaches only the hosts the spec declared, through a proxy; a test proves an undeclared host is refused and logged, and proves the repo cannot be POSTed anywhere</div></div>
 <div class="task todo"><div class="taskhead"><code class="tid">E-3</code><span class="ttitle">Prove the sandbox by attacking it</span><span class="chip neutral">To do</span></div><div class="taskmeta"><span class="tmi"><b>security</b></span><span class="tmi">1d</span><span class="tmi">after E-2</span></div><div class="acc"><b>Accept:</b> written attempts to (a) write outside the repo mount, (b) exhaust host memory, (c) reach an undeclared host and (d) reach the container socket each fail, with the command and its output recorded</div><div class="tnote"><b>Latest:</b> A sandbox nobody has tried to break is a claim, not a control. This task never gets dropped as obviously fine.</div></div>
 <div class="task todo"><div class="taskhead"><code class="tid">E-4</code><span class="ttitle">Target a box you own, not only a PaaS</span><span class="chip neutral">To do</span></div><div class="taskmeta"><span class="tmi"><b>devops</b></span><span class="tmi">2d</span><span class="tmi">after E-2</span></div><div class="acc"><b>Accept:</b> the environment layer can produce a deployable for a plain Linux host with its own Postgres and a Prometheus scrape config, not only a managed platform</div><div class="tnote"><b>Latest:</b> Follows from the thesis rather than being bolted on. Every agent tool on the market assumes a PaaS. The migration failure that started this - ten migrations missing from a live database with no ledger anywhere, while the test suite stayed green because it replayed onto a throwaway cluster - happened because managed convenience meant nobody owned the migration path.</div></div>
+<div class="task todo"><div class="taskhead"><code class="tid">E-5</code><span class="ttitle">The sandbox is rebuilt from the spec every run</span><span class="chip neutral">To do</span></div><div class="taskmeta"><span class="tmi"><b>backend</b></span><span class="tmi">4h</span><span class="tmi">after E-1, P-1</span></div><div class="acc"><b>Accept:</b> a run gets a container built from the spec and destroyed after, and a package installed by hand inside one is gone on the next run; nothing persists between runs except the repo</div><div class="tnote"><b>Latest:</b> THE ANSWER TO 'ENVIRONMENTS CHANGE' AT THIS LAYER IS THAT THEY DO NOT. Immutable rebuild makes drift structurally impossible rather than detectable: if something is needed, the spec changes and the image is rebuilt. Terraform and Ansible are the wrong shape here - a state file for a thing created fifty times an hour is overhead and a lock contention point, and convergence assumes a host that persists.</div></div>
+<div class="task todo"><div class="taskhead"><code class="tid">E-6</code><span class="ttitle">Environment drift: ask the container what it actually has</span><span class="chip neutral">To do</span></div><div class="taskmeta"><span class="tmi"><b>devops</b></span><span class="tmi">1d</span><span class="tmi">after E-5</span></div><div class="acc"><b>Accept:</b> a check compares the running environment's real package versions, service versions and reachable hosts against what the spec declared, and names every difference</div><div class="tnote"><b>Latest:</b> EASIER THAN DOC DRIFT AND WORTH DOING FIRST BECAUSE OF IT. A document's meaning is ambiguous; a container's contents are not. You can ask it what it has and diff that against the declaration with no interpretation involved. Same machinery as the doc drift gate, pointed at a target that cannot argue.</div></div>
 
 ## Layer 2 — Harness
 
@@ -102,20 +104,21 @@ undefined
 
 ## Layer 6 — Graduate
 
-<div class="phasebar"><div class="phasemeta"><b>Invalid Date &rarr; Invalid Date</b> &middot; 0/1 done &middot; 3d remaining</div><div class="pbar "><div class="pfill" style="width:0%"></div></div></div>
+<div class="phasebar"><div class="phasemeta"><b>Invalid Date &rarr; Invalid Date</b> &middot; 0/2 done &middot; 6d remaining</div><div class="pbar "><div class="pfill" style="width:0%"></div></div></div>
 
 undefined
 
 <div class="task todo"><div class="taskhead"><code class="tid">G-1</code><span class="ttitle">Generate CI and docs from what actually happened</span><span class="chip neutral">To do</span></div><div class="taskmeta"><span class="tmi"><b>devops</b></span><span class="tmi">3d</span><span class="tmi">after B-3, E-4</span></div><div class="acc"><b>Accept:</b> a graduate command emits a workflow file built from the commands the gates really ran, a docs site from the specs really written, and a decision index from the ADRs really recorded; nothing in the output is a template placeholder</div><div class="tnote"><b>Latest:</b> Every scaffolder emits CI at init, when it knows nothing about the project. During a build CI is friction; at handoff its absence is what makes a project unmaintainable.</div></div>
+<div class="task todo"><div class="taskhead"><code class="tid">G-2</code><span class="ttitle">Emit infrastructure as code, do not depend on it</span><span class="chip neutral">To do</span></div><div class="taskmeta"><span class="tmi"><b>devops</b></span><span class="tmi">3d</span><span class="tmi">after G-1, E-4</span></div><div class="acc"><b>Accept:</b> graduate emits a Terraform module and an Ansible playbook derived from the spec and from what was actually deployed, and the tool itself runs with neither installed</div><div class="tnote"><b>Latest:</b> Terraform and Ansible are right for LONG-LIVED infrastructure and wrong for an ephemeral sandbox, so they belong here rather than in Layer 1. Emitting them at graduate beats emitting them at init for the same reason CI does: at init a scaffolder knows nothing about the project. EMITTER, NOT DEPENDENCY - some teams use Pulumi, some use plain bash, some use Nix, and making one of them a hard requirement contradicts the whole thesis.</div></div>
 
 ## Load by agent
 
 | Agent | Tasks | Remaining |
 |---|---|---|
-| `backend` | 12 | 13d |
+| `backend` | 13 | 13d |
 | `architect` | 7 | 12d |
+| `devops` | 4 | 9d |
 | `security` | 2 | 3d |
-| `devops` | 2 | 5d |
 | `frontend` | 2 | 8d |
 | `you` | 1 | 0d |
 

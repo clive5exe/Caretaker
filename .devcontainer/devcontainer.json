@@ -1,0 +1,13 @@
+{
+  // Standard devcontainer. foreman reads the container half from here rather
+  // than inventing its own fields.
+  "name": "foreman",
+  "image": "mcr.microsoft.com/devcontainers/base:debian",
+  "features": {
+    "ghcr.io/devcontainers/features/node:1": { "version": "22" }
+  },
+  "hostRequirements": {
+    "cpus": 2,
+    "memory": "2gb"
+  }
+}
