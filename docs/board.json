@@ -93,6 +93,17 @@
       "name": "Layer 1 \u2014 Environment",
       "tasks": [
         {
+          "id": "E-0",
+          "title": "Podman is the assumption; missing means install it",
+          "owner": "devops",
+          "est": "4h",
+          "status": "todo",
+          "deps": [],
+          "spec": "docs/decisions/0001-build-the-egress-layer.md",
+          "ac": "the runner uses podman; if it is absent the tool offers the correct install command for the platform and runs it on confirmation; Docker is used ONLY when explicitly asked for, and that run prints what the weaker isolation means",
+          "note": "NOT A GRACEFUL FALLBACK. If the security claim is the product, the tool must not quietly accept a weaker runtime because it happened to find one on the box - that is how a guarantee becomes a default nobody checked. Rootless podman means an escape lands unprivileged; Docker's usual daemon runs as root and an escape ends the argument. Docker stays supported because someone's machine will only have it, but it is opt-in and it says what it costs. Install friction is real and is the reason this is its own task: Linux needs a package manager and probably sudo, macOS needs brew plus podman machine init, which is a VM. An installer that asks for sudo has to explain itself first."
+        },
+        {
           "id": "E-1",
           "title": "Container runner: podman, resource limits, repo bind-mount",
           "owner": "backend",
