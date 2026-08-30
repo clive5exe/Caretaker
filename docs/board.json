@@ -5,7 +5,7 @@
   },
   "phases": [
     {
-      "name": "Layer 0 — The spec format",
+      "name": "Layer 0 \u2014 The spec format",
       "tasks": [
         {
           "id": "P-1",
@@ -63,7 +63,7 @@
         },
         {
           "id": "P-4",
-          "title": "Three tiers: decision, spec, log — separated, not one docs pile",
+          "title": "Three tiers: decision, spec, log \u2014 separated, not one docs pile",
           "owner": "architect",
           "est": "1d",
           "status": "todo",
@@ -90,7 +90,7 @@
       ]
     },
     {
-      "name": "Layer 1 — Environment",
+      "name": "Layer 1 \u2014 Environment",
       "tasks": [
         {
           "id": "E-1",
@@ -102,7 +102,8 @@
             "P-1"
           ],
           "spec": "docs/architecture.md",
-          "ac": "an agent runs inside a container with --memory, --cpus and --pids-limit enforced, a read-only root, the repo bind-mounted, and NO container socket; a test proves each limit actually binds rather than being passed and ignored"
+          "ac": "an agent runs inside a container with --memory, --cpus and --pids-limit enforced, a read-only root, the repo bind-mounted, and NO container socket; a test proves each limit actually binds rather than being passed and ignored",
+          "note": "Unblocked by ADR-0001: build rather than adopt. Fabro's container wrapper is 179 lines of create/inspect/list/delete; adopting it would mean taking their graph model and server to get something we can write, and it would not get us the egress control we actually need."
         },
         {
           "id": "E-2",
@@ -115,7 +116,8 @@
             "P-1"
           ],
           "spec": "docs/architecture.md",
-          "ac": "the container has no route to the internet and reaches only the hosts the spec declared, through a proxy; a test proves an undeclared host is refused and logged, and proves the repo cannot be POSTed anywhere"
+          "ac": "the container has no route to the internet and reaches only the hosts the spec declared, through a proxy; a test proves an undeclared host is refused and logged, and proves the repo cannot be POSTed anywhere",
+          "note": "ADR-0001: Fabro was evaluated by reading its source, not its README, and does NOT have this. Their Docker provider errors on cidr_allow_list - it is all-or-nothing, default bridge or no network at all - and docker.rs is 179 lines with no networking in it. The allowlist that exists is typed DaytonaNetwork, serialised into a paid third-party cloud API and enforced there, and it is CIDR, which is the wrong unit for api.stripe.com behind a CDN. This task is the load-bearing piece of the product because it is the part nobody else has."
         },
         {
           "id": "E-3",
@@ -171,7 +173,7 @@
       ]
     },
     {
-      "name": "Layer 2 — Harness",
+      "name": "Layer 2 \u2014 Harness",
       "tasks": [
         {
           "id": "H-1",
@@ -262,7 +264,7 @@
       ]
     },
     {
-      "name": "Layer 3 — Skills",
+      "name": "Layer 3 \u2014 Skills",
       "tasks": [
         {
           "id": "S-1",
@@ -291,7 +293,7 @@
       ]
     },
     {
-      "name": "Layer 4 — Board and tracking",
+      "name": "Layer 4 \u2014 Board and tracking",
       "tasks": [
         {
           "id": "B-1",
@@ -367,7 +369,7 @@
       ]
     },
     {
-      "name": "Layer 5 — TUI",
+      "name": "Layer 5 \u2014 TUI",
       "tasks": [
         {
           "id": "U-1",
@@ -398,7 +400,7 @@
       ]
     },
     {
-      "name": "Layer 6 — Graduate",
+      "name": "Layer 6 \u2014 Graduate",
       "tasks": [
         {
           "id": "G-1",
