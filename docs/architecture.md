@@ -5,119 +5,142 @@ setup improvises and gets wrong: where the agent runs, what it may reach, which
 model does what, whether the work is actually done, and what the project looks
 like when you hand it to someone else.
 
-The board that exists in this repo today is one layer of six. It is the layer
-that was already built; it is not the interesting one.
-
-## The layers
+## Four layers
 
 ```
-6  graduate     CI/CD + docs generated from what actually happened
-5  UI           watch a run, steer it mid-flight
-4  board        tasks, gates, tracking, cost        <- exists today
-3  skills       consume the existing standard, do not rebuild it
-2  harness      plug in your AI
-1  environment  it cannot hurt your machine, and you can cap what it takes
+control plane        the board, the gates, the loop. Decides what runs.
+      |
+harness              talks to an AI. Owns the model call and the tool loop.
+      |
+dev environment      node + postgres + the repo. What the project needs to
+                     build and test itself.
+      |
+infra                where that environment is placed: your box, a VM, a
+                     cloud sandbox, a workstation.
 ```
 
-Built bottom-up, and the order is not negotiable. Layers 1 and 2 are the
-product; 4 already exists; 5 and 6 are what make it worth paying for.
+Two things this fixes that an earlier version of this document conflated.
 
-## 1. Environment
+**`devcontainer.json` describes the dev environment; Terraform and Ansible
+provision the infra.** Both were already the right answers, filed one layer
+apart without noticing they were layers of the same stack.
 
-**The isolation is the easy half.** `--memory`, `--cpus`, `--pids-limit`, a
-read-only root with a tmpfs, the repo bind-mounted, and never the container
-socket. Mounting `/var/run/docker.sock` is root on the host, and it is how most
-"sandboxed" agent tools are quietly not sandboxed.
+**Placement is separate from contents.** The same dev environment sits on a
+laptop, a Hetzner box, or a cloud sandbox without being redesigned. That is a
+deployment decision, not an architectural one.
 
-**The hard half is egress, and it is the actual security layer.** An agent needs
-to reach an API. A container with open internet can exfiltrate the whole repo,
-which is worse than the machine damage the sandbox was for, because it is
-silent. The control is an allowlist proxy: the container gets no route to the
-internet, only to a proxy that permits the model API, the package registry, and
-nothing else. Everything else 403s and is logged.
+## The consequence nobody warns you about
 
-That is the difference between "runs in Docker" as a marketing line and "cannot
-hurt you" as a property.
+**Existing agent CLIs violate this boundary.** Claude Code, Codex and Aider are
+monoliths: each owns the model call *and* executes its own tools, in one process
+on one machine. They span the harness and the dev environment and do not split
+where this diagram splits.
 
-**Rootless podman over Docker.** A container escape lands as an unprivileged
-user rather than root. Same CLI surface, cgroup limits work the same. The
-development box already runs podman 5.8.2 rootless.
+So the harness hooks at the **SDK level, not the CLI level**. The orchestrator
+makes the model call; tool execution is routed down into the dev environment.
 
-## 2. Harness
-
-**The seam is the whole design decision.** The tempting abstraction is an LLM
-interface — messages, tools, streaming. That is a trap: you re-implement every
-vendor's SDK forever and break on each release.
-
-The seam that holds:
+The seam is unchanged:
 
 ```
 run(workspace, prompt, policy) -> { diff, transcript, verdict, cost }
 ```
 
-Every agent CLI can do exactly that. None of them agree on anything below it.
-Define it there and a new vendor is a small adapter rather than a permanent
-maintenance tax.
+The cost is honest: an SDK adapter is a few hundred lines per vendor rather than
+fifty for shelling out to a binary. Three things are bought with it.
 
-Two vendors before calling the seam proven. One vendor proves nothing — the
-abstraction will have that vendor's shape baked into it and nobody will notice
-until the second one arrives.
+- **The dev environment stays sealed for the agent's own traffic.** The model
+  call happens above it, so the container needs egress only for what the
+  *project* legitimately does — installing dependencies, a test hitting a
+  sandbox API.
+- **"Plug in your AI" means the SDK**, which is the more durable interface. CLIs
+  change their flags every release.
+- **Tool execution becomes ours to place**, which is what makes the infra layer
+  a real choice rather than a diagram.
 
-## 3. Skills
+## Layer by layer
 
-Solved elsewhere. `npx skills@latest add owner/repo`, skills as
-`skills/<category>/<name>/SKILL.md`, invoked as slash commands. That convention
-has enormous adoption already.
+### Control plane
 
-Consume it. Let a project point at any repo that follows it. Building a second
-skills format is a losing move and the differentiator was never the skills.
+Tasks, gates that refuse a builder closing their own work, the event log, the
+dashboard, the unattended loop. **Largely built.**
 
-## 4. Board
+State is a projection of an append-only log rather than a second record, so the
+board cannot disagree with the log. See `events.md`.
 
-What this repo does today: tasks, gates that refuse a builder closing their own
-work, a dashboard that shows effort against task count and says what it cannot
-measure, a run log with cost, an unattended loop.
+### Harness
 
-Slots in above the harness. Needs one addition to be useful to a new project: a
-`spec` field on a task, and a staleness check that compares a document's claimed
-`updated:` date against the last commit that touched it, so a doc that lies
-about its own freshness is visible.
+The seam above, plus everything that reasons about a run's *output* rather than
+producing it: adversarial verification, drift detection between code and the
+specs that govern it, and harvesting decisions a transcript holds and no document
+does.
 
-## 5. UI
+Two vendors before the seam is called proven. One bakes that vendor's shape in
+and nobody notices until the second arrives. See `vendors.md`.
 
-Last, and it changes what the thing is to operate. The dashboard today is one
-static file with no attack surface. A UI that shows live runs and lets you steer
-one needs a daemon, a websocket and auth — a service, not a file.
+### Dev environment
 
-Worth building. Building it first is the standard way this dies: a good shell
-over a harness that does not work yet.
+A container built from the spec and `devcontainer.json`, rebuilt every run, with
+enforced limits and no route to the internet except an allowlist derived from the
+spec's declared hosts.
 
-## 6. Graduate
+**Rebuilt every run, so drift here is impossible rather than detectable.** A
+package installed by hand is gone next time; if it is needed, the spec changes
+and the image rebuilds, which makes the change reviewable and visible to the
+allowlist. See `environments.md`.
 
-The sharpest idea here and nobody ships it.
+### Infra
 
-During a build, CI is friction. At handoff, its absence is exactly what makes a
-project unmaintainable. Every scaffolder emits CI at `init`, when it knows
-nothing about the project.
+Where the dev environment is placed. Terraform provisions, Ansible converges,
+and both are **emitted rather than required** — some teams use Pulumi, some plain
+bash, some Nix, and requiring one contradicts the thesis.
 
-`graduate` runs at the END and generates from what actually happened: the
-workflow file from the commands the gates really ran, the docs site from the
-specs that were really written, the decision index from the ADRs that were
-really recorded. Real history rather than a template.
+`graduate` generates them at handoff from what was actually deployed, which beats
+generating them at init when a scaffolder knows nothing about the project.
 
-## Prior art, honestly
+## The decisions everything rests on
 
-**Fabro** — DOT graphs as workflow definitions, a CSS-like stylesheet routing
-model per node class, git checkpoints per stage. The stylesheet idea is good and
-worth taking: separating what a step does from how much thinking to buy for it
-is the right seam. Their unit being a *stage* rather than a *conversation* is
-also right, and is the same conclusion the harness seam above reaches.
+**The seam is `run(workspace, prompt, policy)`.** The tempting abstraction is an
+LLM interface — messages, tools, streaming — and it is a trap: you re-implement
+every vendor's SDK forever and break on each release.
 
-Where they stop short: a graph fixes the ORDER of steps, not the CORRECTNESS of
-any one of them, and their verification is a human approval gate. A person
-approving their fortieth diff of the day is a rubber stamp. Machine gates that
-revert a fix and assert the test goes red by name are the thing that actually
-catches a false claim.
+**Egress, not isolation, is the security control.** Limits and a read-only root
+are table stakes. A container with open internet can exfiltrate the repo, which
+is worse and quieter than the machine damage the sandbox was for. Verified
+against the alternative: Fabro's Docker provider errors on `cidr_allow_list`
+entirely, and the allowlist that exists is enforced by a paid third-party cloud.
+See `decisions/0001-build-the-egress-layer.md`.
 
-**mattpocock/skills** — the skills distribution standard. Consume, do not
-compete.
+**A spec that auto-follows the code is a mirror, not a spec.** So drift detection
+is a gate, reconciliation is a run that *proposes*, and the direction — did we
+learn something, or did the code drift — is recorded rather than guessed.
+
+**Structure is inferred, intent is declared.** A code graph owns what calls what,
+which is a fact in the AST. The spec's `governs` field owns which document is the
+authority, which is a decision a human made and cannot be read off a parse tree.
+
+**Three tiers of record, because they rot at different speeds.** Decisions never
+decay and are superseded rather than edited. Specs carry current state only. The
+log is append-only and never read in full. See `memory.md`.
+
+## The walking skeleton
+
+The roadmap is thirty-plus tasks. The scope is five, and everything else waits
+behind them:
+
+1. **Secrets** — an API key reaches the harness without touching the repo, the
+   image, or the event log.
+2. **Minimal egress** — a CONNECT proxy allowing the declared hostnames, denying
+   and logging everything else. Roughly a hundred lines, not a policy engine.
+3. **The harness seam** — one vendor, SDK level, tool execution routed into the
+   dev environment.
+4. **One real run** — an agent edits a file inside the sealed environment and a
+   diff comes back.
+5. **The drift gate on that diff** — did it touch governed paths without touching
+   the spec.
+
+Done already: the spec parser, the container with limits proven from inside it,
+the board and its gates.
+
+Not in the skeleton, deliberately: the TUI, the graph, skills, graduate, the
+second vendor, the KPI panel. Each is easier once a run works, and none of them
+proves anything until one does.

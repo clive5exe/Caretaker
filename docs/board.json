@@ -5,7 +5,7 @@
   },
   "phases": [
     {
-      "name": "Layer 0 \u2014 The spec format",
+      "name": "Layer 0 \u2014 Spec format",
       "tasks": [
         {
           "id": "P-1",
@@ -90,7 +90,7 @@
       ]
     },
     {
-      "name": "Layer 1 \u2014 Environment",
+      "name": "Layer 3 \u2014 Dev environment",
       "tasks": [
         {
           "id": "E-0",
@@ -201,6 +201,43 @@
       "name": "Layer 2 \u2014 Harness",
       "tasks": [
         {
+          "id": "H-0",
+          "title": "Secrets reach the harness without touching the repo, image or log",
+          "owner": "security",
+          "est": "4h",
+          "status": "todo",
+          "deps": [],
+          "spec": "docs/architecture.md",
+          "ac": "an API key is available to the harness at run time, is never written into the image, the repo, the spec or the event log, and a test proves a key value cannot be found in any of them after a run",
+          "note": "In the skeleton and absent from the board until now. It also constrains the egress design: the model call happens at the harness layer, above the dev environment, so the key never needs to be inside the container at all."
+        },
+        {
+          "id": "H-9",
+          "title": "Timeouts, and killing a run that hangs",
+          "owner": "backend",
+          "est": "4h",
+          "status": "todo",
+          "deps": [
+            "H-1"
+          ],
+          "spec": "docs/architecture.md",
+          "ac": "a run has a wall-clock ceiling, exceeding it kills the process tree and the container, and the event log records that it was killed rather than that it finished",
+          "note": "Boring, essential, and it was missing. A hung agent holds the lock forever - which happened on this box today: four wait loops from a deploy sat spinning for sixteen hours because the condition they polled matched their own command line."
+        },
+        {
+          "id": "H-10",
+          "title": "SDK-level adapters, and a tool-use reliability fixture",
+          "owner": "backend",
+          "est": "2d",
+          "status": "todo",
+          "deps": [
+            "H-1"
+          ],
+          "spec": "docs/vendors.md",
+          "ac": "four adapters exist - anthropic, openai, google and openai-compatible - and a fixed task with a known-good diff scores each candidate on well-formed tool calls, stopping when done, and not inventing a tool that was never offered",
+          "note": "THE ADAPTER IS PER-API, NOT PER-MODEL, which is what makes broad support cheap: everything self-hosted speaks an OpenAI-compatible endpoint, so DeepSeek or Qwen behind vLLM is a config line rather than code. And the discriminator is tool-use reliability, not benchmark score - a model that codes well but emits malformed tool calls burns the loop and produces nothing, which is expensive rather than obvious. Testable, so it is a fixture rather than an opinion."
+        },
+        {
           "id": "H-1",
           "title": "Define the run seam and implement one vendor",
           "owner": "backend",
@@ -214,14 +251,16 @@
         },
         {
           "id": "H-2",
-          "title": "Second vendor, to prove the seam is a seam",
+          "title": "Second vendor, and it should be a LOCAL model",
           "owner": "backend",
           "est": "1d",
           "status": "todo",
           "deps": [
             "H-1"
           ],
-          "ac": "a second agent CLI runs behind the same interface with no change above it; if the interface had to change, that change is recorded as what the first vendor had baked in"
+          "ac": "a second agent CLI runs behind the same interface with no change above it; if the interface had to change, that change is recorded as what the first vendor had baked in",
+          "spec": "docs/vendors.md",
+          "note": "A second frontier API would agree with the first about almost everything and prove almost nothing. An OpenAI-compatible local model stresses the seam properly: different tool-call quirks, NO PROMPT CACHING so the cost model changes completely, smaller context so selection has to actually work, and GPU contention instead of hosted rate limits."
         },
         {
           "id": "H-3",
@@ -303,7 +342,7 @@
       ]
     },
     {
-      "name": "Layer 3 \u2014 Skills",
+      "name": "Layer 2b \u2014 Skills",
       "tasks": [
         {
           "id": "S-1",
@@ -332,7 +371,7 @@
       ]
     },
     {
-      "name": "Layer 4 \u2014 Board and tracking",
+      "name": "Layer 1 \u2014 Control plane",
       "tasks": [
         {
           "id": "B-1",
@@ -432,7 +471,7 @@
       ]
     },
     {
-      "name": "Layer 5 \u2014 TUI",
+      "name": "Layer 1b \u2014 TUI",
       "tasks": [
         {
           "id": "U-1",
@@ -463,7 +502,7 @@
       ]
     },
     {
-      "name": "Layer 6 \u2014 Graduate",
+      "name": "Layer 4 \u2014 Infra and graduate",
       "tasks": [
         {
           "id": "G-1",

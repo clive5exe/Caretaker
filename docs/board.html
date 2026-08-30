@@ -152,16 +152,16 @@ footer{margin-top:34px;color:var(--faint);font-size:13px;line-height:1.7;
 </style></head><body><div class="wrap">
 
 <div class="top"><h1>Foreman</h1>
-  <span class="ph">Layer 0 — The spec format</span>
-  <span class="bt">built 2026-08-30 17:05</span></div>
+  <span class="ph">Layer 2 — Harness</span>
+  <span class="bt">built 2026-08-30 17:17</span></div>
 
 <div class="prog">
   <div class="prognums">
     <span class="big">0%</span>
-    <span class="lab">by effort<br>0h of 30h</span>
+    <span class="lab">by effort<br>0h of 104h</span>
     <span class="alt">0%</span>
-    <span class="lab">by task count<br>0 of 5</span>
-    <span class="eta">ETA <b>2026-10-22</b> &middot; 53 days at
+    <span class="lab">by task count<br>0 of 11</span>
+    <span class="eta">ETA <b>2027-02-28</b> &middot; 182 days at
      0.6h/day</span>
   </div>
   <div class="track"><i class="t" style="width:0%"></i>
@@ -180,7 +180,7 @@ footer{margin-top:34px;color:var(--faint);font-size:13px;line-height:1.7;
 <div class="pane pane-board">
   <div class="tiles">
     <div class="tile warn">
-      <p class="tl">Held at a gate</p><p class="tv">3</p><p class="ts">work done, verdict outstanding</p>
+      <p class="tl">Held at a gate</p><p class="tv">0</p><p class="ts">nothing waiting on a signature</p>
       </div>
     <div class="tile bad">
       <p class="tl">Blocked</p><p class="tv">0</p><p class="ts">waiting on a decision or a credential</p>
@@ -189,7 +189,7 @@ footer{margin-top:34px;color:var(--faint);font-size:13px;line-height:1.7;
       <p class="tl">No finish line</p><p class="tv">0</p><p class="ts">every open task has one</p>
       </div>
     <div class="tile plain">
-      <p class="tl">Landed today</p><p class="tv">13</p><p class="ts">commits &middot; 14-day trend</p>
+      <p class="tl">Landed today</p><p class="tv">14</p><p class="ts">commits &middot; 14-day trend</p>
       <svg class="spark plain" viewBox="0 0 240 44" preserveAspectRatio="none" aria-hidden="true">
       <path class="a" d="M0.0 42.0 L18.5 42.0 L36.9 42.0 L55.4 42.0 L73.8 42.0 L92.3 42.0 L110.8 42.0 L129.2 42.0 L147.7 42.0 L166.2 42.0 L184.6 42.0 L203.1 42.0 L221.5 42.0 L240.0 3.0 L240 44 L0 44 Z"/><path class="l" d="M0.0 42.0 L18.5 42.0 L36.9 42.0 L55.4 42.0 L73.8 42.0 L92.3 42.0 L110.8 42.0 L129.2 42.0 L147.7 42.0 L166.2 42.0 L184.6 42.0 L203.1 42.0 L221.5 42.0 L240.0 3.0"/></svg></div>
   </div>
@@ -201,23 +201,41 @@ footer{margin-top:34px;color:var(--faint);font-size:13px;line-height:1.7;
         <span class="hr"></span></h2>
       <p class="empty">nothing here</p>
     </section><section class="col">
-      <h2>Queued<span class="n">5</span>
-        <span class="hr">30h</span></h2>
-      <article class="card is-held">
-      <header><code>P-1</code><div class="rail" aria-label="gates"><i class="none" title="reviewer: not run"></i><i class="pass" title="qa: pass"></i><i class="none" title="security: not run"></i></div></header>
-      <h3>A spec schema the environment can be derived from</h3><div class="meta"><span class="ow">architect</span><span class="es">1d</span></div><p class="hold partial">waiting on reviewer + security</p>
-    </article><article class="card is-held">
-      <header><code>P-2</code><div class="rail" aria-label="gates"><i class="none" title="reviewer: not run"></i><i class="pass" title="qa: pass"></i><i class="none" title="security: not run"></i></div></header>
-      <h3>Appended gate verdicts, before there is data to lose</h3><div class="meta"><span class="ow">backend</span><span class="es">2h</span></div><p class="hold partial">waiting on reviewer + security</p>
-    </article><article class="card is-held">
-      <header><code>P-3</code><div class="rail" aria-label="gates"><i class="none" title="reviewer: not run"></i><i class="pass" title="qa: pass"></i><i class="none" title="security: not run"></i></div></header>
-      <h3>A spec declares which paths it governs</h3><div class="meta"><span class="ow">architect</span><span class="es">4h</span><span class="es">after P-1</span></div><p class="hold partial">waiting on reviewer + security</p>
+      <h2>Queued<span class="n">11</span>
+        <span class="hr">104h</span></h2>
+      <article class="card">
+      <header><code>H-0</code><div class="rail" aria-label="gates"><i class="none" title="reviewer: not run"></i><i class="none" title="qa: not run"></i><i class="none" title="security: not run"></i></div></header>
+      <h3>Secrets reach the harness without touching the repo, image or log</h3><div class="meta"><span class="ow">security</span><span class="es">4h</span></div>
     </article><article class="card">
-      <header><code>P-4</code><div class="rail" aria-label="gates"><i class="none" title="reviewer: not run"></i><i class="none" title="qa: not run"></i><i class="none" title="security: not run"></i></div></header>
-      <h3>Three tiers: decision, spec, log — separated, not one docs pile</h3><div class="meta"><span class="ow">architect</span><span class="es">1d</span><span class="es">after P-1</span></div>
+      <header><code>H-9</code><div class="rail" aria-label="gates"><i class="none" title="reviewer: not run"></i><i class="none" title="qa: not run"></i><i class="none" title="security: not run"></i></div></header>
+      <h3>Timeouts, and killing a run that hangs</h3><div class="meta"><span class="ow">backend</span><span class="es">4h</span><span class="es">after H-1</span></div>
     </article><article class="card">
-      <header><code>P-5</code><div class="rail" aria-label="gates"><i class="none" title="reviewer: not run"></i><i class="none" title="qa: not run"></i><i class="none" title="security: not run"></i></div></header>
-      <h3>Staleness is computed, never declared</h3><div class="meta"><span class="ow">backend</span><span class="es">1d</span><span class="es">after P-3</span></div>
+      <header><code>H-10</code><div class="rail" aria-label="gates"><i class="none" title="reviewer: not run"></i><i class="none" title="qa: not run"></i><i class="none" title="security: not run"></i></div></header>
+      <h3>SDK-level adapters, and a tool-use reliability fixture</h3><div class="meta"><span class="ow">backend</span><span class="es">2d</span><span class="es">after H-1</span></div>
+    </article><article class="card">
+      <header><code>H-1</code><div class="rail" aria-label="gates"><i class="none" title="reviewer: not run"></i><i class="none" title="qa: not run"></i><i class="none" title="security: not run"></i></div></header>
+      <h3>Define the run seam and implement one vendor</h3><div class="meta"><span class="ow">backend</span><span class="es">2d</span><span class="es">after E-1</span></div>
+    </article><article class="card">
+      <header><code>H-2</code><div class="rail" aria-label="gates"><i class="none" title="reviewer: not run"></i><i class="none" title="qa: not run"></i><i class="none" title="security: not run"></i></div></header>
+      <h3>Second vendor, and it should be a LOCAL model</h3><div class="meta"><span class="ow">backend</span><span class="es">1d</span><span class="es">after H-1</span></div>
+    </article><article class="card">
+      <header><code>H-3</code><div class="rail" aria-label="gates"><i class="none" title="reviewer: not run"></i><i class="none" title="qa: not run"></i><i class="none" title="security: not run"></i></div></header>
+      <h3>Adversarial verify as a first-class step</h3><div class="meta"><span class="ow">architect</span><span class="es">1d</span><span class="es">after H-1</span></div>
+    </article><article class="card">
+      <header><code>H-4</code><div class="rail" aria-label="gates"><i class="none" title="reviewer: not run"></i><i class="none" title="qa: not run"></i><i class="none" title="security: not run"></i></div></header>
+      <h3>Drift gate: a governed path changed and its spec did not</h3><div class="meta"><span class="ow">backend</span><span class="es">1d</span><span class="es">after P-3, H-1</span></div>
+    </article><article class="card">
+      <header><code>H-5</code><div class="rail" aria-label="gates"><i class="none" title="reviewer: not run"></i><i class="none" title="qa: not run"></i><i class="none" title="security: not run"></i></div></header>
+      <h3>Reconciliation run: propose the spec change, do not make it</h3><div class="meta"><span class="ow">backend</span><span class="es">1d</span><span class="es">after H-4</span></div>
+    </article><article class="card">
+      <header><code>H-6</code><div class="rail" aria-label="gates"><i class="none" title="reviewer: not run"></i><i class="none" title="qa: not run"></i><i class="none" title="security: not run"></i></div></header>
+      <h3>Harvest decisions the transcript holds and no document does</h3><div class="meta"><span class="ow">architect</span><span class="es">2d</span><span class="es">after H-5</span></div>
+    </article><article class="card">
+      <header><code>H-7</code><div class="rail" aria-label="gates"><i class="none" title="reviewer: not run"></i><i class="none" title="qa: not run"></i><i class="none" title="security: not run"></i></div></header>
+      <h3>Drift direction is a project default, overridable per task</h3><div class="meta"><span class="ow">architect</span><span class="es">1d</span><span class="es">after H-4, H-5</span></div>
+    </article><article class="card">
+      <header><code>H-8</code><div class="rail" aria-label="gates"><i class="none" title="reviewer: not run"></i><i class="none" title="qa: not run"></i><i class="none" title="security: not run"></i></div></header>
+      <h3>Graph access: MCP for agents, CLI-with-JSON for gates</h3><div class="meta"><span class="ow">backend</span><span class="es">1d</span><span class="es">after H-1, H-4</span></div>
     </article>
     </section><section class="col">
       <h2>Blocked<span class="n">0</span>
@@ -231,7 +249,7 @@ footer{margin-top:34px;color:var(--faint);font-size:13px;line-height:1.7;
 </div>
 
 <div class="pane pane-data">
-  <div class="panel"><h2>Velocity &middot; last 14 days</h2><div class="vwrap"><div class="vmean" style="bottom:7%"><span>avg 0.9</span></div><div class="vday" title="2026-08-17: 0 commits, 0 closed">
+  <div class="panel"><h2>Velocity &middot; last 14 days</h2><div class="vwrap"><div class="vmean" style="bottom:7%"><span>avg 1.0</span></div><div class="vday" title="2026-08-17: 0 commits, 0 closed">
         <div class="vbars"><i class="vc" style="height:0%"></i>
         </div>
         <span class="vd">17</span></div><div class="vday" title="2026-08-18: 0 commits, 0 closed">
@@ -270,39 +288,40 @@ footer{margin-top:34px;color:var(--faint);font-size:13px;line-height:1.7;
         <span class="vd">28</span></div><div class="vday" title="2026-08-29: 0 commits, 0 closed">
         <div class="vbars"><i class="vc" style="height:0%"></i>
         </div>
-        <span class="vd">29</span></div><div class="vday" title="2026-08-30: 13 commits, 1 closed (8h)">
+        <span class="vd">29</span></div><div class="vday" title="2026-08-30: 14 commits, 1 closed (8h)">
         <div class="vbars"><i class="vc" style="height:100%"></i>
-        <i class="vk" style="height:8%"></i></div>
+        <i class="vk" style="height:7%"></i></div>
         <span class="vd">30</span></div></div>
     <div class="legend"><span><i style="background:var(--line2)"></i>commits</span>
       <span><i style="background:var(--lime)"></i>tasks closed</span></div></div>
   <div class="grid2">
-    <div class="panel"><h2>Phases</h2><table><tr class="cur">
-      <td>Layer 0 — The spec format</td><td class="num">0/5</td>
+    <div class="panel"><h2>Phases</h2><table><tr>
+      <td>Layer 0 — Spec format</td><td class="num">0/5</td>
       <td class="bar"><i style="width:0%"></i></td><td class="num">0%</td></tr><tr>
-      <td>Layer 1 — Environment</td><td class="num">0/7</td>
+      <td>Layer 3 — Dev environment</td><td class="num">0/7</td>
+      <td class="bar"><i style="width:0%"></i></td><td class="num">0%</td></tr><tr class="cur">
+      <td>Layer 2 — Harness</td><td class="num">0/11</td>
       <td class="bar"><i style="width:0%"></i></td><td class="num">0%</td></tr><tr>
-      <td>Layer 2 — Harness</td><td class="num">0/8</td>
+      <td>Layer 2b — Skills</td><td class="num">0/2</td>
       <td class="bar"><i style="width:0%"></i></td><td class="num">0%</td></tr><tr>
-      <td>Layer 3 — Skills</td><td class="num">0/2</td>
-      <td class="bar"><i style="width:0%"></i></td><td class="num">0%</td></tr><tr>
-      <td>Layer 4 — Board and tracking</td><td class="num">1/7</td>
+      <td>Layer 1 — Control plane</td><td class="num">1/7</td>
       <td class="bar"><i style="width:14%"></i></td><td class="num">14%</td></tr><tr>
-      <td>Layer 5 — TUI</td><td class="num">0/2</td>
+      <td>Layer 1b — TUI</td><td class="num">0/2</td>
       <td class="bar"><i style="width:0%"></i></td><td class="num">0%</td></tr><tr>
-      <td>Layer 6 — Graduate</td><td class="num">0/2</td>
+      <td>Layer 4 — Infra and graduate</td><td class="num">0/2</td>
       <td class="bar"><i style="width:0%"></i></td><td class="num">0%</td></tr></table></div>
     <div class="panel"><h2>Agent routing</h2><table><tr><td>no agent definitions found</td></tr></table></div>
   </div>
   <div class="panel" style="margin-top:15px"><h2>What landed</h2>
-    <ul class="log"><li><code>8b16b01</code><span class="dim">52 minutes ago</span>
-       <span class="sub">E-0 and E-1: a container that boots, with limits proven from inside it</span></li><li><code>8e29ad4</code><span class="dim">75 minutes ago</span>
-       <span class="sub">E-0: podman is the assumption, not the preference</span></li><li><code>cfbf4fe</code><span class="dim">78 minutes ago</span>
-       <span class="sub">ADR-0001: say why podman, and note their runner is bound to the Docker API</span></li><li><code>6244c54</code><span class="dim">80 minutes ago</span>
+    <ul class="log"><li><code>d48ce3d</code><span class="dim">12 minutes ago</span>
+       <span class="sub">events: one append-only log, and the organising key is a field not a folder</span></li><li><code>8b16b01</code><span class="dim">64 minutes ago</span>
+       <span class="sub">E-0 and E-1: a container that boots, with limits proven from inside it</span></li><li><code>8e29ad4</code><span class="dim">87 minutes ago</span>
+       <span class="sub">E-0: podman is the assumption, not the preference</span></li><li><code>cfbf4fe</code><span class="dim">2 hours ago</span>
+       <span class="sub">ADR-0001: say why podman, and note their runner is bound to the Docker API</span></li><li><code>6244c54</code><span class="dim">2 hours ago</span>
        <span class="sub">ADR-0001: build the egress layer. Fabro does not have it</span></li><li><code>dafb95d</code><span class="dim">2 hours ago</span>
        <span class="sub">spec: two fields, because devcontainer.json already has the rest</span></li><li><code>d4a1535</code><span class="dim">3 hours ago</span>
        <span class="sub">environments: two problems that look like one, and they want opposite tools</span></li><li><code>662c721</code><span class="dim">3 hours ago</span>
-       <span class="sub">P-2: gate verdicts append, so rework becomes measurable</span></li><li><code>168d2e4</code><span class="dim">3 hours ago</span>
+       <span class="sub">P-2: gate verdicts append, so rework becomes measurable</span></li><li><code>168d2e4</code><span class="dim">4 hours ago</span>
        <span class="sub">memory: three tiers, computed staleness, and one drift mechanism with a direction</span></li><li><code>ebe7057</code><span class="dim">4 hours ago</span>
        <span class="sub">doc drift: detection is a gate, reconciliation is a run, and the direction is recorded</span></li><li><code>69cc13b</code><span class="dim">4 hours ago</span>
        <span class="sub">the plan, sequenced, with the two things that must happen first</span></li><li><code>3e341bc</code><span class="dim">4 hours ago</span>
@@ -324,10 +343,12 @@ footer{margin-top:34px;color:var(--faint);font-size:13px;line-height:1.7;
         each day, never rewritten.</p></div>
     <div class="panel"><h2>Remaining effort by owner</h2>
       <table><tr><th>owner</th><th class="num">open</th><th class="num">hours</th>
-        <th></th><th class="num"></th></tr><tr><td>architect</td><td class="num">3</td><td class="num">20h</td>
-       <td class="bar"><i style="width:67%"></i></td>
-       <td class="num"></td></tr><tr><td>backend</td><td class="num">2</td><td class="num">10h</td>
-       <td class="bar"><i style="width:33%"></i></td>
+        <th></th><th class="num"></th></tr><tr><td>backend</td><td class="num">7</td><td class="num">68h</td>
+       <td class="bar"><i style="width:65%"></i></td>
+       <td class="num"></td></tr><tr><td>architect</td><td class="num">3</td><td class="num">32h</td>
+       <td class="bar"><i style="width:31%"></i></td>
+       <td class="num"></td></tr><tr><td>security</td><td class="num">1</td><td class="num">4h</td>
+       <td class="bar"><i style="width:4%"></i></td>
        <td class="num"></td></tr></table>
       <p class="cav">Open tasks only, weighted by the board&rsquo;s own estimates. This is the
         queue, not a workload: a blocked task sits here while nobody is working on it.</p></div>

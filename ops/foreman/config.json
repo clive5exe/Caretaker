@@ -8,7 +8,7 @@
   "history": "ops/foreman/history.jsonl",
   "out": "docs/board.html",
   "repo": ".",
-  "activePhase": "Layer 0 \u2014 The spec format",
+  "activePhase": "Layer 2 \u2014 Harness",
   "gates": [
     "reviewer",
     "qa",
