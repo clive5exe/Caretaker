@@ -5,7 +5,7 @@
   },
   "phases": [
     {
-      "name": "Layer 0 — The spec format",
+      "name": "Layer 0 \u2014 The spec format",
       "tasks": [
         {
           "id": "P-1",
@@ -49,7 +49,7 @@
         },
         {
           "id": "P-4",
-          "title": "Three tiers: decision, spec, log — separated, not one docs pile",
+          "title": "Three tiers: decision, spec, log \u2014 separated, not one docs pile",
           "owner": "architect",
           "est": "1d",
           "status": "todo",
@@ -76,7 +76,7 @@
       ]
     },
     {
-      "name": "Layer 1 — Environment",
+      "name": "Layer 1 \u2014 Environment",
       "tasks": [
         {
           "id": "E-1",
@@ -126,11 +126,38 @@
           ],
           "ac": "the environment layer can produce a deployable for a plain Linux host with its own Postgres and a Prometheus scrape config, not only a managed platform",
           "note": "Follows from the thesis rather than being bolted on. Every agent tool on the market assumes a PaaS. The migration failure that started this - ten migrations missing from a live database with no ledger anywhere, while the test suite stayed green because it replayed onto a throwaway cluster - happened because managed convenience meant nobody owned the migration path."
+        },
+        {
+          "id": "E-5",
+          "title": "The sandbox is rebuilt from the spec every run",
+          "owner": "backend",
+          "est": "4h",
+          "status": "todo",
+          "deps": [
+            "E-1",
+            "P-1"
+          ],
+          "spec": "docs/environments.md",
+          "ac": "a run gets a container built from the spec and destroyed after, and a package installed by hand inside one is gone on the next run; nothing persists between runs except the repo",
+          "note": "THE ANSWER TO 'ENVIRONMENTS CHANGE' AT THIS LAYER IS THAT THEY DO NOT. Immutable rebuild makes drift structurally impossible rather than detectable: if something is needed, the spec changes and the image is rebuilt. Terraform and Ansible are the wrong shape here - a state file for a thing created fifty times an hour is overhead and a lock contention point, and convergence assumes a host that persists."
+        },
+        {
+          "id": "E-6",
+          "title": "Environment drift: ask the container what it actually has",
+          "owner": "devops",
+          "est": "1d",
+          "status": "todo",
+          "deps": [
+            "E-5"
+          ],
+          "spec": "docs/environments.md",
+          "ac": "a check compares the running environment's real package versions, service versions and reachable hosts against what the spec declared, and names every difference",
+          "note": "EASIER THAN DOC DRIFT AND WORTH DOING FIRST BECAUSE OF IT. A document's meaning is ambiguous; a container's contents are not. You can ask it what it has and diff that against the declaration with no interpretation involved. Same machinery as the doc drift gate, pointed at a target that cannot argue."
         }
       ]
     },
     {
-      "name": "Layer 2 — Harness",
+      "name": "Layer 2 \u2014 Harness",
       "tasks": [
         {
           "id": "H-1",
@@ -221,7 +248,7 @@
       ]
     },
     {
-      "name": "Layer 3 — Skills",
+      "name": "Layer 3 \u2014 Skills",
       "tasks": [
         {
           "id": "S-1",
@@ -250,7 +277,7 @@
       ]
     },
     {
-      "name": "Layer 4 — Board and tracking",
+      "name": "Layer 4 \u2014 Board and tracking",
       "tasks": [
         {
           "id": "B-1",
@@ -326,7 +353,7 @@
       ]
     },
     {
-      "name": "Layer 5 — TUI",
+      "name": "Layer 5 \u2014 TUI",
       "tasks": [
         {
           "id": "U-1",
@@ -357,7 +384,7 @@
       ]
     },
     {
-      "name": "Layer 6 — Graduate",
+      "name": "Layer 6 \u2014 Graduate",
       "tasks": [
         {
           "id": "G-1",
@@ -372,6 +399,20 @@
           "spec": "docs/architecture.md",
           "ac": "a graduate command emits a workflow file built from the commands the gates really ran, a docs site from the specs really written, and a decision index from the ADRs really recorded; nothing in the output is a template placeholder",
           "note": "Every scaffolder emits CI at init, when it knows nothing about the project. During a build CI is friction; at handoff its absence is what makes a project unmaintainable."
+        },
+        {
+          "id": "G-2",
+          "title": "Emit infrastructure as code, do not depend on it",
+          "owner": "devops",
+          "est": "3d",
+          "status": "todo",
+          "deps": [
+            "G-1",
+            "E-4"
+          ],
+          "spec": "docs/environments.md",
+          "ac": "graduate emits a Terraform module and an Ansible playbook derived from the spec and from what was actually deployed, and the tool itself runs with neither installed",
+          "note": "Terraform and Ansible are right for LONG-LIVED infrastructure and wrong for an ephemeral sandbox, so they belong here rather than in Layer 1. Emitting them at graduate beats emitting them at init for the same reason CI does: at init a scaffolder knows nothing about the project. EMITTER, NOT DEPENDENCY - some teams use Pulumi, some use plain bash, some use Nix, and making one of them a hard requirement contradicts the whole thesis."
         }
       ]
     }
