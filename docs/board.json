@@ -38,6 +38,32 @@
           ],
           "ac": "the spec's structured block names the paths it is the authority for, and a tool can answer 'which spec governs this file' for any path in the repo",
           "note": "Same block the environment derives from, one more field. This is what makes drift detectable mechanically rather than by someone remembering."
+        },
+        {
+          "id": "P-4",
+          "title": "Three tiers: decision, spec, log \u2014 separated, not one docs pile",
+          "owner": "architect",
+          "est": "1d",
+          "status": "todo",
+          "deps": [
+            "P-1"
+          ],
+          "spec": "docs/memory.md",
+          "ac": "decisions are immutable and superseded rather than edited, specs carry current state only, and the log is append-only; a tool can answer 'why is this like this' from the decisions without reading the log",
+          "note": "They rot at completely different speeds and want opposite treatment. A spec that accumulates a changelog becomes unreadable, unreadable specs are not consulted, and unconsulted specs drift. An ADR that gets edited stops being a record of what was decided."
+        },
+        {
+          "id": "P-5",
+          "title": "Staleness is computed, never declared",
+          "owner": "backend",
+          "est": "1d",
+          "status": "todo",
+          "deps": [
+            "P-3"
+          ],
+          "spec": "docs/memory.md",
+          "ac": "a check reports stale (the doc's updated: is older than the last commit touching the paths it GOVERNS), orphaned (governs paths that no longer exist) and unowned (code no spec claims), with no manual freshness flag anywhere",
+          "note": "A manual 'is this current?' flag stops being updated the first time someone is in a hurry, and then there is no way to tell a current doc from an abandoned one. Comparing against the governed paths rather than the doc's own last commit is the stronger check: a doc can be true and untouched while the code under it moves."
         }
       ]
     },
@@ -169,6 +195,20 @@
           ],
           "ac": "after a run, decisions made in the transcript that appear in no spec or ADR are surfaced for a human to keep or discard",
           "note": "Prompt-driven development means the PROMPT is the real spec, transiently. Intent gets settled in a conversation and lands nowhere. This is the graduate idea applied continuously instead of only at handoff."
+        },
+        {
+          "id": "H-7",
+          "title": "Drift direction is a project default, overridable per task",
+          "owner": "architect",
+          "est": "1d",
+          "status": "todo",
+          "deps": [
+            "H-4",
+            "H-5"
+          ],
+          "spec": "docs/memory.md",
+          "ac": "a project declares whether the spec or the code is the authority, the drift gate blocks or harvests accordingly, and a single task can override it",
+          "note": "The three ways people actually work want the SAME machinery pointed in different directions. Spec-first: drift means the code is wrong, block. Build-as-you-go: drift means the spec is behind, harvest and propose. Handoff: reconcile before anyone inherits it. Two of those are one code path with the arrow reversed, which is the reason not to build three products."
         }
       ]
     },
@@ -261,6 +301,19 @@
           ],
           "ac": "the dashboard reports deploy frequency, lead time, change failure rate and time to restore from git and the board; and tokens per closed task, cost per merged diff line, first-pass gate rate, rework rate, model mix, estimate calibration and human intervention rate from the run log",
           "note": "Lines of code, agents spawned and tasks-per-day without effort weighting are deliberately absent. Each rewards exactly the wrong behaviour."
+        },
+        {
+          "id": "B-5",
+          "title": "Externalise before compaction, continuously",
+          "owner": "backend",
+          "est": "1d",
+          "status": "todo",
+          "deps": [
+            "H-6"
+          ],
+          "spec": "docs/memory.md",
+          "ac": "reasoning is written to the artifact it explains as a run proceeds rather than at the end, so a compacted or killed session loses nothing that was already decided",
+          "note": "Compaction is lossy and unavoidable, so the principle is externalise early rather than avoid compacting. Measured in the project this came from: everything that survived was written where it attaches to the artifact - commit message, board note, decision record. Everything that lived only in the conversation is gone, including reasoning that took hours to reach."
         }
       ]
     },
