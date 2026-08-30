@@ -57,7 +57,14 @@
             "qa": {
               "verdict": "pass",
               "at": "2026-08-30",
-              "note": "governs is parsed and matched; globToRegExp handles ** and refuses to let a single star cross a directory boundary"
+              "note": "governs is parsed, matched, and now consumed by a real gate; the resolver sits behind a two-member seam so a graph resolver can replace globs without touching the gate",
+              "history": [
+                {
+                  "verdict": "pass",
+                  "at": "2026-08-30",
+                  "note": "governs is parsed and matched; globToRegExp handles ** and refuses to let a single star cross a directory boundary"
+                }
+              ]
             }
           }
         },
@@ -142,7 +149,7 @@
           ],
           "spec": "docs/architecture.md",
           "ac": "the container has no route to the internet and reaches only the hosts the spec declared, through a proxy; a test proves an undeclared host is refused and logged, and proves the repo cannot be POSTed anywhere",
-          "note": "ADR-0001: Fabro was evaluated by reading its source, not its README, and does NOT have this. Their Docker provider errors on cidr_allow_list - it is all-or-nothing, default bridge or no network at all - and docker.rs is 179 lines with no networking in it. The allowlist that exists is typed DaytonaNetwork, serialised into a paid third-party cloud API and enforced there, and it is CIDR, which is the wrong unit for api.stripe.com behind a CDN. This task is the load-bearing piece of the product because it is the part nobody else has.",
+          "note": "ADR-0001: Fabro was evaluated by reading its source, not its README, and does NOT have this. Their Docker provider errors on cidr_allow_list - it is all-or-nothing, default bridge or no network at all - and docker.rs is 179 lines with no networking in it. The allowlist that exists is typed DaytonaNetwork, serialised into a paid third-party cloud API and enforced there, and it is CIDR, which is the wrong unit for api.stripe.com behind a CDN. This task is the load-bearing piece of the product because it is the part nobody else has.\n\nREOPENED AFTER ITS QA PASS. Two bugs found by the H-0 agent in bin/egress.mjs, both mine, both fixed: isEntry compared the BASENAME of argv[1], so any script anywhere on disk named egress.mjs that merely imported the module ran its CLI as a side effect - printing usage and exiting, or binding a listening socket if serve was in argv; and the flag parser stepped i += 2 from index 1, silently misaligning every later flag the moment a boolean or a --k=v appeared. Misparsing an ALLOWLIST is the worst place for a quiet failure, because the operator believes they declared a host and did not. Unknown flags are an error now, as they already were in run.mjs.",
           "gate": {
             "qa": {
               "verdict": "pass",
@@ -161,7 +168,14 @@
             "E-2"
           ],
           "ac": "written attempts to (a) write outside the repo mount, (b) exhaust host memory, (c) reach an undeclared host and (d) reach the container socket each fail, with the command and its output recorded",
-          "note": "A sandbox nobody has tried to break is a claim, not a control. This task never gets dropped as obviously fine."
+          "note": "A sandbox nobody has tried to break is a claim, not a control. This task never gets dropped as obviously fine.",
+          "gate": {
+            "qa": {
+              "verdict": "pass",
+              "at": "2026-08-30",
+              "note": "All five attacks run against a real container on an --internal network, with real output. Bypassing the proxy and dialling a raw IP returns Network unreachable rather than a DNS failure dressed up as one. A sibling container is unreachable. The host is unreachable via host.containers.internal, PROVEN AS A CONTROL by showing the same address succeeds from a normally-networked container."
+            }
+          }
         },
         {
           "id": "E-4",
@@ -216,7 +230,14 @@
           "deps": [],
           "spec": "docs/architecture.md",
           "ac": "an API key is available to the harness at run time, is never written into the image, the repo, the spec or the event log, and a test proves a key value cannot be found in any of them after a run",
-          "note": "In the skeleton and absent from the board until now. It also constrains the egress design: the model call happens at the harness layer, above the dev environment, so the key never needs to be inside the container at all."
+          "note": "In the skeleton and absent from the board until now. CORRECTION, and it is the defect class this project cares most about - a correct control defended with a wrong reason. This note previously said the model call happens above the dev environment 'so the key never needs to be inside the container at all'. That is FALSE under the default path: H-10 makes the CLI adapter the default, precisely because subscription auth lives in the CLI, and the CLI runs INSIDE the container. The key must cross the boundary. Anyone designing from the old note would have built the wrong thing. Found by the agent implementing this task, which is the only reason it was caught before the code was written.",
+          "gate": {
+            "qa": {
+              "verdict": "pass",
+              "at": "2026-08-30",
+              "note": "73 checks. The mechanism is one anonymous pipe per secret via podman --preserve-fd, chosen after MEASURING what the alternatives leak on this box rather than assuming: -e shows the value twice in podman inspect and once in ps for a foreground run, --env-file shows it once in inspect, and --secret keeps it base64 in the filedriver store outliving the run. The decisive mutation swapped the chosen mechanism for the rejected -e form and the live inspect scan went red by name."
+            }
+          }
         },
         {
           "id": "H-9",
@@ -292,7 +313,14 @@
             "H-1"
           ],
           "ac": "after a run, the diff's touched paths are compared against the ownership map, and a task cannot close while a governed path has changed without its governing spec being touched or the drift being explicitly dismissed with a recorded reason",
-          "note": "DETECTION IS A GATE, NOT A HARNESS FEATURE, and the distinction is the whole design. The harness already returns a diff, which is exactly the evidence needed; no model is required to notice that pricing.ts changed and pricing.md did not. Putting it in the harness would mean the spec silently follows the code, and a spec that always agrees with the code cannot ever say the code is wrong."
+          "note": "DETECTION IS A GATE, NOT A HARNESS FEATURE, and the distinction is the whole design. The harness already returns a diff, which is exactly the evidence needed; no model is required to notice that pricing.ts changed and pricing.md did not. Putting it in the harness would mean the spec silently follows the code, and a spec that always agrees with the code cannot ever say the code is wrong.",
+          "gate": {
+            "qa": {
+              "verdict": "pass",
+              "at": "2026-08-30",
+              "note": "70 checks, 10 mutations. Mutation M7 found a real gap rather than confirming one: gate() overwrote analyse()'s orphaned field, so it was asserted by nothing and could be changed to [] with the suite still green. Direct assertion added; M7 now goes red by name."
+            }
+          }
         },
         {
           "id": "H-5",

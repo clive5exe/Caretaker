@@ -35,6 +35,8 @@
 import { createServer } from "node:http";
 import { connect } from "node:net";
 import { appendFileSync, readFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
+import { resolve } from "node:path";
 import { parseSpec, toEgress, readDevcontainer } from "./spec.mjs";
 
 /**
@@ -124,11 +126,46 @@ export function createProxy({ allowlist, onEvent = () => {}, allowPorts = [443, 
 
 /* --------------------------------------------------------------------- cli */
 
-const isEntry = process.argv[1] && import.meta.url.endsWith(process.argv[1].split("/").pop());
+/*
+ * BASENAME COMPARISON WAS A BUG, and a live one. This read
+ * `import.meta.url.endsWith(argv[1].split("/").pop())`, so ANY script named
+ * egress.mjs anywhere on disk that merely imported this module ran its CLI as a
+ * side effect — printing usage and exiting before its own first line, or, with
+ * `serve --allow` in argv, binding a listening socket. Found by the H-0 agent,
+ * which hit exactly that. sandbox.mjs already did it correctly; this now
+ * matches, comparing the resolved path rather than the last path segment.
+ */
+const isEntry =
+  process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href;
 if (isEntry) {
   const argv = process.argv.slice(2);
+  /*
+   * STEPPING BY TWO FROM INDEX 1 SILENTLY MISALIGNED EVERY LATER FLAG the moment
+   * a boolean or a `--k=v` appeared, and misparsing an ALLOWLIST is the worst
+   * possible place for a quiet failure: the operator believes they declared a
+   * host and did not. Unknown flags are an error here for the same reason they
+   * are in run.mjs.
+   */
+  const KNOWN = new Set(["allow", "spec", "devcontainer", "port", "log"]);
   const flags = {};
-  for (let i = 1; i < argv.length; i += 2) flags[argv[i]?.replace(/^--/, "")] = argv[i + 1];
+  for (let i = 1; i < argv.length; i++) {
+    const a = argv[i];
+    if (!a.startsWith("--")) {
+      console.error(`egress: unexpected argument "${a}"`);
+      process.exit(2);
+    }
+    const eq = a.indexOf("=");
+    const key = (eq === -1 ? a.slice(2) : a.slice(2, eq)).trim();
+    if (!KNOWN.has(key)) {
+      console.error(`egress: unknown flag --${key} (known: ${[...KNOWN].join(", ")})`);
+      process.exit(2);
+    }
+    flags[key] = eq === -1 ? argv[++i] : a.slice(eq + 1);
+    if (flags[key] === undefined) {
+      console.error(`egress: --${key} needs a value`);
+      process.exit(2);
+    }
+  }
 
   if (argv[0] !== "serve") {
     console.error("usage: egress.mjs serve --allow a.com,b.com | --spec F [--devcontainer F]");
