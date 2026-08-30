@@ -26,6 +26,18 @@
           "deps": [],
           "ac": "a gate records every verdict rather than the latest, and rework rate and first-pass rate are computable from the board",
           "note": "CHEAP NOW, IMPOSSIBLE RETROACTIVELY. The board keeps one verdict per gate, so a task that failed qa three times and passed once reads as a pass. Two of the KPIs that matter most are therefore unmeasurable, and the dashboard already prints a warning saying so."
+        },
+        {
+          "id": "P-3",
+          "title": "A spec declares which paths it governs",
+          "owner": "architect",
+          "est": "4h",
+          "status": "todo",
+          "deps": [
+            "P-1"
+          ],
+          "ac": "the spec's structured block names the paths it is the authority for, and a tool can answer 'which spec governs this file' for any path in the repo",
+          "note": "Same block the environment derives from, one more field. This is what makes drift detectable mechanically rather than by someone remembering."
         }
       ]
     },
@@ -120,6 +132,43 @@
           ],
           "ac": "a run can be declared as an attempt to REFUTE another run's result, and its verdict can fail the task rather than merely commenting on it",
           "note": "The technique behind grill-me, without the branding. Every defect worth finding in the project this came from was found by one agent refusing to take another's word: a security review that failed a rate-limit fix and found an OTP brute-force bypass, a qa run that found the paid checkout path returning 500 on every order. Neither came from an agent doing work."
+        },
+        {
+          "id": "H-4",
+          "title": "Drift gate: a governed path changed and its spec did not",
+          "owner": "backend",
+          "est": "1d",
+          "status": "todo",
+          "deps": [
+            "P-3",
+            "H-1"
+          ],
+          "ac": "after a run, the diff's touched paths are compared against the ownership map, and a task cannot close while a governed path has changed without its governing spec being touched or the drift being explicitly dismissed with a recorded reason",
+          "note": "DETECTION IS A GATE, NOT A HARNESS FEATURE, and the distinction is the whole design. The harness already returns a diff, which is exactly the evidence needed; no model is required to notice that pricing.ts changed and pricing.md did not. Putting it in the harness would mean the spec silently follows the code, and a spec that always agrees with the code cannot ever say the code is wrong."
+        },
+        {
+          "id": "H-5",
+          "title": "Reconciliation run: propose the spec change, do not make it",
+          "owner": "backend",
+          "est": "1d",
+          "status": "todo",
+          "deps": [
+            "H-4"
+          ],
+          "ac": "a reconciliation run receives the diff and the governing spec and returns a PROPOSED spec diff plus a stated direction, which a human accepts or rejects; nothing is committed to a spec without that acceptance",
+          "note": "THE DIRECTION IS THE POINT AND MUST BE RECORDED. 'We learned something, the spec should change' and 'the code drifted from what we decided' are opposite events with opposite fixes, and the tool must not guess which. Forcing the answer is where the value is; auto-applying either one destroys it."
+        },
+        {
+          "id": "H-6",
+          "title": "Harvest decisions the transcript holds and no document does",
+          "owner": "architect",
+          "est": "2d",
+          "status": "todo",
+          "deps": [
+            "H-5"
+          ],
+          "ac": "after a run, decisions made in the transcript that appear in no spec or ADR are surfaced for a human to keep or discard",
+          "note": "Prompt-driven development means the PROMPT is the real spec, transiently. Intent gets settled in a conversation and lands nowhere. This is the graduate idea applied continuously instead of only at handoff."
         }
       ]
     },
