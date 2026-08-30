@@ -5,7 +5,7 @@
   },
   "phases": [
     {
-      "name": "Layer 0 — The spec format",
+      "name": "Layer 0 \u2014 The spec format",
       "tasks": [
         {
           "id": "P-1",
@@ -63,7 +63,7 @@
         },
         {
           "id": "P-4",
-          "title": "Three tiers: decision, spec, log — separated, not one docs pile",
+          "title": "Three tiers: decision, spec, log \u2014 separated, not one docs pile",
           "owner": "architect",
           "est": "1d",
           "status": "todo",
@@ -90,7 +90,7 @@
       ]
     },
     {
-      "name": "Layer 1 — Environment",
+      "name": "Layer 1 \u2014 Environment",
       "tasks": [
         {
           "id": "E-0",
@@ -198,7 +198,7 @@
       ]
     },
     {
-      "name": "Layer 2 — Harness",
+      "name": "Layer 2 \u2014 Harness",
       "tasks": [
         {
           "id": "H-1",
@@ -285,11 +285,25 @@
           "spec": "docs/memory.md",
           "ac": "a project declares whether the spec or the code is the authority, the drift gate blocks or harvests accordingly, and a single task can override it",
           "note": "The three ways people actually work want the SAME machinery pointed in different directions. Spec-first: drift means the code is wrong, block. Build-as-you-go: drift means the spec is behind, harvest and propose. Handoff: reconcile before anyone inherits it. Two of those are one code path with the arrow reversed, which is the reason not to build three products."
+        },
+        {
+          "id": "H-8",
+          "title": "Graph access: MCP for agents, CLI-with-JSON for gates",
+          "owner": "backend",
+          "est": "1d",
+          "status": "todo",
+          "deps": [
+            "H-1",
+            "H-4"
+          ],
+          "spec": "docs/events.md",
+          "ac": "a reviewer agent can query the code graph through MCP over stdio or a bind-mounted unix socket with the container still on --network none, and the drift gate calls the graph CLI for a machine-readable answer with an exit code",
+          "note": "NEVER PUT A GATE BEHIND A MODEL. A reviewer's use is exploratory - read the diff, form a hypothesis, chase an edge - and it does not know its second question until it hears the first answer, which is what MCP is shaped for. A gate asks one fixed question and must answer the same way twice on the same input; routing that through a model makes a merge blocker probabilistic. Models find things, gates decide things.\n\nAnd the transport is the good news: MCP over stdio or a unix socket needs no network at all, so graph access does not punch a hole in the egress allowlist. Bind-mount the socket and the box stays sealed.\n\nSTRUCTURE IS INFERRED, INTENT IS DECLARED. The graph owns what calls what, which is a fact in the AST. The spec's `governs` field owns which document is the authority, which is a decision a human made and cannot be read off a parse tree. Mixing them lets an inferred doc-to-code edge compete with a declared one, and the inferred one is wrong in exactly the cases that matter."
         }
       ]
     },
     {
-      "name": "Layer 3 — Skills",
+      "name": "Layer 3 \u2014 Skills",
       "tasks": [
         {
           "id": "S-1",
@@ -318,7 +332,7 @@
       ]
     },
     {
-      "name": "Layer 4 — Board and tracking",
+      "name": "Layer 4 \u2014 Board and tracking",
       "tasks": [
         {
           "id": "B-1",
@@ -390,11 +404,35 @@
           "spec": "docs/memory.md",
           "ac": "reasoning is written to the artifact it explains as a run proceeds rather than at the end, so a compacted or killed session loses nothing that was already decided",
           "note": "Compaction is lossy and unavoidable, so the principle is externalise early rather than avoid compacting. Measured in the project this came from: everything that survived was written where it attaches to the artifact - commit message, board note, decision record. Everything that lived only in the conversation is gone, including reasoning that took hours to reach."
+        },
+        {
+          "id": "B-6",
+          "title": "One append-only event log, tailable, with the keys as fields",
+          "owner": "backend",
+          "est": "1d",
+          "status": "todo",
+          "deps": [],
+          "spec": "docs/events.md",
+          "ac": "every run appends JSONL to a day-rotated events file, tail -f and jq give the per-task, per-run and failures-only views with no extra tooling, and a half-written final line is skipped rather than throwing",
+          "note": "The organising key is a FIELD, never a folder. A run spans tasks, a task spans runs, a PR maps to neither, so any directory hierarchy locks in an assumption that breaks once there is history in the old shape. level is the field that gets skipped and then missed: without it an autonomous run logs too little to debug and too much to read, on the same day."
+        },
+        {
+          "id": "B-7",
+          "title": "Board state is a projection of the log, not a second record",
+          "owner": "backend",
+          "est": "2d",
+          "status": "todo",
+          "deps": [
+            "B-6"
+          ],
+          "spec": "docs/events.md",
+          "ac": "task status is computed by replaying events rather than stored, and the board and the log cannot disagree because the board IS the log folded up",
+          "note": "Same reasoning that made gate verdicts append: a record keeping only the latest value cannot answer how many attempts it took, and that turned out to matter more than the current state."
         }
       ]
     },
     {
-      "name": "Layer 5 — TUI",
+      "name": "Layer 5 \u2014 TUI",
       "tasks": [
         {
           "id": "U-1",
@@ -425,7 +463,7 @@
       ]
     },
     {
-      "name": "Layer 6 — Graduate",
+      "name": "Layer 6 \u2014 Graduate",
       "tasks": [
         {
           "id": "G-1",
