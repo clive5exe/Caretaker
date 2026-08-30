@@ -563,7 +563,7 @@ function execWithTimeout({ file, args, cwd, stdinData, stdoutPath, stderrPath, t
 
     const killTree = (sig) => {
       try {
-        process.kill(child.pid, sig);
+        process.kill(-child.pid, sig);
       } catch {
         // The group is already gone. Fall back to the single pid so a partial
         // teardown still tries.
@@ -575,11 +575,45 @@ function execWithTimeout({ file, args, cwd, stdinData, stdoutPath, stderrPath, t
       }
     };
 
+    let finalTimer = null;
+
+    /*
+     * A TIMEOUT THAT CAN ITSELF BE BLOCKED IS NOT A TIMEOUT, and this one could.
+     *
+     * `close` fires when the child has exited AND its stdio pipes are closed. A
+     * BACKGROUNDED GRANDCHILD inherits those pipes and holds them open, so if
+     * the group kill does not reach it — job control can put it in its own
+     * group — `close` never arrives and the promise waits for the grandchild's
+     * full sleep. Measured: an 800ms ceiling returned after 60112ms, the length
+     * of the sleep it was supposed to cut short. It reproduced 2 runs in 5,
+     * which is worse than always failing, because a flaky timeout teaches people
+     * to re-run until green.
+     *
+     * So after SIGKILL the result is settled on a bounded timer, whatever the
+     * pipes are doing. The exit code is unknown at that point and is reported as
+     * unknown; the verdict is `killed`, which is the fact that matters. Waiting
+     * for certainty about a process we have already SIGKILLed is how the hang
+     * this feature exists to prevent gets reintroduced one layer up.
+     */
     const softTimer = setTimeout(() => {
       killed = true;
       killReason = "timeout";
       killTree("SIGTERM");
-      hardTimer = setTimeout(() => killTree("SIGKILL"), graceMs);
+      hardTimer = setTimeout(() => {
+        killTree("SIGKILL");
+        finalTimer = setTimeout(() => {
+          // Stop reading from pipes a dead process's children may still hold,
+          // then settle. `done` is idempotent via `finish`, so a late `close`
+          // that does arrive changes nothing.
+          try {
+            child.stdout?.unpipe(outStream);
+            child.stderr?.unpipe(errStream);
+          } catch {
+            /* already torn down */
+          }
+          done(null, "SIGKILL");
+        }, graceMs);
+      }, graceMs);
       // The container outlives the client — measured, see the header. Killing
       // the tree is necessary and NOT sufficient.
       if (onKill) onKill();
@@ -589,6 +623,7 @@ function execWithTimeout({ file, args, cwd, stdinData, stdoutPath, stderrPath, t
     const done = (code, signal) => {
       clearTimeout(softTimer);
       if (hardTimer) clearTimeout(hardTimer);
+      if (finalTimer) clearTimeout(finalTimer);
       outStream.end();
       errStream.end();
       flushed.then(() =>

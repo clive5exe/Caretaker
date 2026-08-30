@@ -275,7 +275,14 @@
             "E-1"
           ],
           "spec": "docs/architecture.md",
-          "ac": "run(workspace, prompt, policy) returns diff, transcript, verdict and cost for one vendor, and nothing above this layer imports that vendor's SDK"
+          "ac": "run(workspace, prompt, policy) returns diff, transcript, verdict and cost for one vendor, and nothing above this layer imports that vendor's SDK",
+          "gate": {
+            "qa": {
+              "verdict": "fail",
+              "at": "2026-08-30",
+              "note": "The suite is GREEN in 30 consecutive runs but the flake is UNEXPLAINED, so this is not a pass. It failed 2 runs in 5 while four agents were running podman-heavy work on this box: once as 'returns near the ceiling rather than the sleep — 60112ms for an 800ms ceiling', and twice as assertions returning undefined, which means something threw before them rather than the assertion being false.\n\nNOT REPRODUCED SINCE, under any condition tried: 10 runs idle, 5 under six spinning CPU hogs at load 3.5 on 4 cores, 6 more with the candidate fix REVERTED under that same load, and 4 during 40 podman container create/destroy cycles. Thirty runs, zero failures, with and without the change.\n\nSO THE CHANGE IS HARDENING, NOT A PROVEN FIX, and is labelled that way in the code. It is defensible on its own:  fires only when the child has exited AND its stdio pipes are closed, and a backgrounded grandchild inherits those pipes, so if the group kill misses it the promise waits for the grandchild's full sleep. That is a real hazard whether or not it caused this. The result now settles on its own bounded timer after SIGKILL, reporting the exit code as unknown and the verdict as killed, because waiting for certainty about a process already SIGKILLed reintroduces the hang the feature exists to prevent.\n\nTHE LEADING HYPOTHESIS IS PODMAN UNDER CHURN rather than CPU. The netns agent independently reported a matching symptom: a DNS alias that resolved instantly after startup returned empty 5 of 5 times late in a run of ~20 podman cycles, reproducible in its full suite and not in isolation. Same shape - fine alone, wrong under sustained runtime churn.\n\nHeld rather than passed on purpose. A suite that fails 2 in 5 and then passes 30 times without anyone understanding why is not a suite anyone should trust, and marking it green would teach exactly the habit of re-running until it works."
+            }
+          }
         },
         {
           "id": "H-2",
