@@ -1,0 +1,357 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Foreman</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#08080a; --panel:#111114; --line:#1e1e23; --line2:#2c2c34;
+  --ink:#ece9e2; --dim:#918f87; --faint:#5f5d57;
+  --lime:#c6f24a; --amber:#f5a524; --red:#ff5d51;
+  --sans:"IBM Plex Sans Condensed",ui-sans-serif,system-ui,"Segoe UI",Helvetica,Arial,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);
+  font-size:17px;line-height:1.5;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1560px;margin:0 auto;padding:28px 26px 72px}
+
+.top{display:flex;flex-wrap:wrap;align-items:baseline;gap:14px;margin-bottom:18px}
+.top h1{font-size:26px;font-weight:700;letter-spacing:.01em;margin:0;text-transform:uppercase}
+.top .ph{color:var(--lime);font-family:var(--mono);font-size:13px;letter-spacing:.04em}
+.top .bt{margin-left:auto;color:var(--faint);font-family:var(--mono);font-size:12px}
+
+/* progress -------------------------------------------------------------- */
+.prog{margin-bottom:26px}
+.prognums{display:flex;flex-wrap:wrap;align-items:baseline;gap:10px 20px;margin-bottom:11px}
+.prognums .big{font-family:var(--mono);font-size:58px;font-weight:600;line-height:.9;
+  letter-spacing:-.035em;color:var(--lime);font-variant-numeric:tabular-nums}
+.prognums .lab{font-family:var(--mono);font-size:12px;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--faint)}
+.prognums .alt{font-family:var(--mono);font-size:20px;color:var(--ink);
+  font-variant-numeric:tabular-nums}
+.prognums .eta{margin-left:auto;font-size:15px;color:var(--dim);text-align:right}
+.prognums .eta b{color:var(--lime);font-family:var(--mono)}
+.track{position:relative;height:16px;background:#141418;border:1px solid var(--line);
+  border-radius:99px;overflow:hidden}
+.track .t{position:absolute;inset:0 auto 0 0;background:var(--lime);border-radius:99px}
+.track .e{position:absolute;top:0;bottom:0;width:2px;background:#08080a;opacity:.85}
+.tracknote{margin:8px 0 0;font-size:13px;color:var(--faint)}
+
+/* tabs (CSS only) -------------------------------------------------------- */
+.tabin{position:absolute;opacity:0;pointer-events:none}
+.tabs{display:flex;gap:5px;border-bottom:1px solid var(--line);margin-bottom:20px}
+.tabs label{font-family:var(--mono);font-size:12px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--faint);padding:9px 15px;cursor:pointer;border-bottom:2px solid transparent;
+  margin-bottom:-1px}
+.tabs label:hover{color:var(--dim)}
+#tb:checked~.tabs label[for=tb],#td:checked~.tabs label[for=td],
+#ts:checked~.tabs label[for=ts]{color:var(--ink);border-bottom-color:var(--lime)}
+.pane{display:none}
+#tb:checked~.pane-board,#td:checked~.pane-data,#ts:checked~.pane-stats{display:block}
+.worse{color:var(--amber)} .better{color:var(--lime)}
+.panel p.cav{margin:11px 0 0;font-size:13px;color:var(--faint);line-height:1.6}
+th{text-align:left;font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--faint);font-weight:500;padding:0 8px 7px 0;
+  border-bottom:1px solid var(--line)}
+th.num{text-align:right}
+
+/* tiles ------------------------------------------------------------------ */
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(228px,1fr));gap:13px;
+  margin-bottom:22px}
+.tile{position:relative;overflow:hidden;background:var(--panel);border:1px solid var(--line);
+  border-radius:12px;padding:15px 17px 38px}
+.tile .tl{margin:0;font-size:12px;letter-spacing:.13em;text-transform:uppercase;color:var(--faint)}
+.tile .tv{margin:7px 0 3px;font-family:var(--mono);font-size:42px;font-weight:600;line-height:1;
+  letter-spacing:-.03em;font-variant-numeric:tabular-nums}
+.tile .ts{margin:0;font-size:13.5px;color:var(--dim);position:relative;z-index:1}
+.tile.good .tv{color:var(--lime)} .tile.warn .tv{color:var(--amber)}
+.tile.bad .tv{color:var(--red)} .tile.plain .tv{color:var(--ink)}
+.spark{position:absolute;left:0;right:0;bottom:0;width:100%;height:44px}
+.spark .a{fill:currentColor;opacity:.13} .spark .l{fill:none;stroke:currentColor;stroke-width:1.5}
+.spark.good{color:var(--lime)} .spark.plain{color:var(--dim)}
+
+.strip{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+  padding:14px 17px;margin-bottom:22px}
+.strip h2,.panel h2,.col h2{font-family:var(--mono);font-size:11px;letter-spacing:.16em;
+  text-transform:uppercase;color:var(--faint);margin:0 0 10px;font-weight:500}
+.note{color:var(--dim);font-size:14px;margin:0}
+.runs{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.runs li{display:flex;align-items:center;gap:9px;font-size:15px}
+.pulse{width:8px;height:8px;border-radius:99px;background:var(--lime);flex:none;
+  animation:p 1.6s ease-in-out infinite}
+@keyframes p{0%,100%{opacity:1}50%{opacity:.2}}
+
+/* board ------------------------------------------------------------------ */
+.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(296px,1fr));gap:15px}
+.col h2{display:flex;align-items:center;gap:8px}
+.col h2 .n{font-family:var(--mono);color:var(--ink);background:var(--line);border-radius:99px;
+  padding:1px 8px;font-size:11px;letter-spacing:0}
+.col h2 .hr{margin-left:auto;color:var(--faint);letter-spacing:0}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+  padding:12px 13px;margin-bottom:10px}
+.card.is-held{border-color:#3a3320;background:linear-gradient(180deg,#16140d 0%,var(--panel) 62%)}
+.card header{display:flex;align-items:center;justify-content:space-between;gap:8px;
+  margin-bottom:8px}
+.card code{font-family:var(--mono);font-size:11.5px;color:var(--faint)}
+.card h3{font-size:15px;font-weight:500;margin:0 0 9px;line-height:1.38;color:var(--ink)}
+.rail{display:flex;gap:3px;flex:none}
+.rail i{width:16px;height:4px;border-radius:99px;background:var(--line2);display:block}
+.rail i.pass{background:var(--lime)} .rail i.fail{background:var(--red)}
+.meta{display:flex;flex-wrap:wrap;gap:5px;font-family:var(--mono);font-size:11px}
+.ow{color:var(--ink);border:1px solid var(--line2);border-radius:99px;padding:1px 8px}
+.es{color:var(--faint);border:1px solid var(--line);border-radius:99px;padding:1px 8px}
+.es.no{color:var(--amber);border-color:#3a3320}
+.hold{font-family:var(--mono);font-size:12px;margin:9px 0 0;color:var(--amber)}
+.hold.failed{color:var(--red)}
+.why{font-size:13px;color:var(--dim);margin:8px 0 0;border-left:2px solid var(--line2);
+  padding-left:10px;line-height:1.45}
+.empty{color:var(--faint);font-size:14px;font-style:italic}
+
+/* data pane -------------------------------------------------------------- */
+.vwrap{position:relative;display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:6px;
+  height:132px;align-items:end;padding-top:16px}
+.vday{display:flex;flex-direction:column;justify-content:flex-end;height:100%;gap:6px}
+.vbars{position:relative;display:flex;align-items:flex-end;gap:2px;height:100%}
+.vbars i{display:block;flex:1;border-radius:2px 2px 0 0;min-height:2px}
+.vc{background:var(--line2)} .vk{background:var(--lime)}
+.vd{font-family:var(--mono);font-size:10px;color:var(--faint);text-align:center}
+.vmean{position:absolute;left:0;right:0;border-top:1px dashed #35353e;pointer-events:none}
+.vmean span{position:absolute;right:0;top:-16px;font-family:var(--mono);font-size:10px;
+  color:var(--faint)}
+.legend{display:flex;gap:16px;font-family:var(--mono);font-size:11px;color:var(--faint);
+  margin-top:11px}
+.legend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:6px;
+  vertical-align:-1px}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(345px,1fr));gap:15px;
+  margin-top:15px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px}
+table{width:100%;border-collapse:collapse;font-size:14px}
+td{padding:6px 8px 6px 0;border-bottom:1px solid var(--line);vertical-align:top}
+tr:last-child td{border-bottom:0}
+tr.cur td{color:var(--lime)}
+.num{font-family:var(--mono);text-align:right;white-space:nowrap;color:var(--dim);
+  font-variant-numeric:tabular-nums}
+.bar{width:32%} .bar i{display:block;height:5px;background:var(--line2);border-radius:99px}
+tr.cur .bar i{background:var(--lime)}
+.agents{color:var(--dim);font-size:13px;line-height:1.45}
+.log{list-style:none;margin:0;padding:0;display:grid;gap:7px;font-size:14px}
+.log li{display:grid;grid-template-columns:62px 96px 1fr;gap:11px;align-items:baseline}
+.log code{font-family:var(--mono);font-size:12px;color:var(--lime)}
+.log .sub{color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dim{color:var(--faint);font-size:11.5px;font-family:var(--mono)}
+footer{margin-top:34px;color:var(--faint);font-size:13px;line-height:1.7;
+  border-top:1px solid var(--line);padding-top:15px}
+@media(max-width:680px){
+  body{font-size:16px} .prognums .big{font-size:44px} .prognums .eta{margin-left:0;text-align:left}
+  .tile .tv{font-size:34px} .log li{grid-template-columns:58px 1fr} .log .dim{grid-column:1/-1}
+  .vd{display:none}
+}
+</style></head><body><div class="wrap">
+
+<div class="top"><h1>Foreman</h1>
+  <span class="ph">Layer 1 — Environment</span>
+  <span class="bt">built 2026-08-30 13:10</span></div>
+
+<div class="prog">
+  <div class="prognums">
+    <span class="big">0%</span>
+    <span class="lab">by effort<br>0h of 32h</span>
+    <span class="alt">0%</span>
+    <span class="lab">by task count<br>0 of 3</span>
+    <span class="eta">ETA <b>2026-10-25</b> &middot; 56 days at
+     0.6h/day</span>
+  </div>
+  <div class="track"><i class="t" style="width:0%"></i>
+    <i class="e" style="left:0%"></i></div>
+  <p class="tracknote">The bar is EFFORT, from the board's own estimates; the notch is the
+    task count. They disagree when the cheap work is done and the expensive work is not, and
+    that gap is the honest part.</p>
+</div>
+
+<input class="tabin" type="radio" name="tab" id="tb" checked>
+<input class="tabin" type="radio" name="tab" id="td">
+<input class="tabin" type="radio" name="tab" id="ts">
+<div class="tabs"><label for="tb">Board</label><label for="td">Data</label>
+  <label for="ts">Stats</label></div>
+
+<div class="pane pane-board">
+  <div class="tiles">
+    <div class="tile warn">
+      <p class="tl">Held at a gate</p><p class="tv">0</p><p class="ts">nothing waiting on a signature</p>
+      </div>
+    <div class="tile bad">
+      <p class="tl">Blocked</p><p class="tv">0</p><p class="ts">waiting on a decision or a credential</p>
+      </div>
+    <div class="tile good">
+      <p class="tl">No finish line</p><p class="tv">0</p><p class="ts">every open task has one</p>
+      </div>
+    <div class="tile plain">
+      <p class="tl">Landed today</p><p class="tv">1</p><p class="ts">commits &middot; 14-day trend</p>
+      <svg class="spark plain" viewBox="0 0 240 44" preserveAspectRatio="none" aria-hidden="true">
+      <path class="a" d="M0.0 42.0 L18.5 42.0 L36.9 42.0 L55.4 42.0 L73.8 42.0 L92.3 42.0 L110.8 42.0 L129.2 42.0 L147.7 42.0 L166.2 42.0 L184.6 42.0 L203.1 42.0 L221.5 42.0 L240.0 3.0 L240 44 L0 44 Z"/><path class="l" d="M0.0 42.0 L18.5 42.0 L36.9 42.0 L55.4 42.0 L73.8 42.0 L92.3 42.0 L110.8 42.0 L129.2 42.0 L147.7 42.0 L166.2 42.0 L184.6 42.0 L203.1 42.0 L221.5 42.0 L240.0 3.0"/></svg></div>
+  </div>
+  <div class="strip"><h2>Executing now</h2><p class="note">No run log yet. This fills in when something appends to
+       <code>ops/foreman/runs.jsonl</code>. Until then the board is a snapshot rather than a live view,
+       and saying so is the point.</p></div>
+  <div class="cols"><section class="col">
+      <h2>Working<span class="n">0</span>
+        <span class="hr"></span></h2>
+      <p class="empty">nothing here</p>
+    </section><section class="col">
+      <h2>Queued<span class="n">3</span>
+        <span class="hr">32h</span></h2>
+      <article class="card">
+      <header><code>E-1</code><div class="rail" aria-label="gates"><i class="none" title="reviewer: not run"></i><i class="none" title="qa: not run"></i><i class="none" title="security: not run"></i></div></header>
+      <h3>Container runner: podman, resource limits, repo bind-mount</h3><div class="meta"><span class="ow">backend</span><span class="es">1d</span></div>
+    </article><article class="card">
+      <header><code>E-2</code><div class="rail" aria-label="gates"><i class="none" title="reviewer: not run"></i><i class="none" title="qa: not run"></i><i class="none" title="security: not run"></i></div></header>
+      <h3>Egress allowlist proxy: the container has no route to the internet</h3><div class="meta"><span class="ow">security</span><span class="es">2d</span><span class="es">after E-1</span></div>
+    </article><article class="card">
+      <header><code>E-3</code><div class="rail" aria-label="gates"><i class="none" title="reviewer: not run"></i><i class="none" title="qa: not run"></i><i class="none" title="security: not run"></i></div></header>
+      <h3>Prove the sandbox by attacking it</h3><div class="meta"><span class="ow">security</span><span class="es">1d</span><span class="es">after E-2</span></div>
+    </article>
+    </section><section class="col">
+      <h2>Blocked<span class="n">0</span>
+        <span class="hr"></span></h2>
+      <p class="empty">nothing here</p>
+    </section><section class="col">
+      <h2>Done<span class="n">0</span>
+        <span class="hr"></span></h2>
+      <p class="empty">nothing here</p>
+    </section></div>
+</div>
+
+<div class="pane pane-data">
+  <div class="panel"><h2>Velocity &middot; last 14 days</h2><div class="vwrap"><div class="vmean" style="bottom:7%"><span>avg 0.1</span></div><div class="vday" title="2026-08-17: 0 commits, 0 closed">
+        <div class="vbars"><i class="vc" style="height:0%"></i>
+        </div>
+        <span class="vd">17</span></div><div class="vday" title="2026-08-18: 0 commits, 0 closed">
+        <div class="vbars"><i class="vc" style="height:0%"></i>
+        </div>
+        <span class="vd">18</span></div><div class="vday" title="2026-08-19: 0 commits, 0 closed">
+        <div class="vbars"><i class="vc" style="height:0%"></i>
+        </div>
+        <span class="vd">19</span></div><div class="vday" title="2026-08-20: 0 commits, 0 closed">
+        <div class="vbars"><i class="vc" style="height:0%"></i>
+        </div>
+        <span class="vd">20</span></div><div class="vday" title="2026-08-21: 0 commits, 0 closed">
+        <div class="vbars"><i class="vc" style="height:0%"></i>
+        </div>
+        <span class="vd">21</span></div><div class="vday" title="2026-08-22: 0 commits, 0 closed">
+        <div class="vbars"><i class="vc" style="height:0%"></i>
+        </div>
+        <span class="vd">22</span></div><div class="vday" title="2026-08-23: 0 commits, 0 closed">
+        <div class="vbars"><i class="vc" style="height:0%"></i>
+        </div>
+        <span class="vd">23</span></div><div class="vday" title="2026-08-24: 0 commits, 0 closed">
+        <div class="vbars"><i class="vc" style="height:0%"></i>
+        </div>
+        <span class="vd">24</span></div><div class="vday" title="2026-08-25: 0 commits, 0 closed">
+        <div class="vbars"><i class="vc" style="height:0%"></i>
+        </div>
+        <span class="vd">25</span></div><div class="vday" title="2026-08-26: 0 commits, 0 closed">
+        <div class="vbars"><i class="vc" style="height:0%"></i>
+        </div>
+        <span class="vd">26</span></div><div class="vday" title="2026-08-27: 0 commits, 0 closed">
+        <div class="vbars"><i class="vc" style="height:0%"></i>
+        </div>
+        <span class="vd">27</span></div><div class="vday" title="2026-08-28: 0 commits, 0 closed">
+        <div class="vbars"><i class="vc" style="height:0%"></i>
+        </div>
+        <span class="vd">28</span></div><div class="vday" title="2026-08-29: 0 commits, 0 closed">
+        <div class="vbars"><i class="vc" style="height:0%"></i>
+        </div>
+        <span class="vd">29</span></div><div class="vday" title="2026-08-30: 1 commit, 1 closed (8h)">
+        <div class="vbars"><i class="vc" style="height:100%"></i>
+        <i class="vk" style="height:100%"></i></div>
+        <span class="vd">30</span></div></div>
+    <div class="legend"><span><i style="background:var(--line2)"></i>commits</span>
+      <span><i style="background:var(--lime)"></i>tasks closed</span></div></div>
+  <div class="grid2">
+    <div class="panel"><h2>Phases</h2><table><tr class="cur">
+      <td>Layer 1 — Environment</td><td class="num">0/3</td>
+      <td class="bar"><i style="width:0%"></i></td><td class="num">0%</td></tr><tr>
+      <td>Layer 2 — Harness</td><td class="num">0/2</td>
+      <td class="bar"><i style="width:0%"></i></td><td class="num">0%</td></tr><tr>
+      <td>Layer 3 — Skills</td><td class="num">0/1</td>
+      <td class="bar"><i style="width:0%"></i></td><td class="num">0%</td></tr><tr>
+      <td>Layer 4 — Board</td><td class="num">1/2</td>
+      <td class="bar"><i style="width:50%"></i></td><td class="num">50%</td></tr><tr>
+      <td>Layer 5 — UI</td><td class="num">0/1</td>
+      <td class="bar"><i style="width:0%"></i></td><td class="num">0%</td></tr><tr>
+      <td>Layer 6 — Graduate</td><td class="num">0/1</td>
+      <td class="bar"><i style="width:0%"></i></td><td class="num">0%</td></tr></table></div>
+    <div class="panel"><h2>Agent routing</h2><table><tr><td>no agent definitions found</td></tr></table></div>
+  </div>
+  <div class="panel" style="margin-top:15px"><h2>What landed</h2>
+    <ul class="log"><li><code>5e2e3fa</code><span class="dim">11 minutes ago</span>
+       <span class="sub">foreman: a board that will not let you sign off your own work</span></li></ul></div>
+</div>
+
+<div class="pane pane-stats">
+  <div class="grid2" style="margin-top:0">
+    <div class="panel"><h2>ETA, as predicted &middot; and how it moved</h2>
+      <table><tr><th>day</th><th class="num">effort</th><th class="num">left</th>
+        <th class="num">predicted</th><th class="num">drift vs now</th></tr>
+        <tr><td class="num">2026-08-30</td><td class="num">0%</td>
+      <td class="num">1h</td><td class="num">-</td>
+      <td class="num ">-</td></tr></table>
+      <p class="cav">Drift compares each day&rsquo;s prediction to today&rsquo;s. Positive means
+        the date moved OUT since that day. One row per day, appended on the first build of
+        each day, never rewritten.</p></div>
+    <div class="panel"><h2>Remaining effort by owner</h2>
+      <table><tr><th>owner</th><th class="num">open</th><th class="num">hours</th>
+        <th></th><th class="num"></th></tr><tr><td>security</td><td class="num">2</td><td class="num">24h</td>
+       <td class="bar"><i style="width:75%"></i></td>
+       <td class="num"></td></tr><tr><td>backend</td><td class="num">1</td><td class="num">8h</td>
+       <td class="bar"><i style="width:25%"></i></td>
+       <td class="num"></td></tr></table>
+      <p class="cav">Open tasks only, weighted by the board&rsquo;s own estimates. This is the
+        queue, not a workload: a blocked task sits here while nobody is working on it.</p></div>
+  </div>
+  <div class="grid2">
+    <div class="panel"><h2>Gate verdicts recorded</h2>
+      <table><tr><th>gate</th><th class="num">pass</th><th class="num">fail</th>
+        <th class="num">fail rate</th></tr><tr><td>reviewer</td><td class="num">1</td><td class="num ">0</td><td class="num">0%</td></tr><tr><td>qa</td><td class="num">1</td><td class="num ">0</td><td class="num">0%</td></tr><tr><td>security</td><td class="num">0</td><td class="num ">0</td><td class="num">0%</td></tr></table>
+      <p class="cav">Current verdicts only. A gate that failed and was later re-run as a pass
+        shows as a pass, because the board keeps one verdict per role rather than a history.
+        So this UNDERSTATES rework and cannot be read as a defect-find rate.</p></div>
+    <div class="panel"><h2>What is not measured here</h2>
+      <p class="cav"><b>Tokens per task.</b> Not recoverable retrospectively. Agent runs
+             report their token use when they finish, but nothing writes it down, so there is no
+             record to read. It becomes available once something appends to
+             <code>ops/foreman/runs.jsonl</code> — see ops/foreman/run.mjs.</p>
+      <p class="cav">
+        <b>Actual effort.</b> The board stamps a close date but no start, so elapsed below is
+        calendar time from the first commit naming a task. A 2h task opened Monday and closed
+        Friday reads as four days. That measures how long work SITS, which is what the ETA
+        actually depends on, but it is not hours worked and must not be read as such.<br><br>
+        <b>Rework.</b> See the gate note. Recording each verdict instead of the latest one would
+        make it measurable.</p></div>
+  </div>
+  <div class="panel" style="margin-top:15px">
+    <h2>Slowest closed tasks &middot; estimate against elapsed</h2>
+    <table><tr><th>id</th><th>title</th><th class="num">est</th><th class="num">elapsed</th>
+      <th class="num">commits</th></tr><tr><td colspan="5">no closed task has a dated commit</td></tr></table>
+    <p class="cav">Median estimate n/a, median elapsed
+      n/a days, across 0 closed tasks git
+      can date. Commit count is a churn signal: a task named in twenty commits fought back, and
+      that is worth seeing next to what it was estimated at.</p></div>
+  
+</div>
+
+<footer>
+  Generated by <code>ops/foreman/dashboard.mjs</code> from the board, from git, and from the agent
+  definitions. It reports the board's own state and does not judge it.<br>
+  <b>ETA</b> is remaining effort divided by effort actually closed per calendar day over the last
+  14 days. Idle days are in the divisor on purpose: the question is when this lands, not what
+  a good day looks like. It is an extrapolation from the board's estimates and moves whenever
+  either changes.<br>
+  Each card draws one rail segment per gate &mdash; filled on a pass, red on a fail, hollow when it
+  has not run. <b>Held</b> counts open tasks with a verdict recorded but not the full set, or one
+  that failed.
+</footer>
+</div></body></html>

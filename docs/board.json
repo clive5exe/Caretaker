@@ -1,0 +1,160 @@
+{
+  "meta": {
+    "name": "Foreman"
+  },
+  "phases": [
+    {
+      "name": "Layer 1 \u2014 Environment",
+      "tasks": [
+        {
+          "id": "E-1",
+          "title": "Container runner: podman, resource limits, repo bind-mount",
+          "owner": "backend",
+          "est": "1d",
+          "status": "todo",
+          "deps": [],
+          "spec": "docs/architecture.md",
+          "ac": "an agent runs inside a container with --memory, --cpus and --pids-limit enforced, a read-only root, the repo bind-mounted, and NO container socket; a test proves each limit actually binds rather than being passed and ignored"
+        },
+        {
+          "id": "E-2",
+          "title": "Egress allowlist proxy: the container has no route to the internet",
+          "owner": "security",
+          "est": "2d",
+          "status": "todo",
+          "deps": [
+            "E-1"
+          ],
+          "spec": "docs/architecture.md",
+          "ac": "the container reaches the model API and the package registry through a proxy and NOTHING else; a test proves an arbitrary host is refused and the refusal is logged, and proves the repo cannot be POSTed anywhere"
+        },
+        {
+          "id": "E-3",
+          "title": "Prove the sandbox by attacking it",
+          "owner": "security",
+          "est": "1d",
+          "status": "todo",
+          "deps": [
+            "E-2"
+          ],
+          "ac": "a written attempt to (a) write outside the repo mount, (b) exhaust host memory, (c) reach an unlisted host, and (d) reach the container socket, each fails, with the command and its output recorded"
+        }
+      ]
+    },
+    {
+      "name": "Layer 2 \u2014 Harness",
+      "tasks": [
+        {
+          "id": "H-1",
+          "title": "Define the run seam and implement one vendor",
+          "owner": "backend",
+          "est": "2d",
+          "status": "todo",
+          "deps": [
+            "E-1"
+          ],
+          "spec": "docs/architecture.md",
+          "ac": "run(workspace, prompt, policy) returns diff, transcript, verdict and cost for one vendor, and nothing above this layer imports that vendor's SDK"
+        },
+        {
+          "id": "H-2",
+          "title": "Second vendor, to prove the seam is a seam",
+          "owner": "backend",
+          "est": "1d",
+          "status": "todo",
+          "deps": [
+            "H-1"
+          ],
+          "ac": "a second agent CLI runs behind the same interface with no change above it; if the interface had to change, that change is recorded as what the first vendor had baked in"
+        }
+      ]
+    },
+    {
+      "name": "Layer 3 \u2014 Skills",
+      "tasks": [
+        {
+          "id": "S-1",
+          "title": "Consume the existing skills standard",
+          "owner": "backend",
+          "est": "4h",
+          "status": "todo",
+          "deps": [
+            "H-1"
+          ],
+          "ac": "a project can point at any repo following skills/<category>/<name>/SKILL.md and have those skills available to a run; no second format is invented"
+        }
+      ]
+    },
+    {
+      "name": "Layer 4 \u2014 Board",
+      "tasks": [
+        {
+          "id": "B-1",
+          "title": "Tasks, gates, dashboard, run log, unattended loop",
+          "owner": "you",
+          "est": "1d",
+          "status": "done",
+          "completed": "2026-08-30",
+          "deps": [],
+          "ac": "done is refused until the gate verdicts exist, and the dashboard reports effort, ETA and cost",
+          "note": "Built in the Encore repo and extracted here. Installed and verified end to end against a fresh repo: refusal, verdicts, close, run log, dashboard, pause guard.",
+          "gate": {
+            "reviewer": {
+              "verdict": "pass",
+              "at": "2026-08-30",
+              "note": "extracted, installed into a clean repo, and exercised end to end"
+            },
+            "qa": {
+              "verdict": "pass",
+              "at": "2026-08-30",
+              "note": "install.sh run against two throwaway repos; the gate refusal, the close path and the PAUSED guard all reproduced"
+            }
+          }
+        },
+        {
+          "id": "B-2",
+          "title": "A task can point at its spec, and a stale doc is visible",
+          "owner": "backend",
+          "est": "4h",
+          "status": "todo",
+          "deps": [],
+          "ac": "a task carries a spec path rendered as a link on its card, and a check compares each doc's claimed updated: date against the last commit that touched it and names the ones that lie"
+        }
+      ]
+    },
+    {
+      "name": "Layer 5 \u2014 UI",
+      "tasks": [
+        {
+          "id": "U-1",
+          "title": "Watch a run and steer it mid-flight",
+          "owner": "frontend",
+          "est": "1w",
+          "status": "blocked",
+          "deps": [
+            "H-1"
+          ],
+          "blockedReason": "Deliberately last. It needs a daemon, a websocket and auth, which turns a static file into a service to operate. Building it before the harness works is the standard way this dies.",
+          "ac": "a running agent's output streams to a browser and a human can interrupt or redirect it without killing the run"
+        }
+      ]
+    },
+    {
+      "name": "Layer 6 \u2014 Graduate",
+      "tasks": [
+        {
+          "id": "G-1",
+          "title": "Generate CI and docs from what actually happened",
+          "owner": "devops",
+          "est": "3d",
+          "status": "todo",
+          "deps": [
+            "B-2"
+          ],
+          "spec": "docs/architecture.md",
+          "ac": "a graduate command emits a workflow file built from the commands the gates really ran, a docs site from the specs really written, and a decision index from the ADRs really recorded; nothing in the output is a template placeholder"
+        }
+      ]
+    }
+  ]
+}
