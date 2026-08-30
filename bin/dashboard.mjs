@@ -431,13 +431,80 @@ const tokenStats = (() => {
     cur.runs += 1;
     byAgent.set(r.name, cur);
   }
+  /*
+   * COMPOSITION IS THE NUMBER THAT CHANGES BEHAVIOUR, and the total hides it.
+   * A run reporting 400k tokens is unreadable; the same run as 380k cache reads,
+   * 15k fresh input and 5k output says immediately that the cost is context
+   * REPLAY rather than work. Those want opposite fixes — better context
+   * selection versus a smaller task — and one number cannot tell them apart.
+   *
+   * Only rows carrying the breakdown are counted here, so a log of totals shows
+   * no composition rather than a fabricated one.
+   */
+  const detailed = list.filter((r) => ["in", "cached", "write", "out"].some((k) => k in r));
+  const sum = (k) => detailed.reduce((n, r) => n + (r[k] ?? 0), 0);
+  const comp = { in: sum("in"), cached: sum("cached"), write: sum("write"), out: sum("out") };
+  const compTotal = comp.in + comp.cached + comp.write + comp.out;
+  const turns = detailed.reduce((n, r) => n + (r.turns ?? 0), 0);
+
+  const byModel = new Map();
+  for (const r of list) {
+    if (!r.model) continue;
+    const cur = byModel.get(r.model) ?? { tokens: 0, runs: 0 };
+    cur.tokens += r.tokens;
+    cur.runs += 1;
+    byModel.set(r.model, cur);
+  }
+
   return {
     total: list.reduce((n, r) => n + r.tokens, 0),
     liveCount: list.filter((r) => !r.src || r.src === "live").length,
     reconCount: list.filter((r) => r.src && r.src !== "live").length,
     byTask: [...byTask.entries()].sort((a, b) => b[1].tokens - a[1].tokens),
     byAgent: [...byAgent.entries()].sort((a, b) => b[1].tokens - a[1].tokens),
+    byModel: [...byModel.entries()].sort((a, b) => b[1].tokens - a[1].tokens),
+    detailedCount: detailed.length,
+    comp,
+    compTotal,
+    turns,
+    // Share of spend that is generated rather than re-read. A small number on a
+    // large total means the loop is paying to look at things.
+    outShare: compTotal ? comp.out / compTotal : null,
+    // Context sent that could NOT be matched against the cache. High write
+    // against low cached is the expensive failure: the context keeps changing
+    // shape, so nothing can be reused.
+    churnShare: compTotal ? comp.write / (comp.cached + comp.write || 1) : null,
+    perTurn: turns ? Math.round(compTotal / turns) : null,
   };
+})();
+
+/**
+ * Tokens spent on work that had to be done again.
+ *
+ * THE ONE ACTIONABLE WASTE NUMBER. Everything else on this page describes what
+ * the spend WAS; this says which part of it bought nothing, because the task
+ * failed a gate and ran again. Only computable since verdicts started appending.
+ */
+const reworkSpend = (() => {
+  if (!runList) return null;
+  const failed = new Set();
+  for (const p of phases) {
+    for (const t of p.tasks ?? []) {
+      const everFailed = GATES.some((g) => {
+        const r = (t.gate ?? {})[g];
+        return r && (r.verdict !== "pass" || (r.history ?? []).some((h) => h.verdict !== "pass"));
+      });
+      if (everFailed) failed.add(t.id);
+    }
+  }
+  let wasted = 0;
+  let total = 0;
+  for (const r of runList) {
+    if (!Number.isFinite(r.tokens)) continue;
+    total += r.tokens;
+    if (r.task && failed.has(r.task)) wasted += r.tokens;
+  }
+  return { wasted, total, pct: total ? Math.round((wasted / total) * 100) : 0, tasks: failed.size };
 })();
 
 /* -------------------------------------------------------------------- render */
@@ -640,6 +707,28 @@ const tokenAgentRows = (tokenStats?.byAgent ?? [])
   )
   .join("");
 
+const pct = (n) => `${Math.round(n * 100)}%`;
+const compBar = tokenStats?.compTotal
+  ? (() => {
+      const c = tokenStats.comp;
+      const t = tokenStats.compTotal;
+      const seg = (k, cls, label) =>
+        c[k] ? `<i class="${cls}" style="width:${(c[k] / t) * 100}%" title="${label}: ${c[k].toLocaleString("en-US")} (${pct(c[k] / t)})"></i>` : "";
+      return `<div class="compbar">
+          ${seg("cached", "s-cached", "cache reads — context re-sent and matched")}
+          ${seg("write", "s-write", "cache writes — context that could not be matched")}
+          ${seg("in", "s-in", "fresh input")}
+          ${seg("out", "s-out", "generated output")}
+        </div>
+        <div class="complegend">
+          <span><i class="s-cached"></i>cache read ${pct(c.cached / t)}</span>
+          <span><i class="s-write"></i>cache write ${pct(c.write / t)}</span>
+          <span><i class="s-in"></i>fresh in ${pct(c.in / t)}</span>
+          <span><i class="s-out"></i>output ${pct(c.out / t)}</span>
+        </div>`;
+    })()
+  : "";
+
 const built = new Date().toISOString().replace("T", " ").slice(0, 16);
 const etaLine = eta
   ? `<b>${esc(eta.date)}</b> &middot; ${eta.days} day${eta.days === 1 ? "" : "s"} at
@@ -700,6 +789,21 @@ body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);
 .pane{display:none}
 #tb:checked~.pane-board,#td:checked~.pane-data,#ts:checked~.pane-stats{display:block}
 .worse{color:var(--amber)} .better{color:var(--lime)}
+.compbar{display:flex;height:22px;border-radius:4px;overflow:hidden;background:var(--line);
+  margin:4px 0 10px}
+.compbar i{display:block;height:100%}
+.s-cached{background:#3f5d6b} .s-write{background:var(--amber)}
+.s-in{background:#6b7f8c} .s-out{background:var(--lime)}
+.complegend{display:flex;flex-wrap:wrap;gap:14px;font-family:var(--mono);font-size:11px;
+  color:var(--dim)}
+.complegend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:6px;
+  vertical-align:-1px}
+.kpi{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:14px 0 0}
+.kpi div{border-left:2px solid var(--line2);padding-left:11px}
+.kpi .k{font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--faint);margin:0}
+.kpi .v{font-family:var(--mono);font-size:22px;margin:3px 0 2px;font-variant-numeric:tabular-nums}
+.kpi .w{font-size:12px;color:var(--dim);margin:0;line-height:1.45}
 .panel p.cav{margin:11px 0 0;font-size:13px;color:var(--faint);line-height:1.6}
 th{text-align:left;font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;
   text-transform:uppercase;color:var(--faint);font-weight:500;padding:0 8px 7px 0;
@@ -890,6 +994,52 @@ footer{margin-top:34px;color:var(--faint);font-size:13px;line-height:1.7;
       <p class="cav">Open tasks only, weighted by the board&rsquo;s own estimates. This is the
         queue, not a workload: a blocked task sits here while nobody is working on it.</p></div>
   </div>
+  ${
+    tokenStats?.compTotal
+      ? `<div class="panel" style="margin-top:15px"><h2>Where the tokens go</h2>
+         ${compBar}
+         <div class="kpi">
+           <div><p class="k">Output share</p>
+             <p class="v" style="color:${tokenStats.outShare < 0.05 ? "var(--amber)" : "var(--lime)"}">${pct(tokenStats.outShare)}</p>
+             <p class="w">of spend is generated rather than re-read. A small number on a large
+               total means the loop is paying to look at things.</p></div>
+           <div><p class="k">Context churn</p>
+             <p class="v" style="color:${tokenStats.churnShare > 0.3 ? "var(--amber)" : "var(--ink)"}">${pct(tokenStats.churnShare)}</p>
+             <p class="w">of context could not be matched against the cache. High churn means the
+               context keeps changing shape, so nothing gets reused.</p></div>
+           ${tokenStats.perTurn ? `<div><p class="k">Per turn</p>
+             <p class="v">${tokenStats.perTurn.toLocaleString("en-US")}</p>
+             <p class="w">tokens per round trip across ${tokenStats.turns} turn${tokenStats.turns === 1 ? "" : "s"}.
+               A run with eighty turns is a loop that did not converge.</p></div>` : ""}
+           ${reworkSpend?.wasted ? `<div><p class="k">Rework</p>
+             <p class="v worse">${reworkSpend.pct}%</p>
+             <p class="w">${reworkSpend.wasted.toLocaleString("en-US")} tokens on
+               ${reworkSpend.tasks} task${reworkSpend.tasks === 1 ? "" : "s"} that failed a gate and
+               ran again. The one number here that bought nothing.</p></div>` : ""}
+         </div>
+         <p class="cav">Composition is computed from ${tokenStats.detailedCount} run(s) that
+           reported a breakdown; runs logging only a total are counted in the totals elsewhere but
+           not here, so this shows no composition rather than a fabricated one.</p></div>`
+      : ""
+  }
+  ${
+    tokenStats?.byModel?.length
+      ? `<div class="panel" style="margin-top:15px"><h2>Spend by model</h2>
+         <table><tr><th>model</th><th class="num">tokens</th><th class="num">runs</th>
+           <th class="num">share</th></tr>
+         ${tokenStats.byModel
+           .map(
+             ([m, v]) =>
+               `<tr><td><code>${esc(m)}</code></td>
+                <td class="num">${v.tokens.toLocaleString("en-US")}</td>
+                <td class="num">${v.runs}</td>
+                <td class="num">${pct(v.tokens / tokenStats.total)}</td></tr>`,
+           )
+           .join("")}</table>
+         <p class="cav">Whether the expensive model is doing the expensive work, or just doing
+           the work.</p></div>`
+      : ""
+  }
   <div class="grid2">
     <div class="panel"><h2>Gate verdicts recorded</h2>
       <table><tr><th>gate</th><th class="num">pass</th><th class="num">fail</th>

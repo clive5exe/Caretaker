@@ -43,7 +43,30 @@ if (!kind || !["start", "end"].includes(kind)) {
 }
 
 /** Flags, tolerating `--k v` and `--k=v`. Unknown flags are an error, not a shrug. */
-const KNOWN = new Set(["name", "task", "tokens", "state", "note", "src", "at", "config"]);
+/*
+ * THE BREAKDOWN IS THE POINT, not the total. A run reporting 400k tokens tells
+ * you nothing actionable; the same run reported as 380k of cache reads, 15k of
+ * fresh input and 5k of output tells you immediately that the cost is context
+ * replay rather than work. Those want completely different fixes — better
+ * context selection versus a smaller task — and the total cannot distinguish
+ * them.
+ *
+ *   in       fresh input tokens, billed at full rate
+ *   cached   cache READS: context re-sent and matched. Cheap, and usually most
+ *            of the volume.
+ *   write    cache CREATION: context sent that could not be matched. Churn.
+ *            High write against low cached means the context keeps changing
+ *            shape, which is the expensive failure.
+ *   out      generated tokens. The expensive ones per unit, and usually a small
+ *            fraction of the total.
+ *   turns    how many round trips. A run with eighty turns is a loop that did
+ *            not converge, and the turn count says so where the total does not.
+ */
+const KNOWN = new Set([
+  "name", "task", "tokens", "state", "note", "src", "at", "config",
+  "in", "cached", "write", "out", "turns", "model",
+]);
+const NUMERIC = new Set(["tokens", "in", "cached", "write", "out", "turns"]);
 const flags = {};
 for (let i = 1; i < argv.length; i++) {
   const a = argv[i];
@@ -62,16 +85,70 @@ if (!flags.name) {
   process.exit(2);
 }
 
-const cfgPath = flags.config ? resolve(flags.config) : join(HERE, "config.json");
-const cfg = JSON.parse(readFileSync(cfgPath, "utf8"));
-const ROOT = resolve(dirname(cfgPath), "..", "..", cfg.repo ?? ".");
-const logPath = join(ROOT, cfg.runs ?? "ops/foreman/runs.jsonl");
+/*
+ * CONFIG IS OPTIONAL, and that is deliberate. This tool is the thing that
+ * records what a run cost, so it must not be the thing that fails because a
+ * config file was not where it expected. A missing config means a sensible
+ * default path, not an exception — losing the cost record of a run that already
+ * happened is unrecoverable, and it is exactly when something is misconfigured
+ * that you most want the log.
+ */
+const candidates = [
+  flags.config,
+  join(HERE, "config.json"),
+  join(HERE, "..", "ops", "foreman", "config.json"),
+  join(process.cwd(), "ops", "foreman", "config.json"),
+].filter(Boolean);
 
-const tokens = flags.tokens === undefined ? undefined : Number(flags.tokens);
-if (tokens !== undefined && !Number.isFinite(tokens)) {
-  console.error(`run.mjs: --tokens must be a number, got ${flags.tokens}`);
+let cfg = null;
+let cfgFrom = null;
+for (const c of candidates) {
+  try {
+    cfg = JSON.parse(readFileSync(resolve(c), "utf8"));
+    cfgFrom = resolve(c);
+    break;
+  } catch {
+    /* try the next */
+  }
+}
+if (flags.config && !cfgFrom) {
+  console.error(`run.mjs: --config ${flags.config} could not be read`);
   process.exit(2);
 }
+const ROOT = cfgFrom
+  ? resolve(dirname(cfgFrom), "..", "..", cfg.repo ?? ".")
+  : process.cwd();
+const logPath = join(ROOT, cfg?.runs ?? "ops/foreman/runs.jsonl");
+
+const nums = {};
+for (const k of NUMERIC) {
+  if (flags[k] === undefined) continue;
+  const n = Number(flags[k]);
+  if (!Number.isFinite(n)) {
+    console.error(`run.mjs: --${k} must be a number, got ${flags[k]}`);
+    process.exit(2);
+  }
+  nums[k] = n;
+}
+/*
+ * A total is DERIVED when the parts are given, never both trusted. Two numbers
+ * that should agree and are stored separately will disagree eventually, and the
+ * one a reader believes is whichever they looked at first.
+ */
+const parts = ["in", "cached", "write", "out"].filter((k) => k in nums);
+if (parts.length && nums.tokens === undefined) {
+  nums.tokens = parts.reduce((n, k) => n + nums[k], 0);
+} else if (parts.length && nums.tokens !== undefined) {
+  const sum = parts.reduce((n, k) => n + nums[k], 0);
+  if (sum !== nums.tokens) {
+    console.error(
+      `run.mjs: --tokens ${nums.tokens} does not equal ${parts.join(" + ")} = ${sum}. ` +
+        "Give the parts and let the total be derived, or give only the total.",
+    );
+    process.exit(2);
+  }
+}
+const tokens = nums.tokens;
 
 const row = {
   t: flags.at ?? new Date().toISOString(),
@@ -81,6 +158,10 @@ const row = {
   state: flags.state ?? (kind === "start" ? "running" : "done"),
   ...(flags.task ? { task: flags.task } : {}),
   ...(tokens !== undefined ? { tokens } : {}),
+  ...Object.fromEntries(
+    ["in", "cached", "write", "out", "turns"].filter((k) => k in nums).map((k) => [k, nums[k]]),
+  ),
+  ...(flags.model ? { model: flags.model } : {}),
   ...(flags.note ? { note: flags.note } : {}),
   src: flags.src ?? "live",
 };

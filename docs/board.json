@@ -226,7 +226,7 @@
         },
         {
           "id": "H-10",
-          "title": "SDK-level adapters, and a tool-use reliability fixture",
+          "title": "CLI adapter by default, SDK adapter alongside it",
           "owner": "backend",
           "est": "2d",
           "status": "todo",
@@ -234,8 +234,8 @@
             "H-1"
           ],
           "spec": "docs/vendors.md",
-          "ac": "four adapters exist - anthropic, openai, google and openai-compatible - and a fixed task with a known-good diff scores each candidate on well-formed tool calls, stopping when done, and not inventing a tool that was never offered",
-          "note": "THE ADAPTER IS PER-API, NOT PER-MODEL, which is what makes broad support cheap: everything self-hosted speaks an OpenAI-compatible endpoint, so DeepSeek or Qwen behind vLLM is a config line rather than code. And the discriminator is tool-use reliability, not benchmark score - a model that codes well but emits malformed tool calls burns the loop and produces nothing, which is expensive rather than obvious. Testable, so it is a fixture rather than an opinion."
+          "ac": "the default adapter shells out to an agent CLI running INSIDE the dev environment, so a subscription login works and tools execute sandboxed; an SDK adapter exists for API-key use with the model call above the environment; both satisfy the same seam, and the tool-use fixture scores any candidate on well-formed calls, stopping when done, and not inventing a tool",
+          "note": "CLI IS THE DEFAULT BECAUSE THAT IS WHERE SUBSCRIPTION AUTH LIVES. The SDKs are API-key only; `claude login` against a Pro or Max plan, and the ChatGPT equivalent, exist only in the CLIs. Defaulting to the SDK would quietly mean paying API rates on top of a subscription somebody already has.\n\nRUNNING THE CLI INSIDE THE DEV ENVIRONMENT KEEPS THE SANDBOX. The CLI needs the model API, which is exactly what the egress allowlist is for - one declared host - and its tools then execute inside the container, which is where they were wanted anyway. What is lost is clean layering: the CLI spans harness and dev environment. What is kept is the seam, which accommodates both hook points, and that is the point of putting it there.\n\nThe adapter is per-API rather than per-model: everything self-hosted speaks an OpenAI-compatible endpoint, so DeepSeek or Qwen behind vLLM is a config line. The discriminator is tool-use reliability, not benchmark score - a model that codes well and emits malformed tool calls burns the loop and produces nothing."
         },
         {
           "id": "H-1",
@@ -467,6 +467,19 @@
           "spec": "docs/events.md",
           "ac": "task status is computed by replaying events rather than stored, and the board and the log cannot disagree because the board IS the log folded up",
           "note": "Same reasoning that made gate verdicts append: a record keeping only the latest value cannot answer how many attempts it took, and that turned out to matter more than the current state."
+        },
+        {
+          "id": "B-8",
+          "title": "Token KPIs: composition, churn, per-turn, rework spend",
+          "owner": "backend",
+          "est": "1d",
+          "status": "todo",
+          "deps": [
+            "B-6"
+          ],
+          "spec": "docs/vendors.md",
+          "ac": "the run log records in/cached/write/out/turns/model per run, the total is DERIVED from the parts rather than stored beside them, and the dashboard shows output share, context churn, tokens per turn, rework spend and spend by model",
+          "note": "THE TOTAL HIDES THE ONLY ACTIONABLE PART. A run reporting 400k tokens is unreadable; the same run as 380k cache reads, 15k fresh input and 5k output says immediately that the cost is context REPLAY rather than work, and those want opposite fixes - better context selection versus a smaller task.\n\nRework spend is the one number that bought nothing, and it only became computable once gate verdicts started appending. Cost is a PROJECTION rather than a stored figure, because a subscription run and a self-hosted run both have zero marginal token cost while still spending tokens as effort."
         }
       ]
     },

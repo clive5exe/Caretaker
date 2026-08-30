@@ -52,6 +52,21 @@ body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);
 .pane{display:none}
 #tb:checked~.pane-board,#td:checked~.pane-data,#ts:checked~.pane-stats{display:block}
 .worse{color:var(--amber)} .better{color:var(--lime)}
+.compbar{display:flex;height:22px;border-radius:4px;overflow:hidden;background:var(--line);
+  margin:4px 0 10px}
+.compbar i{display:block;height:100%}
+.s-cached{background:#3f5d6b} .s-write{background:var(--amber)}
+.s-in{background:#6b7f8c} .s-out{background:var(--lime)}
+.complegend{display:flex;flex-wrap:wrap;gap:14px;font-family:var(--mono);font-size:11px;
+  color:var(--dim)}
+.complegend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:6px;
+  vertical-align:-1px}
+.kpi{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:14px 0 0}
+.kpi div{border-left:2px solid var(--line2);padding-left:11px}
+.kpi .k{font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--faint);margin:0}
+.kpi .v{font-family:var(--mono);font-size:22px;margin:3px 0 2px;font-variant-numeric:tabular-nums}
+.kpi .w{font-size:12px;color:var(--dim);margin:0;line-height:1.45}
 .panel p.cav{margin:11px 0 0;font-size:13px;color:var(--faint);line-height:1.6}
 th{text-align:left;font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;
   text-transform:uppercase;color:var(--faint);font-weight:500;padding:0 8px 7px 0;
@@ -153,7 +168,7 @@ footer{margin-top:34px;color:var(--faint);font-size:13px;line-height:1.7;
 
 <div class="top"><h1>Foreman</h1>
   <span class="ph">Layer 2 — Harness</span>
-  <span class="bt">built 2026-08-30 17:17</span></div>
+  <span class="bt">built 2026-08-30 17:28</span></div>
 
 <div class="prog">
   <div class="prognums">
@@ -189,7 +204,7 @@ footer{margin-top:34px;color:var(--faint);font-size:13px;line-height:1.7;
       <p class="tl">No finish line</p><p class="tv">0</p><p class="ts">every open task has one</p>
       </div>
     <div class="tile plain">
-      <p class="tl">Landed today</p><p class="tv">14</p><p class="ts">commits &middot; 14-day trend</p>
+      <p class="tl">Landed today</p><p class="tv">15</p><p class="ts">commits &middot; 14-day trend</p>
       <svg class="spark plain" viewBox="0 0 240 44" preserveAspectRatio="none" aria-hidden="true">
       <path class="a" d="M0.0 42.0 L18.5 42.0 L36.9 42.0 L55.4 42.0 L73.8 42.0 L92.3 42.0 L110.8 42.0 L129.2 42.0 L147.7 42.0 L166.2 42.0 L184.6 42.0 L203.1 42.0 L221.5 42.0 L240.0 3.0 L240 44 L0 44 Z"/><path class="l" d="M0.0 42.0 L18.5 42.0 L36.9 42.0 L55.4 42.0 L73.8 42.0 L92.3 42.0 L110.8 42.0 L129.2 42.0 L147.7 42.0 L166.2 42.0 L184.6 42.0 L203.1 42.0 L221.5 42.0 L240.0 3.0"/></svg></div>
   </div>
@@ -211,7 +226,7 @@ footer{margin-top:34px;color:var(--faint);font-size:13px;line-height:1.7;
       <h3>Timeouts, and killing a run that hangs</h3><div class="meta"><span class="ow">backend</span><span class="es">4h</span><span class="es">after H-1</span></div>
     </article><article class="card">
       <header><code>H-10</code><div class="rail" aria-label="gates"><i class="none" title="reviewer: not run"></i><i class="none" title="qa: not run"></i><i class="none" title="security: not run"></i></div></header>
-      <h3>SDK-level adapters, and a tool-use reliability fixture</h3><div class="meta"><span class="ow">backend</span><span class="es">2d</span><span class="es">after H-1</span></div>
+      <h3>CLI adapter by default, SDK adapter alongside it</h3><div class="meta"><span class="ow">backend</span><span class="es">2d</span><span class="es">after H-1</span></div>
     </article><article class="card">
       <header><code>H-1</code><div class="rail" aria-label="gates"><i class="none" title="reviewer: not run"></i><i class="none" title="qa: not run"></i><i class="none" title="security: not run"></i></div></header>
       <h3>Define the run seam and implement one vendor</h3><div class="meta"><span class="ow">backend</span><span class="es">2d</span><span class="es">after E-1</span></div>
@@ -249,7 +264,7 @@ footer{margin-top:34px;color:var(--faint);font-size:13px;line-height:1.7;
 </div>
 
 <div class="pane pane-data">
-  <div class="panel"><h2>Velocity &middot; last 14 days</h2><div class="vwrap"><div class="vmean" style="bottom:7%"><span>avg 1.0</span></div><div class="vday" title="2026-08-17: 0 commits, 0 closed">
+  <div class="panel"><h2>Velocity &middot; last 14 days</h2><div class="vwrap"><div class="vmean" style="bottom:7%"><span>avg 1.1</span></div><div class="vday" title="2026-08-17: 0 commits, 0 closed">
         <div class="vbars"><i class="vc" style="height:0%"></i>
         </div>
         <span class="vd">17</span></div><div class="vday" title="2026-08-18: 0 commits, 0 closed">
@@ -288,7 +303,7 @@ footer{margin-top:34px;color:var(--faint);font-size:13px;line-height:1.7;
         <span class="vd">28</span></div><div class="vday" title="2026-08-29: 0 commits, 0 closed">
         <div class="vbars"><i class="vc" style="height:0%"></i>
         </div>
-        <span class="vd">29</span></div><div class="vday" title="2026-08-30: 14 commits, 1 closed (8h)">
+        <span class="vd">29</span></div><div class="vday" title="2026-08-30: 15 commits, 1 closed (8h)">
         <div class="vbars"><i class="vc" style="height:100%"></i>
         <i class="vk" style="height:7%"></i></div>
         <span class="vd">30</span></div></div>
@@ -304,8 +319,8 @@ footer{margin-top:34px;color:var(--faint);font-size:13px;line-height:1.7;
       <td class="bar"><i style="width:0%"></i></td><td class="num">0%</td></tr><tr>
       <td>Layer 2b — Skills</td><td class="num">0/2</td>
       <td class="bar"><i style="width:0%"></i></td><td class="num">0%</td></tr><tr>
-      <td>Layer 1 — Control plane</td><td class="num">1/7</td>
-      <td class="bar"><i style="width:14%"></i></td><td class="num">14%</td></tr><tr>
+      <td>Layer 1 — Control plane</td><td class="num">1/8</td>
+      <td class="bar"><i style="width:13%"></i></td><td class="num">13%</td></tr><tr>
       <td>Layer 1b — TUI</td><td class="num">0/2</td>
       <td class="bar"><i style="width:0%"></i></td><td class="num">0%</td></tr><tr>
       <td>Layer 4 — Infra and graduate</td><td class="num">0/2</td>
@@ -313,9 +328,10 @@ footer{margin-top:34px;color:var(--faint);font-size:13px;line-height:1.7;
     <div class="panel"><h2>Agent routing</h2><table><tr><td>no agent definitions found</td></tr></table></div>
   </div>
   <div class="panel" style="margin-top:15px"><h2>What landed</h2>
-    <ul class="log"><li><code>d48ce3d</code><span class="dim">12 minutes ago</span>
-       <span class="sub">events: one append-only log, and the organising key is a field not a folder</span></li><li><code>8b16b01</code><span class="dim">64 minutes ago</span>
-       <span class="sub">E-0 and E-1: a container that boots, with limits proven from inside it</span></li><li><code>8e29ad4</code><span class="dim">87 minutes ago</span>
+    <ul class="log"><li><code>2cac51d</code><span class="dim">11 minutes ago</span>
+       <span class="sub">four layers, and the agent CLIs do not fit them</span></li><li><code>d48ce3d</code><span class="dim">22 minutes ago</span>
+       <span class="sub">events: one append-only log, and the organising key is a field not a folder</span></li><li><code>8b16b01</code><span class="dim">74 minutes ago</span>
+       <span class="sub">E-0 and E-1: a container that boots, with limits proven from inside it</span></li><li><code>8e29ad4</code><span class="dim">2 hours ago</span>
        <span class="sub">E-0: podman is the assumption, not the preference</span></li><li><code>cfbf4fe</code><span class="dim">2 hours ago</span>
        <span class="sub">ADR-0001: say why podman, and note their runner is bound to the Docker API</span></li><li><code>6244c54</code><span class="dim">2 hours ago</span>
        <span class="sub">ADR-0001: build the egress layer. Fabro does not have it</span></li><li><code>dafb95d</code><span class="dim">2 hours ago</span>
@@ -353,6 +369,8 @@ footer{margin-top:34px;color:var(--faint);font-size:13px;line-height:1.7;
       <p class="cav">Open tasks only, weighted by the board&rsquo;s own estimates. This is the
         queue, not a workload: a blocked task sits here while nobody is working on it.</p></div>
   </div>
+  
+  
   <div class="grid2">
     <div class="panel"><h2>Gate verdicts recorded</h2>
       <table><tr><th>gate</th><th class="num">pass</th><th class="num">fail</th>
