@@ -305,8 +305,8 @@ rows: run log rows and gate verdicts. A figure with no dates behind it says
 - **From `dashboard.mjs` today** (exported in C-2):
   - tokens by kind, as cached, in, write and out per day
   - context churn: the share of context the cache could not match
-  - rework spend: a failed task's tokens up to the day of its last failed gate
-    verdict (the attempts sent back, not the run that passed)
+  - rework spend: a failed task's tokens up to its last failed gate verdict
+    (the attempts sent back, not the run that passed)
   - pass rate per gate, counting every attempt from the verdict history, in
     the range and all time. Core computes pass% and fail% (fail is 100 minus
     pass), so the page, board.html and the terminal show the same figures

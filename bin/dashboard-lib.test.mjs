@@ -173,6 +173,18 @@ const normalise = (html) =>
       ),
       est: [m.estHours({ est: "1d" }), m.estHours({ est: "1d" }, 6), m.estHours({ est: "nonsense" })],
       noGit: m.metrics(board, null, { commitsByDay: [], commitsPerTask: new Map() }, cfg).pctTasks,
+      ts: m.tokenStats([{ task: "A", name: "b", in: 10, out: 10, tokens: 400000 }])?.total,
+      rw2: m.reworkSpend(
+        [{ tasks: [
+          { id: "A", gate: { qa: { verdict: "pass", at: "2026-01-02", t: "2026-01-02T12:00:00.000Z", history: [{ verdict: "fail", at: "2026-01-02", t: "2026-01-02T10:00:00.000Z" }] } } },
+          { id: "C", gate: { qa: { verdict: "fail", at: "2026-01-01" } } },
+        ] }],
+        [
+          { task: "A", t: "2026-01-02T09:00:00Z", tokens: 1 },
+          { task: "A", t: "2026-01-02T11:00:00Z", tokens: 10 },
+        ],
+        ["qa"],
+      ),
       gs: m.gateStats([{ tasks: [{ id: "A", gate: { qa: { verdict: "pass", history: Array.from({ length: 7 }, () => ({ verdict: "fail" })) } } }, { id: "B" }] }], ["qa", "security"]),
       specHtml: m.render(m.metrics({ phases: [{ name: "Phase 1", tasks: [
         { id: "S-1", title: "s", owner: "b", status: "doing", spec: "specs/a.md" },
@@ -204,6 +216,11 @@ const normalise = (html) =>
   ok("rework: a task that never failed spends nothing on rework", o.rw?.tasks === 1);
   ok("estHours: 1d is 8h by default, 6h with a 6h day, null when unparsed", JSON.stringify(o.est) === "[8,6,null]");
   ok("metrics: no git and no run log still computes", o.noGit === o.pctTasks);
+  // B-8 (independent re-review): readers believed a stored total over its parts,
+  // and a retry on the day of its failure was counted as rework.
+  ok("a row's tokens are the sum of its parts, not a total stored beside them", o.ts === 20, String(o.ts));
+  ok("with the failure's instant known, a same-day retry after it is not rework", o.rw2?.wasted === 1 && o.rw2?.total === 11, JSON.stringify(o.rw2));
+  ok("…and the task count is tasks whose spend was sent back, not every failed task", o.rw2?.tasks === 1);
   // W-15 (independent review): pass% and fail% were rounded apart, and 1 pass
   // in 8 read 13% on one surface and 88% on the other: 101.
   const qa = o.gs?.find(([g]) => g === "qa")?.[1];

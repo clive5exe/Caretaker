@@ -240,7 +240,7 @@ export function quality(phases, GATES) {
  * precision this page has no right to.
  */
 export function tokenStats(runList) {
-  const list = (runList ?? []).filter((r) => Number.isFinite(r.tokens));
+  const list = (runList ?? []).map((r) => ({ ...r, tokens: rowTokens(r) })).filter((r) => Number.isFinite(r.tokens));
   if (!list.length) return null;
   const byTask = new Map();
   for (const r of list) {
@@ -307,6 +307,17 @@ export function tokenStats(runList) {
 }
 
 /**
+ * A run row's tokens: the SUM OF ITS PARTS when it has any, else its total.
+ * run.mjs refuses a total that disagrees with its parts, but a row written by
+ * anything else may carry both, and the parts are the measured numbers
+ * (independent review: {in:10, out:10, tokens:400000} counted 400000).
+ */
+export function rowTokens(r) {
+  const parts = ["in", "cached", "write", "out"].filter((k) => Number.isFinite(r?.[k]));
+  return parts.length ? parts.reduce((n, k) => n + r[k], 0) : r?.tokens;
+}
+
+/**
  * Tokens spent on work that had to be done again.
  *
  * THE ONE ACTIONABLE WASTE NUMBER. Everything else on this page describes what
@@ -316,10 +327,13 @@ export function tokenStats(runList) {
  */
 export function reworkSpend(phases, runList, GATES) {
   if (!runList) return null;
-  // Per task that failed a gate: the day of its LAST failed verdict. Runs up
-  // to that day are the attempts sent back; the run that then passed bought
-  // the work and is not rework (independent review: it was counted).
+  // Per task that failed a gate: its LAST failed verdict. Runs up to it are
+  // the attempts sent back; the run that then passed bought the work and is
+  // not rework. A verdict recorded by board.mjs now carries `t`, the
+  // instant, so a retry on the same day is placed after the failure; an older
+  // one has only its date, and a run on that day counts as rework.
   const lastFail = new Map();
+  const key = (e) => (typeof e.t === "string" && Number.isFinite(Date.parse(e.t)) ? e.t : /^\d{4}-\d{2}-\d{2}/.test(e.at ?? "") ? `${e.at.slice(0, 10)}T23:59:59.999Z` : "");
   for (const p of phases) {
     for (const t of p.tasks ?? []) {
       for (const g of GATES) {
@@ -327,8 +341,8 @@ export function reworkSpend(phases, runList, GATES) {
         if (!r) continue;
         for (const e of [...(r.history ?? []), r]) {
           if (e.verdict === "pass") continue;
-          const at = /^\d{4}-\d{2}-\d{2}/.test(e.at ?? "") ? e.at.slice(0, 10) : "";
-          if (!lastFail.has(t.id) || at > lastFail.get(t.id)) lastFail.set(t.id, at);
+          const k = key(e);
+          if (!lastFail.has(t.id) || k > lastFail.get(t.id)) lastFail.set(t.id, k);
         }
       }
     }
@@ -336,17 +350,23 @@ export function reworkSpend(phases, runList, GATES) {
   let wasted = 0;
   let total = 0;
   let unplaced = 0;
+  const hit = new Set();
   for (const r of runList) {
-    if (!Number.isFinite(r.tokens)) continue;
-    total += r.tokens;
+    const tok = rowTokens(r);
+    if (!Number.isFinite(tok)) continue;
+    total += tok;
     if (!r.task || !lastFail.has(r.task)) continue;
-    // Verdicts carry a date only, so a run on the day of the failure counts
-    // as rework. A run or a failure with no date cannot be placed either side.
-    const day = /^\d{4}-\d{2}-\d{2}/.test(r.t ?? "") ? r.t.slice(0, 10) : "";
-    if (!day || !lastFail.get(r.task)) unplaced += r.tokens;
-    else if (day <= lastFail.get(r.task)) wasted += r.tokens;
+    // A run or a failure with no time cannot be placed either side of it.
+    const at = Number.isFinite(Date.parse(r.t)) ? Date.parse(r.t) : null;
+    const fail = lastFail.get(r.task) ? Date.parse(lastFail.get(r.task)) : null;
+    if (at === null || fail === null) unplaced += tok;
+    else if (at <= fail) {
+      wasted += tok;
+      hit.add(r.task);
+    }
   }
-  return { wasted, total, pct: total ? Math.round((wasted / total) * 100) : 0, tasks: lastFail.size, unplaced };
+  // Tasks whose spend was sent back, not every task that ever failed.
+  return { wasted, total, pct: total ? Math.round((wasted / total) * 100) : 0, tasks: hit.size, unplaced };
 }
 
 /**
@@ -509,7 +529,9 @@ export function readRuns(root, cfg) {
     .filter(Boolean)
     .map((l) => {
       try {
-        return JSON.parse(l);
+        const r = JSON.parse(l);
+        const tok = rowTokens(r);
+        return Number.isFinite(tok) && tok !== r.tokens ? { ...r, tokens: tok } : r;
       } catch {
         return null; // a half-written last line is normal in an appended file
       }
@@ -1102,8 +1124,8 @@ footer{margin-top:34px;color:var(--faint);font-size:13px;line-height:1.7;
              <p class="v worse">${reworkSpend.pct}%</p>
              <p class="w">${reworkSpend.wasted.toLocaleString("en-US")} tokens on
                ${reworkSpend.tasks} task${reworkSpend.tasks === 1 ? "" : "s"} that failed a gate, spent
-               up to the day each last failed: the attempts that were sent back. Verdicts carry a
-               date only, so a retry on the day of a failure is counted here too.</p></div>` : ""}
+               up to each one's last failure: the attempts that were sent back. An older verdict
+               with a date only counts a retry on that day here too.</p></div>` : ""}
          </div>
          <p class="cav">Composition is computed from ${tokenStats.detailedCount} run(s) that
            reported a breakdown; runs logging only a total are counted in the totals elsewhere but

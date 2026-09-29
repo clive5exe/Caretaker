@@ -650,9 +650,12 @@ export function recordVerdict(d, id, gate, verdict, note) {
   if (!["pass", "fail"].includes(verdict)) return { ok: false, error: "verdict must be pass or fail" };
   hit.t.gate = hit.t.gate || {};
   const previous = hit.t.gate[gate];
-  const entry = { verdict, at: today(), note: note || undefined };
+  // `at` stays the date every reader already uses. `t` is the instant, added
+  // so a fail and its same-day retry can be ordered (B-8: rework counted the
+  // passing attempt whenever both fell on one day).
+  const entry = { verdict, at: today(), t: new Date().toISOString(), note: note || undefined };
   const history = previous
-    ? [...(previous.history || []), { verdict: previous.verdict, at: previous.at, note: previous.note }]
+    ? [...(previous.history || []), { verdict: previous.verdict, at: previous.at, ...(previous.t ? { t: previous.t } : {}), note: previous.note }]
     : [];
   hit.t.gate[gate] = { ...entry, ...(history.length ? { history } : {}) };
   d.meta.updated = today();

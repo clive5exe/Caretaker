@@ -173,8 +173,10 @@ Fixing them is a rule change and gets its own task (see Findings).
 - `gateStats` returns `[gate, { pass, fail, passPct, failPct }]`. The
   percentages are null with no attempt, and fail is 100 minus the rounded pass.
 - `reworkSpend` returns `{ wasted, total, pct, tasks, unplaced }`. `wasted` is a
-  failed task's tokens up to the day of its last failed verdict. A run or a
-  failure with no date on a failed task is `unplaced`, never counted as rework.
+  failed task's tokens up to its last failed verdict: its instant `t` where
+  recorded, else the end of its date. `tasks` counts tasks with any wasted
+  tokens. A run or failure with no time is `unplaced`, never counted as
+  rework. A row's tokens are the sum of its parts when it has any.
 - Rendering, the `history.jsonl` append and the file write move behind
   `isEntry`.
 - **Test.** Generate the page with the old and new code back to back on a

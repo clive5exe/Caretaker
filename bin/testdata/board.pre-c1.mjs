@@ -393,9 +393,9 @@ if (!cmd || cmd === "status") {
   // oldest first, and is only read by the code that wants it.
   hit.t.gate = hit.t.gate || {};
   const previous = hit.t.gate[cmd];
-  const entry = { verdict, at: today(), note: rest.slice(1).join(" ") || undefined };
+  const entry = { verdict, at: today(), t: new Date().toISOString(), note: rest.slice(1).join(" ") || undefined }; // B-8, mirrored: the instant beside the date
   const history = previous
-    ? [...(previous.history || []), { verdict: previous.verdict, at: previous.at, note: previous.note }]
+    ? [...(previous.history || []), { verdict: previous.verdict, at: previous.at, ...(previous.t ? { t: previous.t } : {}), note: previous.note }]
     : [];
   hit.t.gate[cmd] = { ...entry, ...(history.length ? { history } : {}) };
   d.meta.updated = today();
