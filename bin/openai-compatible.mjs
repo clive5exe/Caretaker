@@ -376,6 +376,8 @@ export async function openaiCompatibleAdapter({ workspace, prompt, policy, paths
   const startedAt = Date.now();
   const deadline = startedAt + policy.timeoutMs;
   const exec = { spawnError: null, exitCode: null, signal: null, killed: false, killReason: null, durationMs: 0, startedAt };
+  // The model's own last words, never a tool's output (finalTextOf, harness.mjs).
+  let finalText = null;
 
   try {
     for (;;) {
@@ -444,6 +446,7 @@ export async function openaiCompatibleAdapter({ workspace, prompt, policy, paths
       // the last line are the only ones it finds.
       log({ type: "assistant", turn: toolUse.turns, content: msg.content ?? null, tool_calls: calls, turnUsage: body.usage ? { in: body.usage.prompt_tokens ?? null, out: body.usage.completion_tokens ?? null } : null });
       messages.push({ role: "assistant", content: msg.content ?? null, ...(calls.length ? { tool_calls: calls } : {}) });
+      if (typeof msg.content === "string" && msg.content.trim()) finalText = msg.content;
       if (!calls.length) {
         toolUse.stopped = true;
         exec.exitCode = 0;
@@ -498,5 +501,5 @@ export async function openaiCompatibleAdapter({ workspace, prompt, policy, paths
         }
       : {}),
   });
-  return { exec, container, file: url, toolUse };
+  return { exec, container, file: url, toolUse, finalText };
 }

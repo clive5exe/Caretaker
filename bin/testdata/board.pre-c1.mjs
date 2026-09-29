@@ -432,6 +432,9 @@ if (!cmd || cmd === "status") {
       if (g.reviewer?.verdict !== "pass") missing.push("reviewer");
       if (!docsOnly && g.qa?.verdict !== "pass") missing.push("qa");
       if (!docsOnly && needsSecurity && g.security?.verdict !== "pass") missing.push("security (money/auth/isolation)");
+  // A FAIL blocks whether or not the gate was required: a refutation recorded
+  // on a docs-only task is still a failing check (independent review).
+  if (docsOnly && g.qa?.verdict === "fail") missing.push("qa");
       if (missing.length) {
         console.error(`\n  REFUSED — ${t.id} has not passed the gate${docsOnly ? " (docs-only: reviewer required)" : ""}.\n`);
         console.error(`  Missing: ${missing.join(", ")}\n`);

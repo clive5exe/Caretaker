@@ -261,6 +261,9 @@ async function race(boardFile, n) {
   ok("auth and money still do", needs("serve: token exchanged for a cookie", "auth on every route") && needs("Billing export"));
   ok("the ticketing project's words no longer decide it", !needs("Stripe fee refund for a tenant"));
   ok("web auth and redaction work does, and so does a task whose note says it needs security", needs("serve: cookie, host/origin checks, CSP") && needs("archive with redacted transcripts") && needs("command endpoint", "Needs security: it is a write path."));
+  const docs = { id: "D", title: "Write the onboarding doc", owner: "product-architect", ac: "prose" };
+  ok("a docs-only task needs reviewer only…", missingGates(docs).missing.join() === "reviewer");
+  ok("…but a qa FAIL recorded on it (a refutation) still blocks done", missingGates({ ...docs, gate: { reviewer: { verdict: "pass" }, qa: { verdict: "fail" } } }).missing.join() === "qa");
   ok("whole words only: author, tokens and escapement are not auth, secrets or escape", !needs("Author list", "estimate in tokens; escapement"));
 }
 

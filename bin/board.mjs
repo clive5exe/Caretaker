@@ -516,6 +516,9 @@ export function missingGates(t) {
   if (g.reviewer?.verdict !== "pass") missing.push("reviewer");
   if (!docsOnly && g.qa?.verdict !== "pass") missing.push("qa");
   if (!docsOnly && needsSecurity && g.security?.verdict !== "pass") missing.push("security (money/auth/isolation)");
+  // A FAIL blocks whether or not the gate was required: a refutation recorded
+  // on a docs-only task is still a failing check (independent review).
+  if (docsOnly && g.qa?.verdict === "fail") missing.push("qa");
   return { missing, docsOnly };
 }
 

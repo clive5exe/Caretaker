@@ -69,6 +69,12 @@ export function parseVerdict(text) {
   return { outcome: last[1] === "REFUTED" ? "refuted" : "stands", reason: reason || null };
 }
 
+/** The last non-empty line of a transcript's text, whatever its shape. */
+export function lastLine(raw) {
+  const lines = transcriptTexts(raw).join("\n").split("\n").map((l) => l.trim()).filter(Boolean);
+  return lines.at(-1) ?? "";
+}
+
 /** The refuter's instructions. The acceptance criterion is the bar; the patch is the evidence. */
 export function refutationPrompt({ task, parent, patch }) {
   const ac = Array.isArray(task.ac) ? task.ac.join("\n") : String(task.ac ?? "").trim();
@@ -144,9 +150,16 @@ export async function refute({ cfgPath, parent, workspace, policy = {}, secrets 
   );
   const child = out.verdict.runId;
   const transcript = readFileSync(join(out.archived, "transcript.log"), "utf8");
-  let { outcome, reason } = parseVerdict(transcript);
-  if (!out.verdict.ok && outcome !== "refuted") {
-    // A refuter that crashed or was killed checked nothing, whatever it printed first.
+  // The verdict is the REFUTER'S OWN, from its final message. Read from the
+  // whole transcript, a file the refuter merely looked at could carry a
+  // "VERDICT: REFUTED" and fail someone's task (independent review). With no
+  // known final message (a custom CLI), only the transcript's last line
+  // counts, which is where the prompt tells it to put the verdict.
+  let { outcome, reason } = parseVerdict(out.verdict.finalText ?? lastLine(transcript));
+  if (!out.verdict.ok) {
+    // A refuter that crashed or was killed checked nothing, whatever it printed
+    // first, a REFUTED included: a fail recorded from a run that did not
+    // finish would stand on nothing.
     outcome = "inconclusive";
     reason = `the refuting run did not complete (${out.verdict.state}${out.verdict.reason ? `: ${out.verdict.reason}` : ""})`;
   }

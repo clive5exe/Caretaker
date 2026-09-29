@@ -500,6 +500,24 @@ function jsonCandidates(text) {
   return out;
 }
 
+/**
+ * The agent's OWN final message, from a CLI's JSON output, or null when the
+ * output has no shape this knows. Read here, in the harness, because it is
+ * vendor shape: claude prints `{"type":"result","result":"..."}`; codex
+ * `--json` ends with an `agent_message` item. Anything the agent merely READ
+ * (a file, a tool's output) is not in it, which is the point: a verdict or a
+ * decision an agent quotes from the work it is checking is not its own.
+ */
+export function finalTextOf(transcriptText) {
+  const docs = jsonCandidates(String(transcriptText ?? ""));
+  for (let i = docs.length - 1; i >= 0; i--) {
+    const d = docs[i];
+    if (typeof d?.result === "string") return d.result;
+    if (d?.item?.type === "agent_message" && typeof d.item.text === "string") return d.item.text;
+  }
+  return null;
+}
+
 /** Deep search for the first numeric value under any of `names`. */
 function findNumber(node, names, depth = 0) {
   if (node === null || typeof node !== "object" || depth > 6) return null;
@@ -1116,6 +1134,10 @@ export async function run(workspace, prompt, policy = {}) {
     // Only adapters that drive the tool loop themselves can score it; for a
     // CLI the loop is inside the vendor's binary and this stays absent.
     ...(result.toolUse ? { toolUse: result.toolUse } : {}),
+    // The agent's own final message (see finalTextOf), or null when the
+    // adapter's output has no known shape. Capped: it is for reading a
+    // declared last line, not for holding the transcript twice.
+    finalText: ((f) => (f === null ? null : f.slice(-8000)))(result.finalText !== undefined ? result.finalText : p.adapter === "cli" ? finalTextOf(stdoutText) : null),
   };
 
   const cost = parseUsage(stdoutText, {
