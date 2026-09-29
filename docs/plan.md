@@ -130,6 +130,18 @@ The budget is 5 hours. Each step ends in a commit you can check.
 
 | 5 local review | done with a **fake model and a fake `gh`**. `node bin/review.mjs <pr>` runs the steps of Warp's installed review workflow as written, in a throwaway worktree: resolve, prepare, the agent, materialize, and Warp's validator. `--task` records the board gate; `--post` runs Warp's publish step. Nothing posts by default | this commit |
 
+| 6 wrap-up | done: `node bin/vendor.mjs install <repo>` puts the factory into a repo and refuses to overwrite your changes without `--upgrade`; tasks F-1 to F-6 are on the board, each waiting on independent gates; the retirements below are marked, not done | this commit |
+
+### Retired only after a real run (not yet)
+
+Nothing is deleted until its Warp replacement has done one real run (F-6):
+
+| Caretaker's hand-built piece | replaced by | state |
+|---|---|---|
+| `ops/caretaker/prompt.txt` (builder brief) | Warp's `implementation` skill | kept until F-6 |
+| `bin/verify.mjs` refuter prompt | Warp's `review-pr`, run on a second model | kept until F-6 |
+| `bin/graduate.mjs` CI generator | Warp's five workflows | kept until F-6 |
+
 ### How the agent's work becomes a PR (option A, chosen 2026-09-29)
 
 The agent never pushes. Caretaker's sandbox mounts `.git` read-only, because a

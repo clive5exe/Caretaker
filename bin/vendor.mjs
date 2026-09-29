@@ -20,6 +20,10 @@
  *   node bin/vendor.mjs sync [name]          fetch upstream at the pinned commit (network)
  *   node bin/vendor.mjs check                offline: vendored == manifest, patches apply
  *   node bin/vendor.mjs build <outdir>       the installed layout, patches applied, into an empty dir
+ *   node bin/vendor.mjs install <repo> [--upgrade]
+ *                                            the same, into a repository: new files are added,
+ *                                            identical ones left, a DIFFERENT one refused unless
+ *                                            --upgrade (then replaced, and listed)
  * Exit: 0 ok, 1 check failed, 2 misuse.
  */
 import { spawnSync } from "node:child_process";
@@ -187,6 +191,40 @@ export function build(outdir, { vendor = VENDOR, withAction = true } = {}) {
   return walk(out);
 }
 
+/**
+ * Put the factory into a repository. Nothing is overwritten silently: a file
+ * that exists and differs is refused, and the whole install with it, unless
+ * `upgrade` is set. Returns { added, same, replaced }.
+ */
+export function install(repo, { upgrade = false, vendor = VENDOR } = {}) {
+  const dest = resolve(repo);
+  if (!existsSync(dest) || !statSync(dest).isDirectory()) throw new VendorError("NO_REPO", `${dest} is not a directory`);
+  const tmp = mkdtempSync(join(tmpdir(), "vendor-install-"));
+  try {
+    const out = join(tmp, "out");
+    const files = build(out, { vendor });
+    const differs = files.filter((f) => existsSync(join(dest, f)) && sha(join(dest, f)) !== sha(join(out, f)));
+    if (differs.length && !upgrade) {
+      throw new VendorError("WOULD_OVERWRITE", `these differ from the factory and would be replaced; re-run with --upgrade to replace them:\n  ${differs.join("\n  ")}`);
+    }
+    const result = { added: [], same: [], replaced: [] };
+    for (const f of files) {
+      const to = join(dest, f);
+      if (!existsSync(to)) result.added.push(f);
+      else if (differs.includes(f)) result.replaced.push(f);
+      else {
+        result.same.push(f);
+        continue;
+      }
+      mkdirSync(dirname(to), { recursive: true });
+      cpSync(join(out, f), to);
+    }
+    return result;
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
 /* -------------------------------------------------------------------- cli */
 
 const isEntry = process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href;
@@ -200,10 +238,15 @@ if (isEntry) {
       for (const p of problems) console.log(`FAIL  ${p}`);
       console.error(`[vendor] ${problems.length ? `FAIL — ${problems.length} problem(s)` : `ok — vendored files match upstream, ${patches().length} patch(es) apply`}`);
       process.exit(problems.length ? 1 : 0);
+    } else if (cmd === "install" && arg) {
+      const r = install(arg, { upgrade: process.argv.includes("--upgrade") });
+      for (const f of r.replaced) console.log(`replaced ${f}`);
+      console.log(`[vendor] ${r.added.length} added, ${r.replaced.length} replaced, ${r.same.length} already current -> ${resolve(arg)}`);
+      console.log("[vendor] next: commit them, and add your CLAUDE_CODE_OAUTH_TOKEN (from `claude setup-token`) as a repository secret");
     } else if (cmd === "build" && arg) {
       console.log(`[vendor] ${build(arg).length} file(s) -> ${resolve(arg)}`);
     } else {
-      console.error("usage: vendor.mjs sync [name] | check | build <outdir>");
+      console.error("usage: vendor.mjs sync [name] | check | build <outdir> | install <repo> [--upgrade]");
       process.exit(2);
     }
   } catch (e) {

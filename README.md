@@ -45,7 +45,21 @@ node ops/caretaker/board.mjs status        # the board
 node ops/caretaker/dashboard.mjs           # writes docs/board.html
 ```
 
-**2. Choose your AI.** Create `~/.config/caretaker/harness.json`:
+**2. Put Warp's factory into the same repo:**
+
+```sh
+node bin/vendor.mjs install /path/to/repo   # Warp's skills + workflows, Oz swapped for Caretaker
+```
+
+Then:
+1. Commit the new files.
+2. Run `claude setup-token` and add what it prints as the repository secret
+   `CLAUDE_CODE_OAUTH_TOKEN`.
+
+Warp's five workflows then run on your subscription: triage, spec,
+implement, review, and improve the reviewer.
+
+**3. Choose your AI.** Create `~/.config/caretaker/harness.json`:
 
 ```json
 { "default": { "adapter": "cli", "cli": "claude" } }
@@ -58,7 +72,7 @@ example Claude builds and ChatGPT reviews:
 { "default": { "cli": "claude" }, "roles": { "refuter": { "cli": "codex" } } }
 ```
 
-**3. Run an agent in the sandbox:**
+**4. Run an agent in the sandbox:**
 
 ```sh
 claude setup-token                          # once, uses your Claude subscription
@@ -74,7 +88,7 @@ node bin/runstore.mjs run --workspace . --prompt "fix the failing test" \
 - Afterwards you get the diff, the transcript and the cost. The drift gate
   checks the change against your specs.
 
-**4. Review a pull request with Warp's review skill, on your machine:**
+**5. Review a pull request with Warp's review skill, on your machine:**
 
 ```sh
 node bin/review.mjs 12 --task T-1 --sandbox none   # uses your own claude login
@@ -87,7 +101,7 @@ node bin/review.mjs 12 --task T-1 --sandbox none   # uses your own claude login
   reviewer gate.
 - **Posting:** nothing goes to GitHub unless you add `--post`.
 
-**5. Watch it:**
+**6. Watch it:**
 
 ```sh
 node bin/serve.mjs ops/caretaker/config.json   # prints a local URL

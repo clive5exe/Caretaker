@@ -5,6 +5,83 @@
   },
   "phases": [
     {
+      "name": "Warp factory on Caretaker (docs/plan.md)",
+      "tasks": [
+        {
+          "id": "F-1",
+          "title": "Vendor Warp's cloud factory unmodified",
+          "owner": "backend",
+          "est": "1h",
+          "status": "doing",
+          "deps": [],
+          "ac": "vendor/ holds Warp's files byte for byte at pinned commits (cloud-factory-demo ab21d0c5, common-skills 69b47536) with both MIT licences; one edited, added or deleted byte, a re-pin without a re-sync, or a patch that no longer applies fails node bin/vendor.test.mjs by name",
+          "note": "Built: bin/vendor.mjs (sync/check/build/install), vendor/sources.json, vendor/manifest.json. docs/plan.md step 1. Gate verdicts not recorded."
+        },
+        {
+          "id": "F-2",
+          "title": "The Caretaker agent step stands in for oz-agent-action",
+          "owner": "backend",
+          "est": "2h",
+          "status": "doing",
+          "deps": [
+            "F-1"
+          ],
+          "ac": "factory/caretaker-agent/action.yml takes Warp's skill/name/prompt inputs and returns agent_output; bin/agent-step.mjs runs the skill through the harness with a Claude subscription token (API keys optional), in the sandbox with egress only to the model API (plus api.github.com when the workflow hands the agent a GH_TOKEN); the token never appears in agent_output, the archive or $GITHUB_OUTPUT",
+          "note": "Proven with a FAKE model only (bin/agent-step.test.mjs): Warp's validate_review_json.py accepts the review it leaves. NOT proven: a real model, and the podman path (podman cannot run containers on the build box). Handles credentials and egress: needs security. Gate verdicts not recorded."
+        },
+        {
+          "id": "F-3",
+          "title": "All five of Warp's workflows run on Caretaker, not Oz",
+          "owner": "backend",
+          "est": "2h",
+          "status": "doing",
+          "deps": [
+            "F-2"
+          ],
+          "ac": "vendor/patches/0001-0005 swap each workflow's Oz step for the Caretaker action and the Warp key for the subscription token; actionlint accepts them with inputs checked against action.yml; for implement, spec and improve-review-pr the agent never pushes: after it, outside the sandbox, agent-step --open-pr commits exactly the files the harness measured it changing (never .caretaker/, hooks off), pushes a branch, opens the PR and links it on the issue",
+          "note": "Option A, chosen by the owner 2026-09-29 (docs/plan.md). bin/workflows.test.mjs, bin/publish.test.mjs. Pushes with the workflow's token: needs security. Not yet run on GitHub. Gate verdicts not recorded."
+        },
+        {
+          "id": "F-4",
+          "title": "A Warp review records the board's reviewer gate",
+          "owner": "backend",
+          "est": "30m",
+          "status": "doing",
+          "deps": [
+            "F-1"
+          ],
+          "ac": "bin/review-gate.mjs records reviewer pass (APPROVE) or fail (REJECT) by review-pr only after Warp's own validator accepts the review; a rejected review records nothing; a task owned by review-pr is refused",
+          "note": "bin/review-gate.test.mjs on a real install. Recording from inside the GitHub review job is not done (that job is read-only on purpose). Gate verdicts not recorded."
+        },
+        {
+          "id": "F-5",
+          "title": "caretaker review <pr> runs Warp's review locally",
+          "owner": "backend",
+          "est": "1h",
+          "status": "doing",
+          "deps": [
+            "F-2",
+            "F-4"
+          ],
+          "ac": "node bin/review.mjs <pr> runs the steps of the installed review-pull-requests.yml as written, in a throwaway worktree, prints the review, records the gate with --task, and posts only with --post (Warp's publish step)",
+          "note": "Proven with a fake gh and a fake model (bin/review.test.mjs). Gate verdicts not recorded."
+        },
+        {
+          "id": "F-6",
+          "title": "First real run on the owner's subscription",
+          "owner": "backend",
+          "est": "30m",
+          "status": "blocked",
+          "deps": [
+            "F-3"
+          ],
+          "ac": "one review and one triage run end to end on GitHub Actions with the owner's CLAUDE_CODE_OAUTH_TOKEN, in the podman sandbox, and their transcripts archived",
+          "note": "Needs the owner: claude setup-token, then the token as a repository secret.",
+          "blockedReason": "needs the owner's subscription token as a repository secret"
+        }
+      ]
+    },
+    {
       "name": "Layer 0 — Spec format",
       "tasks": [
         {

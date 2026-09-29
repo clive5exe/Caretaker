@@ -6,10 +6,10 @@
  *
  * Run: node bin/vendor.test.mjs
  */
-import { appendFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { VENDOR, build, check, readSources } from "./vendor.mjs";
+import { VENDOR, build, check, install, readSources } from "./vendor.mjs";
 
 let failures = 0;
 const ok = (name, cond, detail = "") => {
@@ -74,6 +74,25 @@ try {
         return e.code === "NOT_EMPTY";
       }
     })());
+  }
+  {
+    const repo = join(T, "target");
+    mkdirSync(join(repo, ".github/workflows"), { recursive: true });
+    writeFileSync(join(repo, ".github/workflows/triage-issues.yml"), "mine\n");
+    writeFileSync(join(repo, "keep.txt"), "untouched\n");
+    let err = null;
+    try {
+      install(repo);
+    } catch (e) {
+      err = e;
+    }
+    ok("install refuses to overwrite a file that differs, and names it", err?.code === "WOULD_OVERWRITE" && /triage-issues\.yml/.test(err.message));
+    ok("…and writes nothing at all when it refuses", !existsSync(join(repo, ".agents")) && readFileSync(join(repo, ".github/workflows/triage-issues.yml"), "utf8") === "mine\n");
+    const up = install(repo, { upgrade: true });
+    ok("--upgrade replaces it and says so", up.replaced.join() === ".github/workflows/triage-issues.yml" && readFileSync(join(repo, ".github/workflows/triage-issues.yml"), "utf8").includes("caretaker-agent"));
+    ok("install adds the factory and leaves other files alone", up.added.includes(".github/actions/caretaker-agent/action.yml") && readFileSync(join(repo, "keep.txt"), "utf8") === "untouched\n");
+    const again = install(repo);
+    ok("installing again changes nothing", again.added.length === 0 && again.replaced.length === 0 && again.same.length === up.added.length + up.replaced.length);
   }
 } finally {
   rmSync(T, { recursive: true, force: true });
