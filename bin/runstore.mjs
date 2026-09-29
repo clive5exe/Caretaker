@@ -34,6 +34,7 @@
  *        [--config ops/.../config.json | --state-dir DIR] [--task T-1] [--parent r_…]
  *        [--secret NAME ...] [--adapter cli] [--cli claude] [--model M]
  *        [--sandbox podman|none] [--net NET] [--timeout MS]
+ *        [--egress host,host [--egress-network NET]]   per-run proxy, log in the archive (C-5)
  *   node bin/runstore.mjs where [--config F]      print the state dir
  */
 import {
@@ -163,7 +164,7 @@ function recordedPolicy(policy = {}) {
  * `result` is what `harness.run()` returned. The transcript and stderr are read
  * from the paths it names, redacted line by line, and written beside run.json.
  */
-export function archive(result, { stateDir, workspace = null, task = null, parent = null, model = null, policy = {}, redact }) {
+export function archive(result, { stateDir, workspace = null, task = null, parent = null, model = null, policy = {}, redact, egress = null }) {
   const runId = result?.verdict?.runId;
   if (!RUN_ID.test(String(runId))) {
     throw new RunStoreError("BAD_RUN_ID", `run id ${JSON.stringify(runId)} is not r_ plus eight hex digits`);
@@ -186,6 +187,12 @@ export function archive(result, { stateDir, workspace = null, task = null, paren
   const stderr = read(result.transcript?.stderrPath);
 
   writeAtomic(join(dir, "diff.patch"), patch ?? "");
+  // The proxy writes egress.jsonl straight into this directory (C-5), unredacted:
+  // it has no secrets to redact with. A hostname can carry data — a key smuggled
+  // out as a subdomain is still a refused CONNECT with the key in `host` — so it
+  // gets the same line-by-line pass as the transcript.
+  const egressLog = join(dir, "egress.jsonl");
+  if (existsSync(egressLog)) writeAtomic(egressLog, redactLines(readFileSync(egressLog, "utf8"), redact));
   writeAtomic(join(dir, "transcript.log"), redactLines(transcript, redact));
   writeAtomic(join(dir, "stderr.log"), redactLines(stderr, redact));
 
@@ -201,6 +208,9 @@ export function archive(result, { stateDir, workspace = null, task = null, paren
     diff: diffSummary,
     transcript: { bytes: Buffer.byteLength(transcript), lines: transcript ? transcript.split("\n").length : 0 },
     policy: recordedPolicy(policy),
+    // null when no proxy was attached — the read model then says "not recorded"
+    // for egress, which is the truth for a net:none run.
+    egress,
     archivedAt: new Date().toISOString(),
   };
   // run.json goes through the redactor too: a verdict reason or a warning can
@@ -214,22 +224,49 @@ export function archive(result, { stateDir, workspace = null, task = null, paren
  * runs. The run id and the harness log dir are chosen here, up front, so the
  * mirror knows where the transcript is before the first byte is written.
  */
-export async function runArchived(workspace, prompt, policy = {}, { stateDir, task = null, parent = null, secrets = {}, harness } = {}) {
+export async function runArchived(workspace, prompt, policy = {}, { stateDir, task = null, parent = null, secrets = {}, harness, egress = null } = {}) {
   const h = harness ?? (await import("./harness.mjs"));
   const runId = policy.runId ?? newRunId();
   if (!RUN_ID.test(runId)) throw new RunStoreError("BAD_RUN_ID", `run id ${runId} is not r_ plus eight hex digits`);
   checkStateDir(stateDir, workspace);
+  if (egress && policy.sandbox === "none") {
+    // The proxy guards a NETWORK. An agent on the host is on no such network,
+    // so a per-run proxy would record nothing and imply it had been watched.
+    throw new RunStoreError("EGRESS_NEEDS_SANDBOX", "egress attribution needs the agent in a container; sandbox:none runs on the host network");
+  }
   const redact = redactorFor(secrets);
   const logDir = policy.logDir ?? join(tmpdir(), "foreman-runs", runId);
   const dir = join(stateDir, "runs", runId);
   const mirror = startMirror({ from: join(logDir, "transcript.log"), to: join(dir, "transcript.live.log"), redact });
+  const harnessPolicy = { ...policy, runId, logDir, ...(task ? { task } : {}) };
   let result;
+  let egressRecord = null;
   try {
-    result = await h.run(workspace, prompt, { ...policy, runId, logDir, ...(task ? { task } : {}) });
+    if (egress) {
+      mkdirSync(dir, { recursive: true });
+      const netns = egress.netns ?? (await import("./netns.mjs"));
+      const out = await netns.withRunEgress(
+        { runId, allow: egress.allow, logDir: dir, egressNetwork: egress.egressNetwork, image: egress.image, exec: egress.exec, binDir: egress.binDir },
+        ({ net, extraRunFlags, env }) =>
+          h.run(workspace, prompt, {
+            ...harnessPolicy,
+            net,
+            extraRunFlags: [...(policy.extraRunFlags ?? []), ...extraRunFlags],
+            env: { ...(policy.env ?? {}), ...env },
+          }),
+      );
+      result = out.result;
+      const names = netns.perRunNames(runId);
+      egressRecord = { network: names.internalNetwork, proxy: names.proxyName, allow: egress.allow, cleanup: out.cleanup };
+    } else {
+      result = await h.run(workspace, prompt, harnessPolicy);
+    }
   } finally {
     mirror.stop();
   }
-  const archived = archive(result, { stateDir, workspace, task, parent, model: policy.model ?? null, policy: { ...policy, runId, logDir }, redact });
+  const archived = archive(result, {
+    stateDir, workspace, task, parent, model: policy.model ?? null, policy: harnessPolicy, redact, egress: egressRecord,
+  });
   return { ...result, archived };
 }
 
@@ -240,7 +277,7 @@ if (isEntry) {
   const [cmd, ...argv] = process.argv.slice(2);
   const KNOWN = new Set([
     "workspace", "prompt-file", "prompt", "config", "state-dir", "task", "parent", "secret",
-    "adapter", "cli", "model", "sandbox", "net", "timeout", "image",
+    "adapter", "cli", "model", "sandbox", "net", "timeout", "image", "egress", "egress-network",
   ]);
   const flags = { secret: [] };
   for (let i = 0; i < argv.length; i++) {
@@ -290,6 +327,11 @@ if (isEntry) {
         task: flags.task ?? null,
         parent: flags.parent ?? null,
         secrets,
+        // --egress "a.com,b.com" gives the run its own network and proxy (C-5);
+        // --egress "" is a deliberate deny-all, and is still attributed.
+        egress: flags.egress !== undefined
+          ? { allow: flags.egress.split(",").map((h) => h.trim()).filter(Boolean), egressNetwork: flags["egress-network"] }
+          : null,
       });
       console.log(`[runstore] ${out.verdict.runId} ${out.verdict.state} -> ${out.archived}`);
       process.exit(out.verdict.ok ? 0 : 1);

@@ -190,6 +190,11 @@ The rules are in §Lifecycle below.
 
 ### C-4 — run identity and a run archive (layer 2, security gate)
 
+**Built** in `bin/runstore.mjs`, checked by `bin/runstore.test.mjs`. Only runs
+started through it are archived — `node bin/runstore.mjs run …`, or
+`runArchived()` from code. `loop.sh` still calls the agent CLI directly and
+leaves no archive.
+
 - **`bin/run.mjs` gains** `--run <id>`, `--parent <id>`, `--adapter` and
   `--cli`, all optional and additive. Unknown flags still exit 2 on old
   installs, deliberately. Only the new runner that ships alongside these flags
@@ -207,6 +212,9 @@ The rules are in §Lifecycle below.
 - **A redacted live mirror.** While a run is in flight, the runner appends
   redacted lines to `transcript.live.log`. The server tails only this file,
   never the harness's raw file.
+- **`stateDir` inside the workspace is refused** (`STATE_IN_WORKSPACE`), for
+  the reason below. `stateDirFor()` is the single definition, and
+  `readmodel.mjs` imports it.
 - **`stateDir` defaults to
   `${XDG_STATE_HOME:-$HOME/.local/state}/foreman/<repo-slug>`,** and is
   overridable in config. **The reason is the mount, not the harness refusal.**
@@ -219,27 +227,33 @@ The rules are in §Lifecycle below.
 
 ### C-5 — egress attribution (layer 1, security gate, touches `specs/sandbox.md`)
 
-The problem is open. There are two honest options, and the choice deserves its
-own ADR.
+**Built, opt-in:** one internal network and one proxy per run, chosen in
+`docs/decisions/0003-egress-attributed-by-location.md` over a shared proxy
+logging client addresses. Checked by `bin/egress-attribution.test.mjs`, whose
+live half runs where podman and the images are present (CI).
 
-1. **One internal network and one proxy per run** (`fm-egress-<runId>`), with
-   the log bind-mounted writable at `<stateDir>/runs/<runId>/egress.jsonl`.
-   - Attribution comes from where the log lives. The proxy's decision logic
-     does not change.
-   - The cost is more podman create and destroy per run, which is the leading
-     hypothesis for H-1's unexplained flake.
-2. **One shared proxy that logs the client address,** mapped to the run's
-   container (`foreman-<runId>`, `harness.mjs:706`) when the run starts.
-   - Less churn, but addresses are reused, so the mapping must be taken at
-     start and closed at end.
+- `netns.withRunEgress()` creates `fm-int-<runId>` (internal, DNS off), starts
+  `fm-egress-<runId>` with the run's archive dir bind-mounted writable at
+  `/egress-log`, hands the harness `net`, a static `--add-host proxy:<ip>` and
+  the proxy variables, and tears both down whatever the run does. A failed
+  teardown is recorded in `run.json`, not thrown over the result.
+- The run is identified by where its log lives. The proxy's allow/deny logic
+  is unchanged.
+- The archive redacts `egress.jsonl` with the run's secrets: a key smuggled
+  out as a subdomain is still a refused CONNECT with the key in `host`.
+- Egress attribution with `sandbox: none` is refused. An agent on the host is
+  on no proxied network.
+- Turned on per run with `runstore.mjs run --egress host,host`. It is not the
+  default: the extra podman create and destroy per run has not yet been
+  measured under the sustained churn suspected in H-1's note.
 
-**Recommendation: option 1, measured against the flake before it is adopted.**
-Until C-5 lands, run detail says "not recorded: no proxy was attached to this
-run", which is the true state under the default `net: none`.
+A run without it shows "not recorded: no proxy was attached to this run" for
+egress, which is the true state under the default `net: none`.
 
-**Unverified, to be confirmed with a test.** Given as today's code
-(`--log` resolving inside a container whose only mount is read-only), the
-`appendFileSync` in `egress.mjs:202` may throw on the first event.
+The proxy used to die on its first event when `--log` could not be written
+(the append threw inside the CONNECT handler). It now reports the log failure
+once on stderr and keeps answering. `egress-attribution.test.mjs` fails
+against the old code by name.
 
 ### C-6 — new append-only facts, as core commands
 
@@ -670,18 +684,18 @@ To avoid a name collision, the API field is `lifecycle`, not `stage`.
 
 | field | source | today | after |
 |---|---|---|---|
-| run identity | harness `runId` | returned, not persisted | C-4 |
+| run identity | harness `runId` | archived for runs started through `runstore.mjs` | C-4 (built) |
 | task / work item | `runs.jsonl` `task` | yes | — |
-| agent, model, harness | `name`, `model`; verdict `adapter`, `cli` | name and model yes; harness no | C-4 |
-| status | verdict `state` and `reason`; start/end rows | rows yes; verdict no | C-4 |
-| timestamps | row `t`; verdict `startedAt`, `endedAt`, `durationMs`, `timeoutMs` | row `t` only | C-4 |
+| agent, model, harness | `name`, `model`; verdict `adapter`, `cli` | yes, for archived runs | C-4 (built) |
+| status | verdict `state` and `reason`; start/end rows | yes, for archived runs | C-4 (built) |
+| timestamps | row `t`; verdict `startedAt`, `endedAt`, `durationMs`, `timeoutMs` | yes, for archived runs | C-4 (built) |
 | token usage | `in`, `cached`, `write`, `out`, `turns`, `tokens` (`bin/run.mjs`); harness `cost.tokens`, where null means unknown | yes, from `bin/run.mjs` | — |
-| measured diff | harness `diff`: `files`, `insertions`, `deletions`, `patch`, `truncated`, `ignoredPathsNotMeasured` | returned, not persisted | C-4 |
-| transcript | redacted archive or mirror | raw file in `$TMPDIR` | C-4 |
+| measured diff | harness `diff`: `files`, `insertions`, `deletions`, `patch`, `truncated`, `ignoredPathsNotMeasured` | yes, for archived runs | C-4 (built) |
+| transcript | redacted archive or mirror | yes, for archived runs | C-4 (built) |
 | gate results | drift gate events carrying `run`; task verdicts shown as task-level with their dates | drift yes, when `--run` is passed | — |
-| egress allow/deny | `<run>/egress.jsonl` | not attributable | C-5 |
+| egress allow/deny | `<run>/egress.jsonl` | for runs started with `--egress` | C-5 (built, opt-in) |
 | artifacts | patch, transcript, stderr, drift report, PR | — | C-4, C-6 |
-| parent/child | `parent` | no | C-4 |
+| parent/child | `parent` | yes, for archived runs | C-4 (built) |
 
 **Gate verdicts are task-level.** A board verdict belongs to the *task*, and
 its date carries no time. The page never presents a verdict as the result of a
