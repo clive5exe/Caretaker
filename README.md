@@ -69,6 +69,11 @@ recorded used to look identical to one with none.
 blocked, and how many have no acceptance criterion at all — those can never be
 closed by anyone, and a board full of them only goes down.
 
+**Rework, measured.** Gate verdicts append rather than overwrite, so a task that
+failed qa three times and then passed reads as four attempts, not one pass. The
+stats tab reports first-pass rate, rework rate, and, once a run log exists, the tokens spent on
+tasks that failed a gate and ran again.
+
 ### And what it will not tell you
 
 Printed on the page, next to the numbers they qualify:
@@ -78,9 +83,6 @@ Printed on the page, next to the numbers they qualify:
 - **Effort actually spent.** The board stamps a close date and no start, so
   elapsed is calendar days from the first commit naming a task. That measures how
   long work *sits*, which is what the ETA depends on. It is not hours worked.
-- **Rework.** One verdict per gate means a task that failed three times and
-  passed once reads as a pass. The fail-rate column understates rework and is not
-  a defect-find rate.
 
 A dashboard that implies precision it does not have is worse than the gap it
 hides.
@@ -90,16 +92,20 @@ hides.
 ```json
 { "phases": [ { "name": "Phase 1", "tasks": [
   { "id": "T-001", "title": "…",
-    "status": "todo|doing|blocked|done",
+    "status": "todo|doing|blocked|done|dropped",
     "owner": "backend", "est": "4h",
     "ac": "how you know it is done",
     "completed": "2026-08-29",
     "deps": ["T-000"],
     "blockedReason": "needs an API key",
-    "gate": { "reviewer": { "verdict": "pass" } } } ] } ] }
+    "gate": { "reviewer": { "verdict": "pass", "at": "2026-08-29",
+                            "history": [ { "verdict": "fail", "at": "2026-08-28" } ] } } } ] } ] }
 ```
 
-Only `id`, `title` and `status` are required. Everything else makes the page say
+Only `id`, `title` and `status` are required. `dropped` is scope a decision
+deleted: it leaves the denominator entirely, rather than counting as done or
+sitting in todo forever. Gate verdicts append: `gate.<name>` is always the latest,
+and earlier attempts sit in its `history`, oldest first. Everything else makes the page say
 more. `est` accepts what a board actually contains — `30m`, `1h`, `1.5d`, `2w`,
 and S/M/L/XL — and anything else is counted as unestimated and shown as such
 rather than silently weighing zero.
@@ -117,8 +123,15 @@ rather than silently weighing zero.
 }
 ```
 
-`gates` is the list of verdicts `done` demands. Two, three, or one — it is your
-process; foreman only refuses to let you skip it.
+`gates` is the list of gates the dashboard draws and counts.
+
+**`done` does not read it yet**, and the two can disagree. Today `done` demands:
+- `reviewer`, always;
+- `qa`, unless the task is docs-only (owned by a docs role, with nothing in the
+  title or criterion that names code);
+- `security`, when the title or note matches its money/auth/tenant keywords.
+
+Making `done` honour `gates` is a known, separate fix.
 
 `agentsDir` is optional. If the project keeps agent definitions with a `model:`
 in their frontmatter, the dashboard shows which model each role runs on, so spend
@@ -147,6 +160,33 @@ irreversible ones, and none of them should happen with nobody watching.
 
 Stop it with `touch ops/foreman/PAUSED` — no crontab edit, and `ls` shows whether
 it is paused.
+
+## Beyond the board
+
+The board is the part that ships through `install.sh`. The rest of `bin/` is the
+layers underneath it, built bottom-up. None of it is installed into other repos
+yet. `docs/architecture.md` explains how they fit, and `docs/board.json` records
+where each one stands.
+
+```
+bin/sandbox.mjs    run a command in a rootless podman container with enforced
+                   limits, a read-only root, and never the container socket
+bin/egress.mjs     a CONNECT proxy that allows only declared hosts and logs
+                   every refusal
+bin/netns.mjs      the network wiring that makes the proxy the only way out,
+                   plus the suite that attacks it
+bin/secrets.mjs    get an API key to a run without it touching the repo, the
+                   image or the log; redaction for anything that writes one
+bin/spec.mjs       the spec block: which hosts a spec allows, which paths it
+                   governs
+bin/drift.mjs      the drift gate: a governed path changed and its spec did not
+bin/harness.mjs    the seam, run(workspace, prompt, policy) -> diff, transcript,
+                   verdict, cost. The CLI adapter exists; the SDK adapter says
+                   it is not implemented rather than faking a result.
+bin/tui-mock.mjs   a runnable layout mockup of the terminal UI
+```
+
+Tests are plain scripts with no runner: `node bin/<name>.test.mjs`.
 
 ## RULES.md
 
