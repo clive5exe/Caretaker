@@ -24,6 +24,7 @@ import * as drift from "./drift.mjs";
 import * as events from "./events.mjs";
 import { freshness as computeFreshness } from "./freshness.mjs";
 import { gitFacts as kpiGitFacts, kpis as computeKpis } from "./kpis.mjs";
+import { pending as harvestPending } from "./harvest.mjs";
 import { commandsFor, openQuestions, requiredGates, specApprovalNeeded, stageOf, STAGES } from "./lifecycle.mjs";
 import { KEY_SHAPES } from "./secrets.mjs";
 import { stateDirFor } from "./runstore.mjs";
@@ -398,13 +399,31 @@ export function createReadModel({ cfgPath, board, dash, now = () => new Date(), 
         items.push({ ...base, kind: "pr-review", since: t.pr.at ?? null, fact: `every required gate passed; PR ${t.pr.url}`, pr: t.pr.url, actions: cmds.filter((x) => x.cmd === "done") });
       }
     }
+    // H-6: a decision a run declared that no spec or ADR records. Kept or
+    // discarded in the terminal, with a name, like a drift dismissal.
+    const titles = new Map(board.allTasks(d).map((t) => [t.id, t]));
+    for (const p of harvestPending(stateDir)) {
+      const t = p.task ? titles.get(p.task) : null;
+      items.push({
+        task: p.task ?? null,
+        title: t?.title ?? "(no task)",
+        owner: t?.owner ?? null,
+        kind: "decision",
+        since: p.since ?? null,
+        fact: `run ${p.run} decided: ${p.text}${p.why ? ` — because ${p.why}` : ""}. No spec or ADR records it.`,
+        decision: { run: p.run, id: p.id, text: p.text, why: p.why },
+        keepCommand: `node bin/harvest.mjs keep --run ${p.run} --id ${p.id} --by <you>`,
+        discardCommand: `node bin/harvest.mjs discard --run ${p.run} --id ${p.id} --reason "…" --by <you>`,
+        actions: [],
+      });
+    }
     // Oldest first; an item whose fact carries no time sorts last, not first.
     return items.sort((a, b) => (a.since && b.since ? byTime(a.since, b.since) : a.since ? -1 : b.since ? 1 : 0));
   }
   function inbox() {
     const { runs } = foldRuns();
     const items = inboxItems(loadBoard(), runs);
-    const counts = { question: 0, "spec-approval": 0, "gate-failure": 0, "pr-review": 0 };
+    const counts = { question: 0, "spec-approval": 0, "gate-failure": 0, "pr-review": 0, decision: 0 };
     for (const i of items) counts[i.kind] += 1;
     return { sources: sources(), threshold: reworkThreshold, counts, items };
   }

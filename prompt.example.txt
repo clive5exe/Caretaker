@@ -15,6 +15,12 @@ You are running UNATTENDED from cron. Nobody is watching, so:
   have, ask for it with `node ops/caretaker/board.mjs ask <id> "question"` and
   move to the next unblocked one rather than guessing. A question recorded that
   way reaches a human's Inbox; one written into a note does not.
+- Write things down as you go, not at the end. A session that is compacted or
+  killed keeps only what was already written where it attaches: the board note,
+  the commit message. When you settle something no spec or ADR already says,
+  put it on a line of its own the moment you decide it:
+      DECISION: <what> because <why>
+  Anything no spec or ADR records reaches a human's Inbox to keep or discard.
 
 Report at the end in two or three sentences: what you did, and anything a human
 needs to decide.

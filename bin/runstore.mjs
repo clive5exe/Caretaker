@@ -47,6 +47,7 @@ import { randomBytes } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { makeRedactor, requireSecrets } from "./secrets.mjs";
 import { stateDirFor } from "./statedir.mjs";
+import { harvest, liveRecorder } from "./harvest.mjs";
 
 export const RUN_ID = /^r_[0-9a-f]{8}$/;
 export const newRunId = () => `r_${randomBytes(4).toString("hex")}`;
@@ -94,7 +95,7 @@ export const redactorFor = (secrets = {}) => makeRedactor(secrets);
  * the file is written by another process through a pipe, and a missed watch
  * event must never mean a gap in the mirror.
  */
-export function startMirror({ from, to, redact, intervalMs = 200 }) {
+export function startMirror({ from, to, redact, intervalMs = 200, onLine = null }) {
   mkdirSync(dirname(to), { recursive: true });
   writeFileSync(to, "");
   let offset = 0;
@@ -120,7 +121,11 @@ export function startMirror({ from, to, redact, intervalMs = 200 }) {
     if (cut === -1) return;
     const complete = pending.slice(0, cut + 1);
     pending = pending.slice(cut + 1);
-    appendFileSync(to, complete.split("\n").map((l) => (l ? redact(l) : l)).join("\n"));
+    const lines = complete.split("\n").map((l) => (l ? redact(l) : l));
+    appendFileSync(to, lines.join("\n"));
+    // B-5: each complete line is handed on as it lands, redacted, so what the
+    // run decides is recorded while it runs rather than after it ends.
+    if (onLine) for (const l of lines) if (l) onLine(l);
   };
   const timer = setInterval(pump, intervalMs);
   return {
@@ -129,7 +134,9 @@ export function startMirror({ from, to, redact, intervalMs = 200 }) {
       clearInterval(timer);
       pump();
       if (pending) {
-        appendFileSync(to, `${redact(pending)}\n`);
+        const last = redact(pending);
+        appendFileSync(to, `${last}\n`);
+        if (onLine) onLine(last);
         pending = "";
       }
     },
@@ -231,7 +238,7 @@ export async function runArchived(workspace, prompt, policy = {}, { stateDir, ta
   const redact = redactorFor(secrets);
   const logDir = policy.logDir ?? join(tmpdir(), "caretaker-runs", runId);
   const dir = join(stateDir, "runs", runId);
-  const mirror = startMirror({ from: join(logDir, "transcript.log"), to: join(dir, "transcript.live.log"), redact });
+  const mirror = startMirror({ from: join(logDir, "transcript.log"), to: join(dir, "transcript.live.log"), redact, onLine: liveRecorder(dir) });
   const harnessPolicy = { ...policy, runId, logDir, ...(task ? { task } : {}) };
   let result;
   let egressRecord = null;
@@ -261,7 +268,16 @@ export async function runArchived(workspace, prompt, policy = {}, { stateDir, ta
   const archived = archive(result, {
     stateDir, workspace, task, parent, model: policy.model ?? null, policy: harnessPolicy, redact, egress: egressRecord,
   });
-  return { ...result, archived };
+  // H-6: surface what the run decided and no document records. Never fails
+  // the run: the archive is already written, and a harvest can be re-run.
+  let harvested;
+  try {
+    const h = harvest({ root: workspace, runDir: archived });
+    harvested = { decisions: h.decisions.length, pending: h.decisions.filter((d) => !d.recordedIn).length };
+  } catch (e) {
+    harvested = { error: e.message };
+  }
+  return { ...result, archived, harvested };
 }
 
 /* -------------------------------------------------------------------- cli */

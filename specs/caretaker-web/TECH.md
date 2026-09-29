@@ -673,13 +673,17 @@ To avoid a name collision, the API field is `lifecycle`, not `stage`.
 | `spec-approval` | rule 8 above holds | approved, or rejected with a reason | `spec-approve` / `spec-reject` |
 | `gate-failure` | the latest `security` verdict is `fail`; **or** the latest drift `gate` event for the task has `verdict:"fail"` and no later pass; **or** some required gate has at least `cfg.inbox.reworkThreshold` fails (default 2) | a later pass, or the task is dropped | open the work item; drift shows the CLI command |
 | `pr-review` | `lifecycle === "human"` and a `pr` is recorded | `done` (nothing records a merge yet) | review outside Caretaker, then `done` |
+| `decision` | an archived run's `harvest.json` has a decision with no `recordedIn`, and `harvest-decisions.jsonl` has no entry for it (`harvest.pending`) | kept (a draft ADR is written) or discarded with a reason | the `harvest.mjs keep` / `discard` command, shown as text |
 
 - **A single qa fail is not an Inbox item.** It sends the task back to build.
 - **A refutation (H-3, `bin/verify.mjs`) is a qa fail like any other.** Its
   gate event carries `source: "refute"` and is excluded from the drift-gate
   rule, so it never gets a drift-dismissal command and never masks a drift
   failure. Repeated refutations reach the Inbox through the rework threshold.
-- **Dropped tasks never appear.**
+- **Dropped tasks never appear.** A decision is the exception to "open tasks
+  only": it is about the run, and a decision made on a task that has since
+  closed still lands nowhere until someone keeps or discards it. Its `task` is
+  null when the run named none.
 - Items are ordered by `since`: the `at` of the fact that created them, or the
   date for legacy verdicts.
 

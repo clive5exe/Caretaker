@@ -346,12 +346,12 @@
           "title": "Harvest decisions the transcript holds and no document does",
           "owner": "architect",
           "est": "2d",
-          "status": "todo",
+          "status": "doing",
           "deps": [
             "H-5"
           ],
           "ac": "after a run, decisions made in the transcript that appear in no spec or ADR are surfaced for a human to keep or discard",
-          "note": "Prompt-driven development means the PROMPT is the real spec, transiently. Intent gets settled in a conversation and lands nowhere. This is the graduate idea applied continuously instead of only at handoff."
+          "note": "Prompt-driven development means the PROMPT is the real spec, transiently. Intent gets settled in a conversation and lands nowhere. This is the graduate idea applied continuously instead of only at handoff. — Built: bin/harvest.mjs. Agents declare decisions on their own line (DECISION: <what> because <why>; prompt.txt and prompt.example.txt say so). After every archived run, runstore harvests them and checks each against every spec and ADR (recorded = 80% of its significant words in one document). The rest are a fifth Inbox kind, 'decision', with the keep/discard commands shown as text. keep writes a draft ADR citing the run; discard needs a reason; each once. What is harvested is what was DECLARED: reading intent from free prose would be a model's job and make this probabilistic. Checked by bin/harvest.test.mjs; mutations Hv3-Hv11 fail by name. Gate verdicts not recorded."
         },
         {
           "id": "H-7",
@@ -480,13 +480,13 @@
           "title": "Externalise before compaction, continuously",
           "owner": "backend",
           "est": "1d",
-          "status": "todo",
+          "status": "doing",
           "deps": [
             "H-6"
           ],
           "spec": "docs/memory.md",
           "ac": "reasoning is written to the artifact it explains as a run proceeds rather than at the end, so a compacted or killed session loses nothing that was already decided",
-          "note": "Compaction is lossy and unavoidable, so the principle is externalise early rather than avoid compacting. Measured in the project this came from: everything that survived was written where it attaches to the artifact - commit message, board note, decision record. Everything that lived only in the conversation is gone, including reasoning that took hours to reach."
+          "note": "Compaction is lossy and unavoidable, so the principle is externalise early rather than avoid compacting. Measured in the project this came from: everything that survived was written where it attaches to the artifact - commit message, board note, decision record. Everything that lived only in the conversation is gone, including reasoning that took hours to reach. — Built: runstore's live mirror hands each redacted line to harvest.liveRecorder, which appends any DECISION to the run's decisions.live.jsonl as it is written; a killed run keeps what it had decided (tested with a run killed mid-sleep). The agent prompt now says to write things where they attach as you go. LIMIT: it is as live as the adapter's output. The openai-compatible adapter logs every turn as it happens; the claude CLI preset uses --output-format json, one result at exit, so a killed claude run loses its unprinted turns. Switching that preset to stream-json is the fix and needs a real claude CLI to verify. Mutations Hv1, Hv2 fail by name. Gate verdicts not recorded."
         },
         {
           "id": "B-6",

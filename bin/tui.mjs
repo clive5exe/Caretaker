@@ -218,7 +218,7 @@ export function renderInbox(d, st, W, H, p) {
   const RW = W - LW - 3;
   const items = d.inbox.items;
   const left = [];
-  const SHORT = { question: "questions", "spec-approval": "specs", "gate-failure": "gates", "pr-review": "PRs" };
+  const SHORT = { question: "questions", "spec-approval": "specs", "gate-failure": "gates", "pr-review": "PRs", decision: "decisions" };
   left.push(p.dim(Object.entries(d.inbox.counts).map(([k, n]) => `${SHORT[k]} ${n}`).join(" · ")));
   if (!items.length) left.push(p.dim("Nothing needs you right now."));
   items.forEach((it, i) => {

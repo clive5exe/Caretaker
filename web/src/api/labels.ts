@@ -56,14 +56,15 @@ export const verdictTone = (v: string) => (v === "pass" ? "pass" : v === "fail" 
 
 export const levelTone = (l: string) => (l === "error" ? "fail" : l === "warn" ? "warn" : "");
 
-/** Inbox kinds: category colors (questions blue, spec reviews orange, gate failures red, PRs green). */
+/** Inbox kinds: category colors (questions blue, spec reviews orange, gate failures red, PRs green, decisions violet). */
 export const KIND: Record<InboxKind, { label: string; plural: string; tile: string; icon: "q" | "doc" | "x" | "pr" }> = {
   question: { label: "Question", plural: "Questions", tile: "blue", icon: "q" },
   "spec-approval": { label: "Spec review", plural: "Spec reviews", tile: "orange", icon: "doc" },
   "gate-failure": { label: "Gate failure", plural: "Gate failures", tile: "red", icon: "x" },
   "pr-review": { label: "PR review", plural: "PR reviews", tile: "green", icon: "pr" },
+  decision: { label: "Decision", plural: "Decisions", tile: "violet", icon: "doc" },
 };
-export const KIND_ORDER: InboxKind[] = ["question", "spec-approval", "gate-failure", "pr-review"];
+export const KIND_ORDER: InboxKind[] = ["question", "spec-approval", "gate-failure", "pr-review", "decision"];
 
 /** What a command button says. The command itself is whatever core offered. */
 export function commandLabel(c: Command): string {

@@ -114,6 +114,11 @@ answered. Nobody has to "clear" it.
    `drift.mjs` dismissal command rather than a button (TECH.md explains why).
 4. **PRs ready for human review.** Every required gate passed and a PR is
    recorded. Action: review and merge outside Caretaker, then close with `done`.
+5. **Decisions no document records.** A run declared a decision
+   (`DECISION: … because …`) that no spec or ADR already says. Action: keep
+   it, which writes it as a draft ADR citing the run, or discard it with a
+   reason. Like a drift dismissal, both are shown as the exact
+   `harvest.mjs` command rather than a button.
 
 **The Inbox is not verification.** ADR-0001 rejects "human approval gates as
 the verification story", because a person approving their fortieth diff of the
@@ -187,7 +192,7 @@ The first thing you see.
 - Held at a gate, blocked, and no finish line.
 - **Executing now**: runs with a start and no end, live over SSE. A run past
   the staleness threshold shows as *no end recorded*, not as still running.
-- Inbox count, linking to the Inbox, with the four oldest items listed.
+- Inbox count, linking to the Inbox, with its four oldest items listed.
 - A live feed of recent events, filterable by level.
 - Three headline cards, the same figures as `board.html`:
   - first-pass rate. Its trend line needs `history.jsonl` to record the rate.
@@ -219,10 +224,12 @@ Factories calls this page Activity, and so does the sidebar.
   exactly the rubber stamp ADR-0001 rejects.
 
 ### 3. Inbox
-The four kinds above, oldest first, each with its one action and a link to the
-work item. When empty, it says so plainly.
+The five kinds above, oldest first, each with its one action and a link to the
+work item (and, for a decision, to the run that made it). When empty, it says
+so plainly.
 - **A list with a detail pane,** as in Factories. Each row has its kind's icon
-  tile: questions blue, spec reviews orange, gate failures red, PRs green.
+  tile: questions blue, spec reviews orange, gate failures red, PRs green,
+  decisions violet.
   Selecting a row opens the pane, which shows the item's evidence, the exact
   fact that put it there, and its one action.
 - **Filter tabs by kind,** each with its count.
@@ -339,7 +346,7 @@ the two cannot disagree either. It has four screens, switched with `1` to `4`:
 |---|---|
 | Runs | a list of runs on the left; on the right, the selected run's transcript tail, its token breakdown and its gate state; the queue below |
 | Board | the lifecycle columns, with rework and active items first |
-| Inbox | the same four kinds; the selected item shows the fact that put it there, such as its gate history |
+| Inbox | the same five kinds; the selected item shows the fact that put it there, such as its gate history |
 | Metrics | the Metrics page's figures from `dashboard.mjs`, as text |
 
 - `:` opens a command line that lists only what `commandsFor` offers, like the

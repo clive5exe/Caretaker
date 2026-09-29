@@ -157,9 +157,10 @@ export interface WorkItem extends WorkSummary {
   events: LogEvent[] | null;
 }
 
-export type InboxKind = "question" | "spec-approval" | "gate-failure" | "pr-review";
+export type InboxKind = "question" | "spec-approval" | "gate-failure" | "pr-review" | "decision";
 export interface InboxItem {
-  task: string;
+  /** null only for a harvested decision from a run that named no task. */
+  task: string | null;
   title: string;
   owner: string | null;
   kind: InboxKind;
@@ -170,6 +171,9 @@ export interface InboxItem {
   pr?: string;
   gateHistory?: Record<string, Attempt[]>;
   dismissCommand?: string | null;
+  decision?: { run: string; id: string; text: string; why: string | null };
+  keepCommand?: string;
+  discardCommand?: string;
   actions: Command[];
 }
 export interface Inbox {

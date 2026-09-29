@@ -37,6 +37,7 @@ import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import * as events from "./events.mjs";
 import { cliLabel } from "./harness.mjs";
+import { transcriptTexts } from "./transcript.mjs";
 import { load as loadHarnessSettings, policyFlags, policyFor } from "./harness-config.mjs";
 import { RUN_ID, runArchived, stateDirFor } from "./runstore.mjs";
 import { requireSecrets } from "./secrets.mjs";
@@ -54,32 +55,12 @@ const VERDICT_LINE = /^[ \t>*`_-]*VERDICT:[ \t]*(REFUTED|STANDS)\b[ \t:—-]*(.*
 
 /**
  * Read the refuter's verdict from its transcript. The LAST verdict line wins,
- * because an agent may quote the instruction before answering it. A JSON line
- * is read as the strings it holds; any other line with `\n` escapes unfolded.
- * Both are properties of JSON, not of any vendor.
+ * because an agent may quote the instruction before answering it. The text is
+ * read as transcript.mjs reads any transcript, knowing no vendor's shape.
  */
 export function parseVerdict(text) {
-  const raw = String(text ?? "");
   let last = null;
-  // A transcript line that is JSON is read as the strings it holds, in order —
-  // whatever the field names, so no vendor's output shape is known here. A
-  // reply that IS the verdict line then starts a line, as the rule requires,
-  // instead of sitting after `"content":"`.
-  const texts = [];
-  const walk = (v) => {
-    if (typeof v === "string") texts.push(v);
-    else if (v && typeof v === "object") for (const x of Array.isArray(v) ? v : Object.values(v)) walk(x);
-  };
-  for (const line of raw.split("\n")) {
-    try {
-      const v = JSON.parse(line);
-      if (v && typeof v === "object") {
-        walk(v);
-        continue;
-      }
-    } catch {}
-    texts.push(line.replace(/\\n/g, "\n"));
-  }
+  const texts = transcriptTexts(text);
   for (const t of texts) {
     for (const m of t.matchAll(VERDICT_LINE)) last = m;
   }
