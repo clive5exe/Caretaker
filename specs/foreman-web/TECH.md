@@ -63,8 +63,6 @@ change the design, and it would be wrong without them.
 - **Runs have no identity in the run log.**
   - `bin/run.mjs` rows carry `t, kind, name, state, task, tokens, in, cached,
     write, out, turns, model, note, src`, with no run id and no parent.
-  - `ops/foreman/run.mjs`, the installed copy, is older and lacks the token
-    breakdown.
 - **The harness writes logs but does not keep its result.**
   - `harness.run()` writes `transcript.log`, `stderr.log` and a `shadow/` git
     directory under its log dir, which defaults to `$TMPDIR/foreman-runs/<id>`
@@ -97,9 +95,6 @@ change the design, and it would be wrong without them.
     `spec:` points at a shared doc under `docs/`, and none of those docs
     contains a ```` ```spec ```` block. Some `todo` tasks carry a qa pass, so
     status lags the verdicts.
-  - `board.mjs` escapes `& < >` and not quotes (`:96`).
-  - `board.mjs` calls a `build.mjs` that does not exist in this repo (`:296`),
-    so every mutation prints a `build.mjs failed` line.
 
 ---
 
@@ -162,9 +157,8 @@ the exports in the same file leaves the install set unchanged.
 
 **Behaviour change: none.** A golden test runs the old and new CLI over a
 fixture board, with every command and every refusal. It asserts identical
-stdout, stderr, exit code and resulting `board.json`. It normalises only three
-things, and names them: `today()`, absolute paths, and the `build.mjs failed`
-line.
+stdout, stderr, exit code and resulting `board.json`. It normalises only two
+things, and names them: `today()` and absolute paths.
 
 The gate-definition disagreement and the Encore leak are **not** fixed here.
 Fixing them is a rule change and gets its own task (see Findings).
@@ -335,8 +329,9 @@ POST a board mutation.
   `Content-Security-Policy: default-src 'self'; script-src 'self'; object-src 'none'; frame-ancestors 'none'`.
 - The client renders text nodes only. The boundary test (§4) fails the build
   on `dangerouslySetInnerHTML` or `innerHTML`.
-- `docs/board.html` is served with `Content-Security-Policy: sandbox`, because
-  its `esc()` does not escape quotes.
+- `docs/board.html` is served with `Content-Security-Policy: sandbox`. It is
+  generated outside the server and carries agent-written text, so it gets no
+  script execution even if its escaping is ever wrong.
 
 **Files.**
 - A run id must match `^r_[0-9a-f]{8}$`, the shape from `harness.mjs:115`.
@@ -476,9 +471,6 @@ by the harness.
 **Design.**
 - System fonts and no external requests. The page keeps the same "nothing
   leaves the machine" posture as the sandbox.
-  - Note that `docs/board.html` today *does* preconnect to Google Fonts
-    (`dashboard.mjs:742-744`). It still renders offline with fallback fonts.
-    That is a separate finding, not changed here.
 - The visual language reuses the dashboard's tokens: panel, gate rail, chips.
 
 **Structure.**
@@ -621,7 +613,7 @@ To avoid a name collision, the API field is `lifecycle`, not `stage`.
 | agent, model, harness | `name`, `model`; verdict `adapter`, `cli` | name and model yes; harness no | C-4 |
 | status | verdict `state` and `reason`; start/end rows | rows yes; verdict no | C-4 |
 | timestamps | row `t`; verdict `startedAt`, `endedAt`, `durationMs`, `timeoutMs` | row `t` only | C-4 |
-| token usage | `in`, `cached`, `write`, `out`, `turns`, `tokens` (`bin/run.mjs`); harness `cost.tokens`, where null means unknown | yes, from `bin/run.mjs`; the installed copy lacks the breakdown | refresh the install |
+| token usage | `in`, `cached`, `write`, `out`, `turns`, `tokens` (`bin/run.mjs`); harness `cost.tokens`, where null means unknown | yes, from `bin/run.mjs` | — |
 | measured diff | harness `diff`: `files`, `insertions`, `deletions`, `patch`, `truncated`, `ignoredPathsNotMeasured` | returned, not persisted | C-4 |
 | transcript | redacted archive or mirror | raw file in `$TMPDIR` | C-4 |
 | gate results | drift gate events carrying `run`; task verdicts shown as task-level with their dates | drift yes, when `--run` is passed | — |
@@ -680,23 +672,22 @@ them.
 
 ## Findings recorded here, not fixed by this project
 
-1. **Four gate definitions disagree** (§0). `config.gates` is documented in
-   the README as "the list of verdicts `done` demands", and `done` ignores it.
+1. **Four gate definitions disagree** (§0). The dashboard reads
+   `config.gates` and `done` ignores it. The README says so, but the two
+   still disagree.
 2. **Encore leaks into core,** which CLAUDE.md says should be removed:
    - `needsSecurity` terms (`fee|refund|stripe|…`, `board.mjs:400`)
    - `DOC_ROLES` / `NAMES_CODE` (`:404-405`)
    - `founderBlocked` (`:241`)
    - comments about Weeks, Waves and ADR-0028 (`:53`, `:323`)
-3. **`board.mjs` `esc()` does not escape quotes** (`:96`). The output is
-   markdown and HTML that later gets published.
-4. **`board.mjs` calls a missing `build.mjs`** on every mutation (`:296`).
-5. **The installed `ops/foreman/run.mjs` has drifted** from `bin/run.mjs`.
-6. **Board status lags recorded verdicts:** `todo` tasks carry qa passes.
-7. **Drift events are written unredacted** (`drift.mjs:453-460`).
-8. **The egress proxy's `--log` may be unwritable** as launched by
+3. **Board status lags recorded verdicts:** `todo` tasks carry qa passes.
+4. **Drift events are written unredacted** (`drift.mjs:453-460`).
+5. **The egress proxy's `--log` may be unwritable** as launched by
    `netns.proxyRunArgs`. Unverified; C-5 confirms or refutes it with a test.
-9. **`docs/board.html` preconnects to Google Fonts,** despite the README
-   saying "no CDN".
+
+Four earlier findings were fixed by #2: `esc()` not escaping quotes, the
+missing `build.mjs` hook, the drifted installed `run.mjs`, and the Google Fonts
+links in `docs/board.html`.
 
 ## Verification plan (for the implementation, not this document)
 
