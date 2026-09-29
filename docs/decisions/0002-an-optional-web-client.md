@@ -1,6 +1,6 @@
 ---
 title: "ADR-0002: An optional local web client, beside the TUI and the static page"
-status: draft
+status: accepted
 updated: 2026-09-29
 supersedes: "the 'TUI rather than a web UI' position in the U-2 board note (only that part)"
 ---
@@ -85,6 +85,23 @@ this ADR should make it explicitly.
 
 ## Decision
 
-**Draft.** Proposed: an optional, local, foreground web client over the core,
-alongside the TUI and the static page. It is accepted or rejected by review of
-this document together with the two specs it points to.
+**Accepted on 2026-09-29.** Caretaker gets an optional, local, foreground web
+client over the core, alongside the TUI and the static page. It is specified by
+`specs/foreman-web/PRODUCT.md` and `specs/foreman-web/TECH.md`, which are
+accepted with this ADR.
+
+**Who decided.** Five, the project owner, asked for the web client, steered its
+design through a clickable mockup of every page, and then asked for the work to
+be finished. Claude wrote this acceptance on that instruction. The design that
+came out of that review is recorded in the specs: the layout, colors and logo
+(TECH.md §4, PRODUCT.md §Layout), the Metrics page, the command menu, and the
+TUI's four screens.
+
+**The ordering call this ADR asks for.** No W-task starts before H-1's qa gate
+passes. That keeps CLAUDE.md's bottom-up order, and it is the same reason U-1
+waits. C-1, C-2, C-3 and C-6 may start now. They are layer-4 board work, and
+`docs/board.html` and the TUI use them as much as the web client does. C-4 and
+C-5 wait on H-1 and B-6, as TECH.md already says.
+
+The proposed tasks are still not on the board. Adding them is a separate board
+change.

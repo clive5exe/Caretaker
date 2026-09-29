@@ -1,6 +1,6 @@
 ---
 title: Foreman Web v1 — product
-status: draft
+status: accepted
 updated: 2026-09-29
 ---
 
@@ -138,6 +138,47 @@ Every page follows three rules:
 - **Numbers come from the same functions as `docs/board.html`.** The two
   surfaces cannot headline different figures.
 
+### Layout
+
+The layout is Warp Factories' web app, taken from the screenshots in Warp's
+docs. TECH.md §4 has the colors, font and logo.
+
+- **Sidebar, left.**
+  - At the top: the Caretaker wordmark, search, and a collapse button.
+  - Next, the two lists you check most: **Inbox**, with an unread count, and
+    **Runs**.
+  - Under **Project**: Dashboard, Activity, Agents, Specs & drift, Metrics and
+    Settings.
+  - Factories lists Runs twice, once across factories and once per factory.
+    One server shows one project, so Runs is listed once.
+  - Under **Also in your terminal**: a page showing the same screens in the
+    TUI and how to open it.
+  - At the bottom: **Getting started**.
+- **Top bar.**
+  - Breadcrumbs.
+  - Search and filter buttons.
+  - One black primary button. It reads **Go to**, or **Actions** on a work
+    item, and opens the command menu.
+- **Pages.**
+  - Bordered cards.
+  - Lists of rows with a colored icon tile, a title, one line of
+    description, and chips on the right.
+  - Line charts with the value in large type above them, as on the Factories
+    dashboard.
+
+### The command menu
+
+The menu opens from the primary button or Ctrl-K, and it searches as you type.
+It lists:
+
+- the pages
+- work items and runs, by id and title
+- on a work item, the commands core offers for it right now, from
+  `lifecycle.commandsFor`
+
+Commands core does not offer are not listed, and the menu adds no command of
+its own. Choosing a command does exactly what the same button on the page does.
+
 ### 1. Dashboard
 The first thing you see.
 - Current-phase progress, **by effort and by task count**, with the gap
@@ -146,10 +187,21 @@ The first thing you see.
 - Held at a gate, blocked, and no finish line.
 - **Executing now**: runs with a start and no end, live over SSE. A run past
   the staleness threshold shows as *no end recorded*, not as still running.
-- Inbox count, linking to the Inbox.
+- Inbox count, linking to the Inbox, with the four oldest items listed.
 - A live feed of recent events, filterable by level.
+- Three headline cards, the same figures as `board.html`:
+  - first-pass rate. Its trend line needs `history.jsonl` to record the rate.
+    Today the daily row has progress, ETA, done, held and blocked, and adding
+    the rate is one more field in the same row.
+  - median cycle time against the median estimate
+  - tokens per closed task
+- **Closed vs started**, per day. *Not in v1.* Closed dates come from git, but
+  nothing records when a task started. This needs a start fact in core
+  (`board.mjs start` appending one), and until then the card says *not
+  recorded*.
 
-### 2. Work board
+### 2. Activity (the work board)
+Factories calls this page Activity, and so does the sidebar.
 - Columns by **lifecycle stage**, with a toggle to the **status** columns that
   `board.html` uses (Working / Queued / Blocked / Done from `config.columns`).
 - A card shows id, title, owner, estimate, the gate rail (one segment per
@@ -168,7 +220,18 @@ The first thing you see.
 
 ### 3. Inbox
 The four kinds above, oldest first, each with its one action and a link to the
-work item. It is filterable by kind. When empty, it says so plainly.
+work item. When empty, it says so plainly.
+- **A list with a detail pane,** as in Factories. Each row has its kind's icon
+  tile: questions blue, spec reviews orange, gate failures red, PRs green.
+  Selecting a row opens the pane, which shows the item's evidence, the exact
+  fact that put it there, and its one action.
+- **Filter tabs by kind,** each with its count.
+- **Read and unread are kept in the browser only,** in `localStorage`. Marking
+  an item read changes nothing in core and nothing for anyone else. It only
+  dims the row.
+- **No Resolve button.** Factories has one. Here an item leaves the Inbox when
+  the fact behind it changes, so a Resolve button would be a second, separate
+  way to clear it.
 
 ### 4. Runs
 - A list of runs: id, work item, agent, model, harness, status, started,
@@ -220,11 +283,62 @@ out in TECH.md §Run detail. Until then, those sections say *not recorded*.
 - Read-only for drift. Dismissal stays with `drift.mjs check --dismiss`, and
   the page shows the exact command.
 
-### 8. Settings
+### 8. Metrics
+Everything Caretaker measures. Each figure is labelled with where it comes
+from. A range picker (7, 14 or 30 days) applies to figures built from dated
+rows: run log rows and gate verdicts. A figure with no dates behind it says
+*all time*.
+
+- **From `dashboard.mjs` today** (exported in C-2):
+  - tokens by kind, as cached, in, write and out per day
+  - context churn: the share of context the cache could not match
+  - rework spend: tokens on tasks that failed a gate and ran again
+  - pass rate per gate, counting every attempt from the verdict history
+  - first-pass rate
+  - estimate against elapsed time for closed tasks
+  - tokens by agent and by model
+- **Not in v1:**
+  - Cycle time per lifecycle stage. Stages are derived on every read, so how
+    long an item sat in each one needs dated transitions from the event log
+    (B-7).
+  - Cost in money. Caretaker records tokens, not dollars. A dollar figure
+    needs a price table per model, and subscription CLIs have no per-token
+    price at all.
+
+### 9. Settings
 - The resolved config (read-only in v1), and which data sources exist on disk:
   board, run log, event log, run archive, agent definitions.
 - The state directory, and the server binding and port.
 - How to rotate the access token (restart the server).
+
+### 10. Getting started
+How to build the client and start the server, both copied from TECH.md §1, and
+how to reach it over `ssh -L`. It also lists what the server promises: no
+daemon, no database, loopback only, and the token handling. It says plainly that
+paths and commands still say `foreman`.
+
+## The terminal view (U-2)
+
+The TUI shows the same project over SSH with nothing listening. It reads the
+same functions as the web client, `readmodel` and `lifecycle` (C-2, C-3), so
+the two cannot disagree either. It has four screens, switched with `1` to `4`:
+
+| screen | shows |
+|---|---|
+| Runs | a list of runs on the left; on the right, the selected run's transcript tail, its token breakdown and its gate state; the queue below |
+| Board | the lifecycle columns, with rework and active items first |
+| Inbox | the same four kinds; the selected item shows the fact that put it there, such as its gate history |
+| Metrics | the Metrics page's figures from `dashboard.mjs`, as text |
+
+- `:` opens a command line that lists only what `commandsFor` offers, like the
+  web command menu.
+- The transcript tail is the raw redacted transcript (C-4), the same as Run
+  detail. `bin/tui-mock.mjs` shows per-tool lines (read, edit, bash). Those
+  would need the harness to emit normalised events first, and until it does,
+  the TUI shows raw text.
+- U-2's acceptance criterion covers watching and steering one run. The four
+  screens widen it, and the reviewer should update U-2 on the board if this
+  is accepted. This change does not edit `docs/board.json`.
 
 ## What "not recorded" will mean on day one
 
@@ -241,7 +355,7 @@ what isn't.
 - **Launching runs from the browser.** Runs start from the loop or the CLI.
 - **Steering a run mid-flight.** This is U-2. The harness has no steering
   channel: the prompt goes in on stdin, and stdin is then closed.
-- **Recording gate verdicts from the browser.** See the Work board.
+- **Recording gate verdicts from the browser.** See Activity.
 - **Editing config or the board's structure** (phases, new tasks) from the
   browser.
 - **Remote access, multiple users, or a hosted service.** Tunnel over SSH if
@@ -280,6 +394,9 @@ Studied for product ideas only. Foreman's runtime stays its own.
   outlives the sandbox.
 - **An "autonomy" measure,** the share of work that needed no human. It is
   already planned here as B-4's human intervention rate.
+- **The web app's layout and look:** the sidebar, breadcrumbs, one black
+  primary button, bordered cards, icon tiles and line charts, the Activity name,
+  and the Inbox as a list with a detail pane. See §Layout and TECH.md §4.
 
 **Recorded as an idea, not in v1:** the reviewing run uses a different model
 from the building run, to avoid shared blind spots. It is a natural extension
@@ -292,3 +409,7 @@ of "nobody closes their own work".
 - **An orchestrator agent that decides what runs.** Foreman's control plane is
   code and gates, not a model.
 - **Human approval as the verification step.** See the Inbox, and ADR-0001.
+- **A Resolve button in the Inbox.** Items clear when their fact changes.
+- **A "New run" button.** Runs start from the loop or the CLI (Non-goals).
+- **A structured session view of the transcript.** It would parse one vendor's
+  output above the harness seam. Transcripts stay raw text.
