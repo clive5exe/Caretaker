@@ -20,7 +20,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { STAGES } from "./lifecycle.mjs";
+import { STAGES, stageOf } from "./lifecycle.mjs";
 import { missingGates } from "./board.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -37,8 +37,15 @@ const VENDOR_PACKAGES = ["@anthropic-ai/sdk", "@anthropic-ai/claude-agent-sdk", 
 // Gate names are whatever core's missingGates can ask for, read from core
 // rather than typed here: a task that touches money, auth and isolation.
 const GATES = missingGates({ title: "auth token money isolation sandbox", gate: {} }).missing.map((g) => g.split(" ")[0]);
-const NAMES = [...new Set([...GATES, ...STAGES])];
-const NAMED_COLORS = ["red", "green", "blue", "white", "black", "gray", "grey", "orange", "purple", "violet", "pink", "yellow", "silver", "navy", "teal", "maroon", "crimson", "gold"];
+// Stages stageOf returns beyond STAGES (independent review: "ready" and
+// "dropped" were not checked), asked of stageOf rather than typed here.
+const EXTRA = [stageOf({ id: "X", title: "t", status: "dropped" }, {}).stage, stageOf({ id: "X", title: "t", status: "todo", ac: "a", owner: "o", est: "1h" }, {}).stage];
+const NAMES = [...new Set([...GATES, ...STAGES, ...EXTRA])];
+// Every CSS named color, since any of them works in a style (independent QA:
+// "tomato" and "Red" went through). transparent and currentColor are not
+// colors of their own and are allowed.
+const NAMED_COLORS = ("aliceblue antiquewhite aqua aquamarine azure beige bisque black blanchedalmond blue blueviolet brown burlywood cadetblue chartreuse chocolate coral cornflowerblue cornsilk crimson cyan darkblue darkcyan darkgoldenrod darkgray darkgreen darkgrey darkkhaki darkmagenta darkolivegreen darkorange darkorchid darkred darksalmon darkseagreen darkslateblue darkslategray darkslategrey darkturquoise darkviolet deeppink deepskyblue dimgray dimgrey dodgerblue firebrick floralwhite forestgreen fuchsia gainsboro ghostwhite gold goldenrod gray green greenyellow grey honeydew hotpink indianred indigo ivory khaki lavender lavenderblush lawngreen lemonchiffon lightblue lightcoral lightcyan lightgoldenrodyellow lightgray lightgreen lightgrey lightpink lightsalmon lightseagreen lightskyblue lightslategray lightslategrey lightsteelblue lightyellow lime limegreen linen magenta maroon mediumaquamarine mediumblue mediumorchid mediumpurple mediumseagreen mediumslateblue mediumspringgreen mediumturquoise mediumvioletred midnightblue mintcream mistyrose moccasin navajowhite navy oldlace olive olivedrab orange orangered orchid palegoldenrod palegreen paleturquoise palevioletred papayawhip peachpuff peru pink plum powderblue purple rebeccapurple red rosybrown royalblue saddlebrown salmon sandybrown seagreen seashell sienna silver skyblue slateblue slategray slategrey snow springgreen steelblue tan teal thistle tomato turquoise violet wheat white whitesmoke yellow yellowgreen").split(" ");
+const COLOR_PROP = /(?:color|background|fill|stroke|border|outline|shadow|caret|accent|decoration)[\w-]*["']?\s*[:=]\s*/i;
 
 const LABELS = ["api", "labels.ts"].join(sep);
 const THEME = "theme.css";
@@ -57,17 +64,31 @@ export function violations(rel, text) {
     for (const m of code.matchAll(/(["'`])([a-z-]+)\1/g)) {
       if (NAMES.includes(m[2])) out.push(["names a gate or stage outside labels.ts", m[0]]);
     }
+    // GATE names outside quotes too (independent QA): t.gates.security and
+    // { qa: … } pick out one gate as surely as "security" does. Stage names
+    // are not checked unquoted: spec, triage and dropped are also the names
+    // of recorded facts on a task (t.spec, t.triage, t.dropped).
+    for (const m of code.matchAll(/\.([a-z]+)\b|[{,]\s*([a-z]+)\s*:/g)) {
+      if (GATES.includes(m[1] ?? m[2])) out.push(["names a gate or stage outside labels.ts", m[0]]);
+    }
   }
-  for (const m of code.matchAll(/\bhttps?:\/\/[^\s"'`)]*/g)) out.push(["contains an external URL", m[0]]);
+  for (const m of code.matchAll(/\b(?:https?|wss?):\/\/[^\s"'`)]*/g)) out.push(["contains an external URL", m[0]]);
+  // Protocol-relative (independent QA): "//host" and url(//host) load from outside too.
+  for (const m of code.matchAll(/(?:["'`]|url\(\s*["']?)\/\/[a-z0-9-]+(?:\.[a-z0-9-]+)+/gi)) out.push(["contains an external URL", m[0]]);
   if (rel !== THEME) {
     for (const m of code.matchAll(/#[0-9a-fA-F]{3,8}\b|\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch)\(/g)) {
       // A hex run in an id, a fragment or a hash is not a color when it is not a whole token after '#'.
       out.push(["contains a color literal", m[0]]);
     }
-    for (const m of code.matchAll(/(["'`])([a-z]+)\1/g)) {
-      if (NAMED_COLORS.includes(m[2]) && /(?:color|background|fill|stroke|border)[\w-]*["']?\s*[:=]\s*$/i.test(code.slice(Math.max(0, m.index - 40), m.index))) {
-        out.push(["contains a color literal", m[0]]);
-      }
+    // Named colors, in any case, as a string value of a color property in
+    // code, or as a bare word in a CSS declaration.
+    const named = rel.endsWith(".css") ? /\b([a-z]+)\b/gi : /(["'`])([a-z]+)\1/gi;
+    for (const m of code.matchAll(named)) {
+      const word = (m[2] ?? m[1]).toLowerCase();
+      if (!NAMED_COLORS.includes(word)) continue;
+      const before = code.slice(Math.max(0, m.index - 60), m.index);
+      const decl = rel.endsWith(".css") ? /(?:color|background|fill|stroke|border|outline|shadow|caret|accent|decoration)[\w-]*\s*:[^;{}]*$/i.test(before) : new RegExp(`${COLOR_PROP.source}$`, "i").test(before);
+      if (decl) out.push(["contains a color literal", m[0]]);
     }
   }
   return out;
@@ -101,6 +122,18 @@ function files(dir) {
     ["contains a color literal", "src/pages/X.tsx", `<div style={{ color: "#dc2626" }} />`],
     ["contains a color literal", "src/components/X.css", `.x { background: rgb(0 0 0); }`],
     ["contains a color literal", "src/pages/X.tsx", `<i style={{ background: "red" }} />`],
+    // Independent review and QA: each of these went through.
+    ["names a gate or stage outside labels.ts", "src/pages/X.tsx", `if (t.lifecycle === "ready") queue();`],
+    ["names a gate or stage outside labels.ts", "src/pages/X.tsx", `if (t.lifecycle === "dropped") hide();`],
+    ["names a gate or stage outside labels.ts", "src/pages/X.tsx", `const g = t.gates.security;`],
+    ["names a gate or stage outside labels.ts", "src/pages/X.tsx", `const want = { qa: true };`],
+    ["contains an external URL", "src/pages/X.tsx", `const s = new WebSocket("wss://evil.example/x");`],
+    ["contains an external URL", "src/pages/X.tsx", `<img src="//evil.example/p.png" />`],
+    ["contains an external URL", "src/fonts.css", `@import url(//fonts.example.com/inter.css);`],
+    ["contains a color literal", "src/pages/X.tsx", `<i style={{ color: "tomato" }} />`],
+    ["contains a color literal", "src/pages/X.tsx", `<i style={{ borderColor: "Red" }} />`],
+    ["contains a color literal", "src/components/X.css", `.x { color: tomato; }`],
+    ["contains a color literal", "src/components/X.css", `.x { border: 1px solid Red; }`],
   ];
   for (const [rule, rel, text] of plant) {
     const got = violations(rel.split("/").slice(1).join(sep), text);
@@ -109,6 +142,8 @@ function files(dir) {
   ok("labels.ts may name a stage", !violations(LABELS, `export const L = { human: "Human" }; const x = "human";`).length);
   ok("theme.css may hold colors", !violations(THEME, `:root { --fail: #b91c1c; --x: rgba(0,0,0,.1); }`).length);
   ok("a var() is not a color literal", !violations(join("pages", "X.tsx"), `<i style={{ background: "var(--line)" }} />`).length);
+  ok("a word that is a color name is not a color outside a color property", !violations(join("pages", "X.tsx"), `const tone = "red"; <p className="tan">{"Navy"}</p>`).length && !violations(join("components", "X.css"), `.tan { width: 10px; }`).length);
+  ok("a same-origin path is not an external URL", !violations(join("pages", "X.tsx"), `fetch("/api/v1/work"); const re = /\\/\\//;`).length);
 }
 
 /* 2. the real tree is clean ----------------------------------------------- */

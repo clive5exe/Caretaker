@@ -209,11 +209,14 @@ export async function startServer({ cfgPath, dist = DIST, port = 7420, host = "1
     return send(res, 200, readFileSync(p), { "Content-Type": type, "Cache-Control": cache });
   }
 
+  // Unstyled on purpose: the page is served under CSP, which blocks inline
+  // style attributes, and it is the one page with no stylesheet to point at
+  // (independent review).
   const fallbackPage = () => `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Caretaker</title></head>
-<body style="font:15px system-ui,sans-serif;max-width:640px;margin:48px auto;padding:0 16px;color:#0a0a0a">
-<h1 style="font-size:22px">Caretaker</h1>
+<body>
+<h1>Caretaker</h1>
 <p>The web client has not been built. Build it once, then reload:</p>
-<pre style="background:#fafafa;border:1px solid #e5e5e5;border-radius:8px;padding:12px">npm --prefix web ci &amp;&amp; npm --prefix web run build</pre>
+<pre>npm --prefix web ci &amp;&amp; npm --prefix web run build</pre>
 <p>Until then: the static page is at <a href="/board.html">/board.html</a>, and the API is under <code>/api/v1</code>
 (snapshot, work, work/:id, inbox, runs, runs/:id, agents, specs, metrics, events, settings, stream).</p>
 </body></html>`;

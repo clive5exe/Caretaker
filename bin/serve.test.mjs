@@ -430,6 +430,22 @@ const line = (n) => `${JSON.stringify({ t: `2026-09-29T10:00:0${n}Z`, kind: "sys
   ok("a line longer than the window is skipped, not waited on, and the next line is read", got[0]?.value?.ok === 1, JSON.stringify({ at, got }));
 }
 {
+  // W-17: with no web build, the fallback page's inline styles were blocked
+  // by its own CSP. It carries none now.
+  const empty = join(root, "no-dist");
+  mkdirSync(empty, { recursive: true });
+  const fs2 = await startServer({ cfgPath, dist: empty, port: 0, stateDir: state, pollMs: 60_000, heartbeatMs: 60_000, log: () => {}, token: "u".repeat(64) });
+  const page = await new Promise((res) => request({ host: "127.0.0.1", port: fs2.port, path: "/", headers: { Host: `127.0.0.1:${fs2.port}` } }, (r) => {
+    let t = "";
+    r.setEncoding("utf8");
+    r.on("data", (c) => (t += c));
+    r.on("end", () => res({ csp: r.headers["content-security-policy"] ?? "", text: t }));
+  }).end());
+  ok("the no-build page is served under CSP", /default-src 'self'/.test(page.csp) && /has not been built/.test(page.text), page.text.slice(0, 120));
+  ok("…and carries no inline style that CSP would block", !/\sstyle=|<style/i.test(page.text) && !/'unsafe-inline'/.test(page.csp));
+  await fs2.close();
+}
+{
   // W-3: the per-run stream had no heartbeat.
   const hs = await startServer({ cfgPath, dist, port: 0, stateDir: state, pollMs: 60_000, heartbeatMs: 50, log: () => {}, token: "t".repeat(64) });
   const port = hs.port;

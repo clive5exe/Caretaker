@@ -576,9 +576,16 @@ It fails if `web/src`:
 - imports any vendor SDK (the same list `drift.test.mjs` bans)
 - contains `innerHTML` or `dangerouslySetInnerHTML`
 - names a gate or a lifecycle stage outside the single display-label module
-  `web/src/api/labels.ts`
-- contains an `http://` or `https://` URL, which would be an external request
-- contains a color literal outside `web/src/theme.css`
+  `web/src/api/labels.ts`: every stage `stageOf` returns, `ready` and `dropped`
+  included, as a string; a gate also as a property or key (`gates.security`,
+  `{ qa: … }`)
+- contains an `http://`, `https://`, `ws://`, `wss://` or protocol-relative
+  (`//host`, `url(//host)`) URL, which would be an external request
+- contains a color literal outside `web/src/theme.css`: hex, a color
+  function, or any CSS named color in any case
+
+With no web build, `serve` answers with a plain page that carries no inline
+style, since its own CSP would block one.
 
 ---
 
