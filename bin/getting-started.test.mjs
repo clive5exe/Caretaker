@@ -49,6 +49,8 @@ const board = (() => {
 const t = board?.phases?.[0]?.tasks?.find((x) => x.id === "T-001");
 ok("the walk ends with the first task closed", t?.status === "done" && !!t.completed, JSON.stringify(t));
 ok("…and every move on it recorded, with who made it", (t?.transitions ?? []).map((m) => m.cmd).join() === "start,done" && t.transitions.every((m) => m.by && m.via === "cli"), JSON.stringify(t?.transitions));
+// Independent re-review: the checks were the one move with no who.
+ok("…the verdicts included", ["reviewer", "qa"].every((g) => t?.gate?.[g]?.by && t.gate[g].via === "cli"), JSON.stringify(t?.gate));
 
 rmSync(TMP, { recursive: true, force: true });
 console.log(failures ? `\n[getting-started] ${failures} FAILED` : "\n[getting-started] all checks passed");

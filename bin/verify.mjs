@@ -169,7 +169,7 @@ export async function refute({ cfgPath, parent, workspace, policy = {}, secrets 
   let recorded = false;
   if (outcome === "refuted") {
     const note = `refuted by run ${child}, checking run ${parent}: ${reason ?? "no reason given"}`;
-    const res = board.mutate(ctx, (d) => board.recordVerdict(d, parentRec.task, "qa", "fail", note));
+    const res = board.mutate(ctx, (d) => board.recordVerdict(d, parentRec.task, "qa", "fail", note, { by: `refuter run ${child}`, via: "refute" }));
     recorded = Boolean(res?.ok);
     if (!recorded) warnings.push(`the qa fail could not be recorded: ${res?.error ?? "unknown error"}`);
     try {

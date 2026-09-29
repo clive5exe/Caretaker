@@ -642,7 +642,7 @@ export function transition(d, id, cmd, text = "", opts = {}) {
  * working untouched. The history lives beside it in `gate.reviewer.history`,
  * oldest first, and is only read by the code that wants it.
  */
-export function recordVerdict(d, id, gate, verdict, note) {
+export function recordVerdict(d, id, gate, verdict, note, opts = {}) {
   if (!GATE_CMDS.includes(gate)) return { ok: false, error: `unknown gate: ${gate}` };
   const hit = find(d, id);
   if (!hit) return noTask(id);
@@ -653,10 +653,12 @@ export function recordVerdict(d, id, gate, verdict, note) {
   // `at` stays the date every reader already uses. `t` is the instant, added
   // so a fail and its same-day retry can be ordered (B-8: rework counted the
   // passing attempt whenever both fell on one day).
-  const entry = { verdict, at: today(), t: new Date().toISOString(), note: note || undefined };
-  const history = previous
-    ? [...(previous.history || []), { verdict: previous.verdict, at: previous.at, ...(previous.t ? { t: previous.t } : {}), note: previous.note }]
-    : [];
+  // `by` and `via`, as every other fact carries (independent re-review: the
+  // walk said every move records who made it, and verdicts recorded no one).
+  const who = opts.by ? { by: String(opts.by), ...(opts.via ? { via: opts.via } : {}) } : {};
+  const entry = { verdict, at: today(), t: new Date().toISOString(), ...who, note: note || undefined };
+  const kept = (e) => ({ verdict: e.verdict, at: e.at, ...(e.t ? { t: e.t } : {}), ...(e.by ? { by: e.by } : {}), ...(e.via ? { via: e.via } : {}), note: e.note });
+  const history = previous ? [...(previous.history || []), kept(previous)] : [];
   hit.t.gate[gate] = { ...entry, ...(history.length ? { history } : {}) };
   d.meta.updated = today();
   return { ok: true, task: hit.t };
@@ -893,7 +895,7 @@ function cli(argv) {
     const res = mutate(ctx, (d) => {
       if (!find(d, id)) return noTask(id);
       if (!["pass", "fail"].includes(verdict)) return { ok: false, badVerdict: true };
-      return recordVerdict(d, id, cmd, verdict, rest.slice(1).join(" "));
+      return recordVerdict(d, id, cmd, verdict, rest.slice(1).join(" "), { by: operator(ctx.cfg), via: "cli" });
     });
     if (res.badVerdict) {
       console.error("verdict must be pass or fail:  node ops/caretaker/board.mjs " + cmd + " " + id + " pass");

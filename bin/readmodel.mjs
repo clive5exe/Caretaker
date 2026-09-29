@@ -472,9 +472,29 @@ export function createReadModel({ cfgPath, board, dash, now = () => new Date(), 
     for (const f of RUN_FILES) archiveFiles[f] = runFilePath(id, f) ? statSync(runFilePath(id, f)).size : null;
     const d = loadBoard();
     const hit = r.task ? board.find(d, r.task) : null;
+    // What the run's network was, from its archived record, so "no egress
+    // record" can say WHY (independent re-review: the page claimed no route
+    // out for a sandbox:none run, which had the host's whole network).
+    //   host     sandbox none: the host's network; nothing controlled or recorded it
+    //   proxied  a per-run proxy was attached; no log means no connection was made
+    //   sealed   no proxy, network none: no route out, nothing to record
+    //   network  some other named network: not recorded
+    //   unknown  no archived record for the run
+    const rec = archived().get(id) ?? null;
+    const net = rec?.policy?.net ?? (rec?.egress ? null : "none");
+    const egress = !rec || (!rec.policy && !rec.egress)
+      ? { state: "unknown", net: null }
+      : rec.policy?.sandbox === "none"
+        ? { state: "host", net: null }
+        : rec.egress
+          ? { state: "proxied", net: rec.egress.network ?? null }
+          : net === "none"
+            ? { state: "sealed", net: "none" }
+            : { state: "network", net };
     return {
       sources: sources(),
       ...runRow(r),
+      egress,
       reason: r.reason,
       exitCode: r.exitCode ?? null,
       timeoutMs: r.timeoutMs ?? null,

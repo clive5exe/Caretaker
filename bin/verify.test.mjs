@@ -112,6 +112,7 @@ const refuteEvents = () => events.read(EVENTS).events.filter((e) => e.source ===
   ok("a refutation is reported", r.outcome === "refuted" && r.recorded, JSON.stringify(r));
   const qa = qaOf();
   ok("it fails the task: a qa fail is recorded on the board", qa?.verdict === "fail");
+  ok("…recorded as by the refuting run, via refute", /^refuter run r_[0-9a-f]{8}$/.test(qa?.by ?? "") && qa?.via === "refute", JSON.stringify(qa));
   ok("the verdict note names the refuting run and the run it checked", qa?.note?.includes(r.run) && qa?.note?.includes(PARENT) && qa?.note?.includes('returns [""]'), qa?.note);
   const ev = refuteEvents().at(-1);
   ok("the event is a gate fail marked as a refutation", ev?.verdict === "fail" && ev.kind === "gate" && ev.source === "refute" && ev.stage === "verify");

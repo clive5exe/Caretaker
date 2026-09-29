@@ -34,7 +34,7 @@ bash /path/to/caretaker/install.sh . "My project"`}</pre>
         <h4>4 · Someone else checks it</h4>
         <pre className="code" data-walk="ok">{`node ops/caretaker/board.mjs reviewer T-001 pass "read it: the board describes real work"
 node ops/caretaker/board.mjs qa T-001 pass "checked the board against the plan"`}</pre>
-        <p className="ft">Nobody closes their own work. A task that touches money, auth or isolation needs a security verdict too. Verdicts are recorded here, never from the browser.</p>
+        <p className="ft">Nobody closes their own work. A task that touches money, auth or isolation needs a third verdict too, from whoever owns those risks. Verdicts are recorded here, never from the browser.</p>
         <h4>5 · Close it</h4>
         <pre className="code" data-walk="ok">{`node ops/caretaker/board.mjs done T-001`}</pre>
         <p className="ft">Now it closes. Every move above is on the task with who made it and when.</p>

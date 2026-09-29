@@ -137,6 +137,7 @@ const ISO = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d+Z$/;
   f.cli("qa", "T-2", "fail", "x");
   f.cli("qa", "T-2", "pass", "y");
   const qa = task(f, "T-2").gate.qa;
+  ok("a verdict records who (the operator) and via, and history keeps them", qa.by === "five" && qa.via === "cli" && qa.history?.[0]?.by === "five", JSON.stringify(qa));
   ok("a verdict records the instant (t) beside the date (at), and history keeps the earlier one's", ISO.test(qa.t) && qa.at === qa.t.slice(0, 10) && ISO.test(qa.history?.[0]?.t ?? "") && qa.history[0].t <= qa.t, JSON.stringify(qa));
   // W-4: a transition records who, when and from where; a refused one records nothing.
   f.cli("start", "T-1");

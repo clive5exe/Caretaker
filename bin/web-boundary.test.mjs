@@ -17,7 +17,7 @@
  *
  * Run: node bin/web-boundary.test.mjs
  */
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { STAGES, stageOf } from "./lifecycle.mjs";
@@ -53,14 +53,15 @@ const THEME = "theme.css";
 /** Returns [rule, detail] for every violation in one file's text. */
 export function violations(rel, text) {
   const out = [];
-  const code = rel.endsWith(".css") ? text.replace(/\/\*[\s\S]*?\*\//g, "") : text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'`])\/\/.*$/gm, "$1");
+  const css = rel.endsWith(".css") || rel.endsWith(".html");
+  const code = rel.endsWith(".html") ? text.replace(/<!--[\s\S]*?-->/g, "") : css ? text.replace(/\/\*[\s\S]*?\*\//g, "") : text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'`])\/\/.*$/gm, "$1");
   for (const m of code.matchAll(/(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)["'`]([^"'`]+)["'`]/g)) {
     const spec = m[1];
     if (/(^|\/)bin\//.test(spec) || /\.\.\/(\.\.\/)+bin\b/.test(spec)) out.push(["imports from bin/", spec]);
     if (VENDOR_PACKAGES.some((v) => spec === v || spec.startsWith(`${v}/`))) out.push(["imports a vendor SDK", spec]);
   }
   if (/\binnerHTML\b|dangerouslySetInnerHTML/.test(code)) out.push(["uses innerHTML", "innerHTML"]);
-  if (rel !== LABELS && !rel.endsWith(".css")) {
+  if (rel !== LABELS && !css) {
     for (const m of code.matchAll(/(["'`])([a-z-]+)\1/g)) {
       if (NAMES.includes(m[2])) out.push(["names a gate or stage outside labels.ts", m[0]]);
     }
@@ -68,11 +69,22 @@ export function violations(rel, text) {
     // { qa: … } pick out one gate as surely as "security" does. Stage names
     // are not checked unquoted: spec, triage and dropped are also the names
     // of recorded facts on a task (t.spec, t.triage, t.dropped).
-    for (const m of code.matchAll(/\.([a-z]+)\b|[{,]\s*([a-z]+)\s*:/g)) {
+    for (const m of code.matchAll(/\.([a-z]+)\b|[{,]\s*([a-z]+)\s*[:,}]/g)) {
       if (GATES.includes(m[1] ?? m[2])) out.push(["names a gate or stage outside labels.ts", m[0]]);
     }
+    // …and in display text a person reads: JSX text and template literals
+    // (independent re-review: <span>security</span>, `needs security`). The
+    // Getting started walk is exempt by name: its blocks are CLI commands,
+    // run verbatim by bin/getting-started.test.mjs, not UI.
+    const shown = code.replace(/<pre[^>]*data-walk="[^"]*"[^>]*>\{`[\s\S]*?`\}<\/pre>/g, "");
+    for (const m of shown.matchAll(/>([^<>{}]+)<|`([^`]*)`/g)) {
+      for (const w of String(m[1] ?? m[2]).matchAll(/\b([a-z]+)\b/g)) {
+        if (GATES.includes(w[1])) out.push(["names a gate or stage outside labels.ts", `${w[1]} in ${JSON.stringify(String(m[1] ?? m[2]).trim().slice(0, 40))}`]);
+      }
+    }
   }
-  for (const m of code.matchAll(/\b(?:https?|wss?):\/\/[^\s"'`)]*/g)) out.push(["contains an external URL", m[0]]);
+  // Case-insensitive: HTTPS://evil loads just the same (independent re-review).
+  for (const m of code.matchAll(/\b(?:https?|wss?):\/\/[^\s"'`)]*/gi)) out.push(["contains an external URL", m[0]]);
   // Protocol-relative (independent QA): "//host" and url(//host) load from outside too.
   for (const m of code.matchAll(/(?:["'`]|url\(\s*["']?)\/\/[a-z0-9-]+(?:\.[a-z0-9-]+)+/gi)) out.push(["contains an external URL", m[0]]);
   if (rel !== THEME) {
@@ -82,12 +94,12 @@ export function violations(rel, text) {
     }
     // Named colors, in any case, as a string value of a color property in
     // code, or as a bare word in a CSS declaration.
-    const named = rel.endsWith(".css") ? /\b([a-z]+)\b/gi : /(["'`])([a-z]+)\1/gi;
+    const named = css ? /\b([a-z]+)\b/gi : /(["'`])([a-z]+)\1/gi;
     for (const m of code.matchAll(named)) {
       const word = (m[2] ?? m[1]).toLowerCase();
       if (!NAMED_COLORS.includes(word)) continue;
       const before = code.slice(Math.max(0, m.index - 60), m.index);
-      const decl = rel.endsWith(".css") ? /(?:color|background|fill|stroke|border|outline|shadow|caret|accent|decoration)[\w-]*\s*:[^;{}]*$/i.test(before) : new RegExp(`${COLOR_PROP.source}$`, "i").test(before);
+      const decl = css ? /(?:color|background|fill|stroke|border|outline|shadow|caret|accent|decoration)[\w-]*\s*:[^;{}]*$/i.test(before) : new RegExp(`${COLOR_PROP.source}$`, "i").test(before);
       if (decl) out.push(["contains a color literal", m[0]]);
     }
   }
@@ -127,6 +139,10 @@ function files(dir) {
     ["names a gate or stage outside labels.ts", "src/pages/X.tsx", `if (t.lifecycle === "dropped") hide();`],
     ["names a gate or stage outside labels.ts", "src/pages/X.tsx", `const g = t.gates.security;`],
     ["names a gate or stage outside labels.ts", "src/pages/X.tsx", `const want = { qa: true };`],
+    // Independent re-review: these three went through.
+    ["names a gate or stage outside labels.ts", "src/pages/X.tsx", `return <span>security</span>;`],
+    ["names a gate or stage outside labels.ts", "src/pages/X.tsx", "const t = `needs security`;"],
+    ["names a gate or stage outside labels.ts", "src/pages/X.tsx", `const { security, qa } = t.gates;`],
     ["contains an external URL", "src/pages/X.tsx", `const s = new WebSocket("wss://evil.example/x");`],
     ["contains an external URL", "src/pages/X.tsx", `<img src="//evil.example/p.png" />`],
     ["contains an external URL", "src/fonts.css", `@import url(//fonts.example.com/inter.css);`],
@@ -134,9 +150,13 @@ function files(dir) {
     ["contains a color literal", "src/pages/X.tsx", `<i style={{ borderColor: "Red" }} />`],
     ["contains a color literal", "src/components/X.css", `.x { color: tomato; }`],
     ["contains a color literal", "src/components/X.css", `.x { border: 1px solid Red; }`],
+    ["contains an external URL", "src/pages/X.tsx", `fetch("HTTPS://evil.example.com/x");`],
+    // web/index.html is the page the browser loads first; it is scanned too.
+    ["contains an external URL", "../index.html", `<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter">`],
+    ["contains a color literal", "../index.html", `<style>body{color:red}</style>`],
   ];
   for (const [rule, rel, text] of plant) {
-    const got = violations(rel.split("/").slice(1).join(sep), text);
+    const got = violations(rel.startsWith("../") ? "index.html" : rel.split("/").slice(1).join(sep), text);
     ok(`a planted "${rule}" is caught: ${text.slice(0, 60)}`, got.some(([r]) => r === rule), JSON.stringify(got));
   }
   ok("labels.ts may name a stage", !violations(LABELS, `export const L = { human: "Human" }; const x = "human";`).length);
@@ -148,8 +168,11 @@ function files(dir) {
 
 /* 2. the real tree is clean ----------------------------------------------- */
 {
-  const list = files(SRC);
+  // The client's own entry page, beside src/ (independent re-review: a font
+  // link or a <style> planted there went unscanned).
+  const list = [...files(SRC), join(SRC, "..", "index.html")];
   ok("web/src has files to check", list.length > 10, String(list.length));
+  ok("web/index.html is scanned with them", list.some((f) => relative(SRC, f) === join("..", "index.html")) && existsSync(join(SRC, "..", "index.html")));
   const found = [];
   for (const f of list) {
     const rel = relative(SRC, f);

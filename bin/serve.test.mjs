@@ -57,7 +57,7 @@ writeFileSync(
         {
           name: "P",
           tasks: [
-            { id: "T-1", title: "one", owner: "b", est: "2h", status: "doing", ac: "x", gate: { qa: { verdict: "pass", at: "2026-09-28" } } },
+            { id: "T-1", title: "one", owner: "b", est: "2h", status: "doing", ac: "x", gate: { qa: { verdict: "pass", at: "2026-09-28", history: [{ verdict: "fail", at: "2000-01-01" }] } } },
             { id: "T-2", title: "two", owner: "b", est: "3h", status: "todo", ac: "y", spec: "docs/two.md" },
             { id: "T-3", title: "three", owner: "b", est: "1h", status: "done", completed: "2026-09-28", ac: "z", gate: { reviewer: { verdict: "pass", at: "2026-09-28" }, qa: { verdict: "pass", at: "2026-09-28" } } },
           ],
@@ -312,6 +312,23 @@ const post = (path, obj, headers = WRITE()) => req("POST", path, { headers, body
   const mk = (await get("/api/v1/metrics?days=30")).json.kpis;
   const want = kpis({ board: d, runs: null, facts: gitFacts(root, { days: 30 }), cfg });
   ok("the Metrics API's KPIs are kpis.mjs's, with no run log as null", JSON.stringify(mk) === JSON.stringify(want) && mk.ai.tokensPerClosedTask === null && mk.antiKpis.length === 3, JSON.stringify(mk).slice(0, 300));
+  // W-15 (independent re-review): nothing held the Metrics page's gate figures;
+  // mutating them left every test green. Counted here from the board itself.
+  const met = (await get("/api/v1/metrics?days=30")).json;
+  const count = (since) => {
+    const c = {};
+    for (const t of d.phases.flatMap((p) => p.tasks)) {
+      for (const [g, rec] of Object.entries(t.gate ?? {})) {
+        for (const a of [...(rec.history ?? []), rec]) if (!since || a.at >= since) (c[g] ??= { pass: 0, fail: 0 })[a.verdict === "pass" ? "pass" : "fail"] += 1;
+      }
+    }
+    return c;
+  };
+  const sorted = (o) => JSON.stringify(Object.keys(o).sort().map((k) => [k, o[k]]));
+  const asMap = (gs) => Object.fromEntries(gs.filter(([, v]) => v.pass + v.fail > 0).map(([g, v]) => [g, { pass: v.pass, fail: v.fail }]));
+  ok("Metrics' all-time gate figures count every attempt on the board", sorted(asMap(met.allTime.gateStats)) === sorted(count(null)), JSON.stringify(met.allTime.gateStats));
+  ok("…and its range counts only attempts inside the window it reports", sorted(asMap(met.gateStats)) === sorted(count(met.window[0])) && asMap(met.allTime.gateStats).qa?.fail === 1 && !asMap(met.gateStats).qa?.fail, JSON.stringify(met.gateStats));
+  ok("…with pass% from core, beside the counts", met.allTime.gateStats.every(([, v]) => v.pass + v.fail === 0 ? v.passPct === null : v.passPct === Math.round((v.pass / (v.pass + v.fail)) * 100)));
   const work = (await get("/api/v1/work")).json;
   const t3 = work.tasks.find((t) => t.id === "T-3");
   ok("a closed task is in the done stage", t3.lifecycle === "done");
@@ -320,6 +337,22 @@ const post = (path, obj, headers = WRITE()) => req("POST", path, { headers, body
   const run = (await get(`/api/v1/runs/${RUN}`)).json;
   ok("a run folds its archive record", run?.task === "T-1" && run?.status === "ok", JSON.stringify(run));
   ok("and names the files it has", run?.archiveFiles?.["transcript.log"] > 0 && run?.archiveFiles?.["diff.patch"] === null, JSON.stringify(run?.archiveFiles));
+  // W-7 (independent re-review): "no egress record" claimed no route out even
+  // for a sandbox:none run. The state now comes from the archived record.
+  const states = {
+    r_e0000001: { policy: { sandbox: "none" } },
+    r_e0000002: { policy: { sandbox: "podman" }, egress: { network: "caretaker-egress-r_e0000002" } },
+    r_e0000003: { policy: { sandbox: "podman", net: "none" } },
+    r_e0000004: { policy: { sandbox: "podman", net: "shared" } },
+    r_e0000005: {},
+  };
+  for (const [id, rec] of Object.entries(states)) {
+    mkdirSync(join(state, "runs", id), { recursive: true });
+    writeFileSync(join(state, "runs", id, "run.json"), JSON.stringify({ task: "T-1", ...rec }));
+  }
+  const got = {};
+  for (const id of Object.keys(states)) got[id] = (await get(`/api/v1/runs/${id}`)).json?.egress?.state;
+  ok("a run's egress state says why it has no log: host, proxied, sealed, another network, or unknown", JSON.stringify(Object.values(got)) === '["host","proxied","sealed","network","unknown"]', JSON.stringify(got));
   void board;
 }
 

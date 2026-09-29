@@ -393,10 +393,12 @@ if (!cmd || cmd === "status") {
   // oldest first, and is only read by the code that wants it.
   hit.t.gate = hit.t.gate || {};
   const previous = hit.t.gate[cmd];
-  const entry = { verdict, at: today(), t: new Date().toISOString(), note: rest.slice(1).join(" ") || undefined }; // B-8, mirrored: the instant beside the date
-  const history = previous
-    ? [...(previous.history || []), { verdict: previous.verdict, at: previous.at, ...(previous.t ? { t: previous.t } : {}), note: previous.note }]
-    : [];
+  // B-8 and W-16, mirrored: the instant beside the date, and who recorded it.
+  let by = "unknown";
+  try { by = CFG.operator ? String(CFG.operator) : os.userInfo().username; } catch { /* unknown */ }
+  const entry = { verdict, at: today(), t: new Date().toISOString(), by, via: "cli", note: rest.slice(1).join(" ") || undefined };
+  const kept = (e) => ({ verdict: e.verdict, at: e.at, ...(e.t ? { t: e.t } : {}), ...(e.by ? { by: e.by } : {}), ...(e.via ? { via: e.via } : {}), note: e.note });
+  const history = previous ? [...(previous.history || []), kept(previous)] : [];
   hit.t.gate[cmd] = { ...entry, ...(history.length ? { history } : {}) };
   d.meta.updated = today();
   save(d);
