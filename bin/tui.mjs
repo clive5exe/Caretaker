@@ -488,7 +488,7 @@ const isEntry = (() => {
 })();
 if (isEntry) {
   main(process.argv.slice(2)).catch((e) => {
-    process.stdout.write("\x1b[?25h");
+    if (process.stdout.isTTY) process.stdout.write("\x1b[?25h");
     console.error(`tui: ${e.message}`);
     process.exit(1);
   });
