@@ -87,19 +87,42 @@ const STOP = new Set(("that this with from have will should would could they the
 export const significant = (s) => new Set(norm(s).split(" ").filter((w) => w.length >= 4 && !STOP.has(w)));
 
 /**
- * The document that already records a decision, or null. Recorded means at
- * least 80% of the decision's significant words appear in one document: a
- * spec or ADR saying the same thing in its own sentence still counts, and a
- * document sharing a couple of words with it does not.
+ * Negation and reversal words. A sentence that says "no open egress" does not
+ * record a decision to open egress, though it shares every word with it.
+ */
+const NEGATION = /\b(not|no|never|none|nobody|nothing|without|cannot|can't|don't|doesn't|won't|isn't|aren't|mustn't|instead|rather|drop|remove|stop|forbid(s|den)?|refuse[sd]?|only)\b/i;
+
+/** A document's sentences: paragraphs joined, split at sentence ends and at list items and headings. */
+export function sentencesOf(text) {
+  return String(text)
+    .replace(/```[\s\S]*?```/g, " ")
+    .split(/\n\s*\n|\n(?=\s*(?:[-*+]|\d+\.|#{1,6})\s)/)
+    .flatMap((p) => p.replace(/\s+/g, " ").split(/(?<=[.!?;:])\s+/))
+    .map((x) => x.trim())
+    .filter(Boolean);
+}
+
+/**
+ * The document that already records a decision, or null. Recorded means ONE
+ * SENTENCE of a spec or ADR holds at least 80% of the decision's significant
+ * words, with the same polarity: both negated, or neither. A document whose
+ * words are all there but scattered, or a sentence that says the opposite,
+ * does not count (independent re-review: "drop the allowlist proxy", "run as
+ * root with Docker" and "the builder may close its own task" each matched the
+ * very documents that forbid them). Missing a real match costs a person one
+ * glance in the Inbox; matching a reversal loses the decision silently.
  */
 export function recordedIn(decision, docs, threshold = 0.8) {
   const want = significant(decision.text);
   if (!want.size) return null;
+  const neg = NEGATION.test(decision.text);
   let best = null;
   for (const d of docs) {
-    const have = d.words ?? significant(d.text);
-    const share = [...want].filter((w) => have.has(w)).length / want.size;
-    if (share >= threshold && (!best || share > best.share)) best = { id: d.id, share };
+    for (const s of d.sentences ?? sentencesOf(d.text).map((t) => ({ words: significant(t), neg: NEGATION.test(t) }))) {
+      if (s.neg !== neg) continue;
+      const share = [...want].filter((w) => s.words.has(w)).length / want.size;
+      if (share >= threshold && (!best || share > best.share)) best = { id: d.id, share };
+    }
   }
   return best?.id ?? null;
 }
@@ -117,7 +140,7 @@ export function corpus(root, specsDir = "specs") {
   };
   walk(join(root, specsDir));
   walk(join(root, "docs", "decisions"));
-  return docs.map((d) => ({ ...d, words: significant(d.text) }));
+  return docs.map((d) => ({ ...d, sentences: sentencesOf(d.text).map((t) => ({ words: significant(t), neg: NEGATION.test(t) })) }));
 }
 
 /** B-5: the mirror's line hook. Appends each decision to `<runDir>/decisions.live.jsonl` as it is written. */

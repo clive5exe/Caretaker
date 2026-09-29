@@ -54,6 +54,24 @@ const TMP = mkdtempSync(join(tmpdir(), "harvest-test-"));
   ok("a document sharing a word or two does not record it", recordedIn({ text: "retry uploads twice with exponential backoff" }, docs) === null);
   ok("a decision with no significant words is never counted as recorded", recordedIn({ text: "do it" }, docs) === null);
 }
+{
+  // Independent re-review: 80% of the words anywhere in a document matched
+  // decisions that REVERSE it, so they were never surfaced. Against this
+  // repo's own specs and ADRs, each of these must be pending.
+  const real = corpus(join(HERE, ".."));
+  for (const text of [
+    "give the container open egress to the internet and drop the allowlist proxy",
+    "run the sandbox as root with Docker instead of rootless podman",
+    "the builder may close its own task without a reviewer",
+  ]) {
+    ok(`a decision reversing the specs is not "recorded": ${text}`, recordedIn({ text }, real) === null, String(recordedIn({ text }, real)));
+  }
+  const docs = [{ id: "specs/net.md", text: "The container has no route to the internet.\n\nAn allowlist proxy is the only way out, and it logs every host." }];
+  ok("the words spread across sentences do not record it", recordedIn({ text: "allowlist proxy logs internet route" }, docs) === null);
+  ok("a sentence saying the same, negated as the decision is, does", recordedIn({ text: "the container has no route to the internet" }, docs) === "specs/net.md");
+  const rule = [{ id: "specs/gates.md", text: "The builder may never close its own task." }];
+  ok("one sentence with every word, but saying the opposite, does not record it", recordedIn({ text: "the builder may close its own task" }, rule) === null);
+}
 
 /* ------------------------------------------------------ a real run, live */
 const WS = join(TMP, "ws");
