@@ -11,7 +11,7 @@
  * Run: node bin/environment.test.mjs
  */
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -166,6 +166,28 @@ const probe = (curlBody, extra = {}) => {
   const { obs, canary } = probe("exit 7");
   const none = compare(decl, obs, { net: "none", canary });
   ok("on net none, reachability is one named line, not one 'unreachable' per host", none.filter((d) => d.kind === "hosts-unchecked").length === 1 && /net none/.test(none.find((d) => d.kind === "hosts-unchecked")?.message) && !none.some((d) => d.kind === "host-unreachable"), JSON.stringify(none));
+}
+{
+  // The reviewer's attack: shell syntax in a spec's hosts, checked on the host.
+  const pwned = join(TMP, "pwned-by-spec");
+  const specs = join(TMP, "evil-specs");
+  mkdirSync(specs);
+  writeFileSync(join(specs, "evil.md"), `\`\`\`spec\nhosts: $(touch\${IFS}${pwned}), api.example.test\ngoverns: src/**\n\`\`\`\n`);
+  const { loadSpecs } = await import("./drift.mjs");
+  const loaded = loadSpecs(specs).specs;
+  try {
+    await check({ devcontainerPath: join(TMP, "none.json"), specs: loaded, sandbox: "none" });
+  } catch {
+    /* the probe's own refusal; the assertion below is about the host */
+  }
+  ok("shell syntax in a spec's hosts never runs on the host", !existsSync(pwned) && loaded[0].hosts.join() === "api.example.test", JSON.stringify(loaded[0]));
+  let refused = null;
+  try {
+    probeScript({ hosts: ["a.example.test; touch /tmp/x"], canary: "example.com" });
+  } catch (e) {
+    refused = e.code;
+  }
+  ok("…and the probe refuses a non-host name itself, whoever built the list", refused === "BAD_HOST");
 }
 ok("a fully matching environment has no differences", compare({ tools: [{ name: "node", version: "22", feature: "f" }], unknownFeatures: [], services: [], hosts: ["a.test"] }, { tools: { node: "v22.1.0", python: null }, hosts: { "a.test": true, "example.com": false } }, { net: "n", canary: "example.com" }).length === 0);
 

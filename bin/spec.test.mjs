@@ -40,6 +40,13 @@ const devFile = (obj, name = "devcontainer.json") => {
 ok("a file with no spec block is refused", parseSpec("# just prose\n").ok === false);
 
 {
+  // Hosts reach the proxy's argv and a shell script; only host names may.
+  const r = parseSpec(block("hosts: api.example.com, .example.org, $(touch${IFS}/tmp/x), *, .com, com\ngoverns: src/**"));
+  ok("a host that is not a host name is an error, named", !r.ok && ["$(touch${IFS}/tmp/x)", "*", ".com", "com"].every((h) => r.errors.some((e) => e.includes(`"${h}"`))), r.errors.join("; "));
+  ok("…and is dropped, so it never reaches an allowlist or a shell", JSON.stringify(r.spec.hosts) === '["api.example.com",".example.org"]', JSON.stringify(r.spec.hosts));
+}
+
+{
   const r = parseSpec(block("host: api.stripe.com\ngoverns: src/**"));
   ok(
     "a TYPO'D FIELD is an error, not silently ignored",

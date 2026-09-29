@@ -40,7 +40,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { buildArgs } from "./sandbox.mjs";
-import { readDevcontainer, toEgress, toLimits } from "./spec.mjs";
+import { HOST, readDevcontainer, toEgress, toLimits } from "./spec.mjs";
 
 export class EnvironmentError extends Error {
   constructor(code, message) {
@@ -160,6 +160,12 @@ const shq = (s) => `'${String(s).replace(/'/g, "'\\''")}'`;
  * sets. Any HTTP answer counts as reachable: the question is the network.
  */
 export function probeScript({ hosts, canary }) {
+  // Hosts reach a shell here, on the HOST with --sandbox none. spec.mjs refuses
+  // anything that is not a host name; this refuses it again rather than trust
+  // every path that builds a host list, and quotes what it prints.
+  for (const h of [...hosts, canary]) {
+    if (!HOST.test(String(h))) throw new EnvironmentError("BAD_HOST", `"${h}" is not a host name; refusing to put it in a shell script`);
+  }
   const lines = ["#!/bin/sh"];
   for (const t of TOOLCHAINS) {
     const bin = t.cmd.split(" ")[0];
@@ -170,7 +176,7 @@ export function probeScript({ hosts, canary }) {
     lines.push(
       `if command -v curl >/dev/null 2>&1; then if curl -s -m 5 -o /dev/null ${url}; then r=yes; else r=no; fi; ` +
         `elif command -v wget >/dev/null 2>&1; then wget -q -T 5 -O /dev/null ${url} >/dev/null 2>&1; c=$?; if [ $c -eq 0 ] || [ $c -eq 8 ]; then r=yes; else r=no; fi; ` +
-        `else r=noprobe; fi; echo "host ${h} $r"`,
+        `else r=noprobe; fi; printf 'host %s %s\\n' ${shq(h)} "$r"`,
     );
   }
   return `${lines.join("\n")}\n`;

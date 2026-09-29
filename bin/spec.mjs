@@ -55,6 +55,14 @@ const list = (v) =>
 const KNOWN = new Set(["hosts", "governs"]);
 
 /**
+ * A host the egress proxy can match: two or more DNS labels, or `.example.com`
+ * for its subdomains (egress.mjs `allowed`). Nothing else: a `*`, a bare TLD
+ * or shell syntax in `hosts:` is refused here and never reaches the allowlist,
+ * the proxy's argv or the environment check's shell script.
+ */
+export const HOST = /^\.?(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i;
+
+/**
  * Parse the block. An unknown key is an ERROR, not ignored — a typo'd `host:`
  * would leave a project believing it had declared an allowlist entry it had
  * not, and it would find out either when something it needed was blocked, or
@@ -80,6 +88,12 @@ export function parseSpec(markdown) {
     }
     if (key in spec) return void errors.push(`line ${i + 1}: "${key}" declared twice`);
     spec[key] = list(text.slice(colon + 1));
+    if (key === "hosts") {
+      for (const h of spec.hosts.filter((x) => !HOST.test(x))) {
+        errors.push(`line ${i + 1}: host "${h}" is not a host name: letters, digits, hyphens and dots, or ".example.com" for its subdomains`);
+      }
+      spec.hosts = spec.hosts.filter((x) => HOST.test(x));
+    }
   });
 
   if (!spec.governs?.length) {
