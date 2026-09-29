@@ -353,6 +353,15 @@ const post = (path, obj, headers = WRITE()) => req("POST", path, { headers, body
   const got = {};
   for (const id of Object.keys(states)) got[id] = (await get(`/api/v1/runs/${id}`)).json?.egress?.state;
   ok("a run's egress state says why it has no log: host, proxied, sealed, another network, or unknown", JSON.stringify(Object.values(got)) === '["host","proxied","sealed","network","unknown"]', JSON.stringify(got));
+  // C-5 (independent QA): the proxy's log is raw until the run is archived.
+  const live = "r_e0000009";
+  mkdirSync(join(state, "runs", live), { recursive: true });
+  writeFileSync(join(state, "runs", live, "egress.jsonl"), `${JSON.stringify({ t: "2026-09-29T10:00:00Z", kind: "refused", host: "data-in-a-hostname.evil.example", port: 443 })}\n`);
+  const inFlight = await get(`/api/v1/runs/${live}/egress`);
+  ok("a run's egress log is not served while the run is in flight (it is still raw)", inFlight.status === 404 && !inFlight.text.includes("data-in-a-hostname"), `${inFlight.status} ${inFlight.text.slice(0, 80)}`);
+  writeFileSync(join(state, "runs", live, "run.json"), JSON.stringify({ task: "T-1", egress: { network: "n" } }));
+  const after = await get(`/api/v1/runs/${live}/egress`);
+  ok("…and is once the run is archived, which redacts it first", after.status === 200 && after.text.includes("evil.example"), `${after.status} ${after.text.slice(0, 80)}`);
   void board;
 }
 

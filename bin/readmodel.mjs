@@ -522,6 +522,12 @@ export function createReadModel({ cfgPath, board, dash, now = () => new Date(), 
    */
   function runFilePath(id, name) {
     if (!RUN_ID.test(id) || !RUN_FILES.includes(name)) return null;
+    // The proxy writes egress.jsonl RAW while the run is in flight, and only
+    // archive() redacts it, with the run's own secrets, before it writes
+    // run.json. So it is served once run.json exists, never before
+    // (independent QA: a host carrying data was served as written, with only
+    // the key-shape pass). The transcript's live mirror is redacted as it goes.
+    if (name === "egress.jsonl" && !existsSync(join(archiveDir, id, "run.json"))) return null;
     const p = join(archiveDir, id, name);
     try {
       const real = realpathSync(p);

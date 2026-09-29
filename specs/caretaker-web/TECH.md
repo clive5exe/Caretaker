@@ -402,7 +402,7 @@ zero.
 | `GET /inbox` | derived items: `{ kind, task, since, action }` | readmodel over the facts in §Inbox |
 | `GET /runs?task=&state=&agent=&model=` | runs, folded by id | `runs.jsonl` plus `<stateDir>/runs/*/run.json` |
 | `GET /runs/:id` | one run: identity, parent, children, verdict, cost, diff summary, drift events for it, and `egress.state` (host, proxied, sealed, network or unknown) from its archived record | same, plus the event log |
-| `GET /runs/:id/transcript?from=<byte>`, `/stderr?from=`, `/diff`, `/egress` | raw text or JSONL, byte-ranged | the run archive (C-4, C-5) |
+| `GET /runs/:id/transcript?from=<byte>`, `/stderr?from=`, `/diff`, `/egress` | raw text or JSONL, byte-ranged. `/egress` only once the run is archived: until then the proxy's log is unredacted | the run archive (C-4, C-5) |
 | `GET /agents` | roles, models, runs and tokens aggregate, current work | `agentsDir` frontmatter (as `dashboard.mjs` `agents()` reads it), runs |
 | `GET /specs` | specs, `governs`, parse errors, and `freshness` (stale, lying, undated; null outside git) | `drift.loadSpecs`, `freshness.freshness` |
 | `GET /specs/ownership` | the ownership map, unowned, orphaned | `drift.buildOwnership`, `findOrphaned`, `treeFromGit` |
