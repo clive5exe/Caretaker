@@ -1,0 +1,60 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      # The runner ships rootless podman. Pulling the images the live checks
+      # use means the sandbox, egress and secrets controls are attacked for
+      # real on every push, rather than skipped for want of an image.
+      - name: pull live-test images
+        run: |
+          podman --version
+          podman pull -q docker.io/library/nginx:alpine
+          podman pull -q docker.io/library/node:22-alpine
+
+      # Every bin/*.test.mjs, each run on its own so one failure does not hide
+      # the rest. A live check that still cannot run skips with a printed
+      # reason, and the skip line stays in the log.
+      - name: tests
+        run: |
+          status=0
+          for t in bin/*.test.mjs; do
+            echo "::group::$t"
+            node "$t" || { echo "::error file=$t::$t failed"; status=1; }
+            echo "::endgroup::"
+          done
+          exit $status
+
+      # ops/foreman/ is this repo's installed copy of bin/ and RULES.md.
+      # install.sh copies these files verbatim, so any difference is drift.
+      - name: installed copy matches its source
+        run: |
+          status=0
+          for f in board.mjs dashboard.mjs run.mjs loop.sh; do
+            cmp "bin/$f" "ops/foreman/$f" || { echo "::error file=ops/foreman/$f::differs from bin/$f"; status=1; }
+          done
+          cmp RULES.md ops/foreman/RULES.md || { echo "::error file=ops/foreman/RULES.md::differs from RULES.md"; status=1; }
+          exit $status
+
+      # docs/board.md is generated from docs/board.json and must not be
+      # hand-edited, so rebuilding it on a clean checkout must change nothing.
+      - name: generated board is current
+        run: |
+          node ops/foreman/board.mjs build
+          git diff --exit-code -- docs/board.md

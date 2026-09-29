@@ -59,7 +59,7 @@ const fit = (s, n) => {
     outp += s[i];
     seen += 1;
   }
-  return outp + "\x1b[0m…" + " ".repeat(Math.max(0, n - seen - 1));
+  return outp + (COLOR ? "\x1b[0m" : "") + "…" + " ".repeat(Math.max(0, n - seen - 1));
 };
 const pad = (s, n) => fit(s, n);
 const rule = (ch = "─") => faint(ch.repeat(W));
@@ -96,22 +96,22 @@ out.push(rule());
 
 /* ------------------------------------------------------- master / detail */
 
-row(faint("AGENTS"), `${bold("qa")} ${faint("·")} ${dim("T-277")} ${faint("·")} ${dim("money gates")}`);
+row(faint("AGENTS"), `${bold("qa")} ${faint("·")} ${dim("E-3")} ${faint("·")} ${dim("attack the sandbox")}`);
 row("", faint("─".repeat(RIGHT)));
 
 const agents = [
-  { sel: true, name: "qa", task: "T-277", el: "2m14s", tok: "412k", bar: 4 },
+  { sel: true, name: "qa", task: "E-3", el: "2m14s", tok: "412k", bar: 4 },
   { sel: false, name: "reviewer", task: "H-1", el: "0m31s", tok: "18k", bar: 1 },
   { sel: false, name: "graph", task: "—", el: "1m02s", tok: "—", bar: 2 },
 ];
 const log = [
-  [dim("14:22:01"), faint("bash "), "npm run qa"],
-  [dim("14:22:47"), lime("  ✓  "), dim("53 scripts passed")],
-  [dim("14:23:10"), faint("read "), `src/lib/pricing.ts  ${faint("2.1k tok")}`],
-  [dim("14:23:14"), faint("edit "), "src/lib/pricing.ts"],
-  [dim("14:23:40"), faint("bash "), "node scripts/qa/platform-fee.mjs"],
-  [dim("14:23:58"), red("  ✗  "), red("3 FAILED — every price 1c..$600 charged 200c")],
-  [dim("14:24:02"), faint("read "), `docs/decisions/0029-*.md  ${faint("8.4k tok")}`],
+  [dim("14:22:01"), faint("bash "), "node bin/sandbox.test.mjs"],
+  [dim("14:22:47"), lime("  ✓  "), dim("31 checks passed")],
+  [dim("14:23:10"), faint("read "), `bin/egress.mjs  ${faint("2.1k tok")}`],
+  [dim("14:23:14"), faint("edit "), "bin/egress.mjs"],
+  [dim("14:23:40"), faint("bash "), "node bin/egress.test.mjs"],
+  [dim("14:23:58"), red("  ✗  "), red("3 FAILED — an unlisted host got through")],
+  [dim("14:24:02"), faint("read "), `docs/decisions/0001-*.md  ${faint("8.4k tok")}`],
 ];
 
 agents.forEach((a, i) => {

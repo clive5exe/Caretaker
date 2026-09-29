@@ -23,9 +23,11 @@ import { createServer } from "node:http";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  agentHostArgs,
   agentNetFlag,
   internalNetworkArgs,
   networkArgs,
+  proxyAddressArgs,
   proxyRunArgs,
   removeNetworkArgs,
   runAttackSuite,
@@ -47,8 +49,8 @@ const skip = (name, why) => {
 /* ------------------------------------------------------------- argv (pure) */
 
 ok(
-  "an internal network is created with --internal, not a plain bridge",
-  internalNetworkArgs("x").join(" ") === "network create --internal x",
+  "an internal network is created with --internal and DNS off, not a plain bridge",
+  internalNetworkArgs("x").join(" ") === "network create --internal --disable-dns x",
 );
 ok("an egress network has no --internal flag", !networkArgs("x").includes("--internal"));
 
@@ -72,7 +74,7 @@ ok("an egress network has no --internal flag", !networkArgs("x").includes("--int
     a.filter((x) => x === "--network").length === 2 && has("--network", "egr"),
     JSON.stringify(a),
   );
-  ok("the proxy is reachable under a stable alias", has("--network-alias", "proxy"));
+  ok("the proxy relies on no DNS alias, since the internal network has no DNS", !a.includes("--network-alias"));
   ok("the allowlist is passed straight through to egress.mjs, unmodified here", has("--allow", "a.com,b.com"));
   ok("egress.mjs itself is bind-mounted read-only", a.some((x) => String(x).includes(":/egress-bin:Z,ro")));
   ok("the proxy has no capabilities either", has("--cap-drop", "ALL"));
@@ -89,6 +91,26 @@ ok(
     }
   })(),
   "an empty allowlist is a valid answer, but it has to be asked for — same rule egress.mjs's own CLI enforces",
+);
+
+ok(
+  "an agent reaches the proxy through a static hosts entry",
+  agentHostArgs("10.89.1.5").join(" ") === "--add-host proxy:10.89.1.5",
+);
+ok(
+  "agentHostArgs refuses a name where an address belongs",
+  (() => {
+    try {
+      agentHostArgs("proxy.example");
+      return false;
+    } catch {
+      return true;
+    }
+  })(),
+);
+ok(
+  "the proxy address is read from the internal network, not the egress one",
+  proxyAddressArgs("p", "int").join(" ").includes('.Networks "int"'),
 );
 
 ok(
@@ -168,6 +190,9 @@ if (podmanAvailable !== "true") {
     ok("setup: victim container started on a sibling network", victimStart.status === 0, victimStart.stderr);
     cleanup.push(() => run(["rm", "-f", VICTIM_NAME]));
 
+    const proxyIp = run(proxyAddressArgs(PROXY_NAME, INTERNAL_NET)).stdout.trim();
+    ok("setup: proxy IP address on the internal network discovered", /^\d+\.\d+\.\d+\.\d+$/.test(proxyIp), proxyIp);
+
     const victimIp = run([
       "inspect",
       VICTIM_NAME,
@@ -189,6 +214,7 @@ if (podmanAvailable !== "true") {
           "--rm",
           "--network",
           INTERNAL_NET,
+          ...agentHostArgs(proxyIp),
           AGENT_IMAGE,
           "sh",
           "-c",
@@ -208,6 +234,7 @@ if (podmanAvailable !== "true") {
       // ------------------------------------------------------ the five attacks
       const results = runAttackSuite({
         internalNetwork: INTERNAL_NET,
+        proxyIp,
         proxyAlias: "proxy",
         proxyPort: 8080,
         allowedHost: ALLOW_HOST,
@@ -225,30 +252,11 @@ if (podmanAvailable !== "true") {
         `ran ${results.length}: ${results.map((r) => r.name).join(" | ")}`,
       );
 
-      // A sixth check, adjacent to attack #1: DNS on the internal network must
-      // never forward an arbitrary hostname to the open internet — only
-      // resolve names of containers on the same network. This half of the
-      // claim was 100% reproducible across every run of this file (EXIT=2,
-      // no address, every attempt): getent hosts on a real internet hostname
-      // never returns one.
-      //
-      // NOT ASSERTED HERE: that `getent hosts proxy` (the alias) resolves —
-      // it does immediately after the proxy starts (measured by hand, see
-      // this file's header comment and netns.mjs's), but a standalone getent
-      // for it run AFTER this file's setup + poll loop + five attacks (about
-      // twenty prior `podman run` cycles on the same network in under a
-      // minute) returned empty in every run tried, 5 retries each, while
-      // attack #1 immediately above — which depends on that exact same
-      // resolution to route its CONNECT through `proxy:8080` — passed every
-      // time in the same run. That is aardvark-dns being slow or busy
-      // rewriting its zone under container churn, not a break in the
-      // isolation this file exists to prove; asserting it here would be a
-      // check that fails for a reason unrelated to the control, which is
-      // worse than not having it. Left as a named, open question rather than
-      // papered over: aardvark-dns's behaviour under heavy churn on one
-      // network is unresolved and worth its own investigation if it matters
-      // for a long-running proxy container with many short-lived agent runs
-      // against it.
+      // A sixth check, adjacent to attack #1: a name lookup on the internal
+      // network must not reach the open internet. aardvark-dns 1.4.0 (Ubuntu
+      // 24.04, GitHub's runner) forwards such lookups on an --internal network
+      // and 5.x-era versions do not, so this is the check that caught the
+      // difference, and the reason the network is created with --disable-dns.
       const dnsProbe = spawnSync(
         "podman",
         ["run", "--rm", "--network", INTERNAL_NET, AGENT_IMAGE, "sh", "-c", "getent hosts example.com 2>&1; echo EXIT=$?"],
