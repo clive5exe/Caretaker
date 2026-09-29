@@ -21,9 +21,9 @@ import { spawn, spawnSync } from "node:child_process";
 import { existsSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync, appendFileSync } from "node:fs";
 import { request } from "node:http";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { startServer } from "./serve.mjs";
+import { lineStart, startServer, tailFile } from "./serve.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -357,6 +357,9 @@ const line = (n) => `${JSON.stringify({ t: `2026-09-29T10:00:0${n}Z`, kind: "sys
   const a = openStream();
   await sleep(200);
   ok("the stream says hello with the sources", a.events[0]?.event === "hello" && !!a.events[0].json.sources);
+  // W-3 (independent review): hello had no id, so a client that dropped before
+  // any log event reconnected as fresh, and missed what arrived meanwhile.
+  ok("hello carries the cursor, pointing at the end of what exists", a.events[0]?.id?.includes(`${basename(evFile)}:${line(0).length}`), a.events[0]?.id);
   ok("a fresh client does not replay history (it has just fetched it)", logs(a).length === 0);
   const l1 = line(1);
   appendFileSync(evFile, l1.slice(0, 20));
@@ -388,6 +391,17 @@ const line = (n) => `${JSON.stringify({ t: `2026-09-29T10:00:0${n}Z`, kind: "sys
     const body = (await get(route)).text;
     ok(`…and on ${route}`, body.includes("[redacted:anthropic]") && !body.includes(KEY), body.slice(0, 200));
   }
+  // W-3 (independent QA): a fresh client started at the file's SIZE, which is
+  // mid-line while a writer is part-way through one; that line was lost.
+  const l5 = line(5);
+  appendFileSync(evFile, l5.slice(0, 25));
+  const c = openStream();
+  await sleep(200);
+  appendFileSync(evFile, l5.slice(25));
+  s.pump();
+  await sleep(150);
+  ok("a client that connects while a line is half-written still gets that line", logs(c).map((e) => e.json.detail).join() === "event 5", JSON.stringify(logs(c)));
+  c.close();
   const d = JSON.parse(readFileSync(boardFile, "utf8"));
   d.phases[0].tasks[1].note = "changed by the CLI";
   writeFileSync(boardFile, `${JSON.stringify(d, null, 2)}\n`);
@@ -395,6 +409,45 @@ const line = (n) => `${JSON.stringify({ t: `2026-09-29T10:00:0${n}Z`, kind: "sys
   await sleep(150);
   ok("a board write sends invalidate board", b.events.some((e) => e.event === "invalidate" && e.json.resource === "board"));
   b.close();
+}
+
+{
+  // W-3: tailing helpers.
+  const f = join(root, "tail-test.jsonl");
+  writeFileSync(f, "{}\n{\"a\":1}\n{\"b\"");
+  ok("lineStart is just after the last complete line", lineStart(f) === "{}\n{\"a\":1}\n".length);
+  writeFileSync(f, "no newline at all");
+  ok("…and 0 when there is none", lineStart(f) === 0 && lineStart(join(root, "absent")) === 0);
+  // Independent review: a line longer than the read window stalled the file forever.
+  writeFileSync(f, `${JSON.stringify({ big: "x".repeat(100) })}\n${JSON.stringify({ ok: 1 })}\n`);
+  let at = 0;
+  let got = [];
+  for (let i = 0; i < 20 && !got.length; i++) {
+    const r = tailFile(f, at, { window: 32 });
+    at = r.offset;
+    got = r.records;
+  }
+  ok("a line longer than the window is skipped, not waited on, and the next line is read", got[0]?.value?.ok === 1, JSON.stringify({ at, got }));
+}
+{
+  // W-3: the per-run stream had no heartbeat.
+  const hs = await startServer({ cfgPath, dist, port: 0, stateDir: state, pollMs: 60_000, heartbeatMs: 50, log: () => {}, token: "t".repeat(64) });
+  const port = hs.port;
+  const auth = await new Promise((res) => request({ host: "127.0.0.1", port, path: `/auth?t=${"t".repeat(64)}`, headers: { Host: `127.0.0.1:${port}` } }, (r) => res(r.headers["set-cookie"]?.[0]?.split(";")[0])).end());
+  const raw = await new Promise((res) => {
+    let text = "";
+    const r = request({ host: "127.0.0.1", port, path: `/api/v1/runs/${RUN}/stream`, headers: { Host: `127.0.0.1:${port}`, Cookie: auth } }, (resp) => {
+      resp.setEncoding("utf8");
+      resp.on("data", (c) => (text += c));
+    });
+    r.end();
+    setTimeout(() => {
+      r.destroy();
+      res(text);
+    }, 400);
+  });
+  ok("the per-run stream sends heartbeats", /: heartbeat/.test(raw), raw.slice(0, 200));
+  await hs.close();
 }
 
 await s.close();

@@ -461,15 +461,21 @@ GET /api/v1/runs/:id/stream     one run's redacted live transcript
   already says a half-written last line is the normal state of an appended
   file.
 - An unparseable complete line is skipped and counted, never thrown.
+- A line longer than the 8 MiB read window is skipped and counted too, rather
+  than held: holding it would stall that file forever.
+- A fresh client starts just after each file's last complete line, not at its
+  size, which is mid-line while a writer is part-way through one.
 
 **Events.**
 - `event: log`, carrying one redacted record.
 - `event: invalidate`, with data `{resource: "board"}` when `board.json`
   changes. It is rewritten rather than appended, so clients refetch.
-- A comment heartbeat every 15 seconds.
+- A comment heartbeat every 15 seconds, on the main stream and on each run's
+  transcript stream.
 
 **Resuming.** Event ids are `<file>:<byteOffset>`, so a reconnect with
-`Last-Event-ID` resumes with no gap and no duplicate.
+`Last-Event-ID` resumes with no gap and no duplicate. `hello` carries the
+starting cursor too, so a client that drops before any log event still resumes.
 
 **Why SSE and not WebSockets:**
 - Data flows one way.
