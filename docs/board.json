@@ -510,7 +510,7 @@
           ],
           "spec": "docs/events.md",
           "ac": "task status is computed by replaying events rather than stored, and the board and the log cannot disagree because the board IS the log folded up",
-          "note": "Same reasoning that made gate verdicts append: a record keeping only the latest value cannot answer how many attempts it took, and that turned out to matter more than the current state."
+          "note": "Same reasoning that made gate verdicts append: a record keeping only the latest value cannot answer how many attempts it took, and that turned out to matter more than the current state. — Owner decision 2026-09-29: deferred. board.json stays authoritative for now; revisit once the event log has history worth projecting from."
         },
         {
           "id": "B-8",
