@@ -18,7 +18,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { RunStoreError, archive, checkStateDir, redactorFor, runArchived, startMirror, stateDirFor } from "./runstore.mjs";
+import { RunStoreError, archive, checkStateDir, credentialAdvice, redactorFor, runArchived, startMirror, stateDirFor } from "./runstore.mjs";
 import { open } from "./readmodel.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -219,6 +219,21 @@ ok("archive with a malformed parent is refused", throwsCode(() => archive(out, {
   m.pump();
   m.stop();
   ok("a multi-byte character split across reads arrives whole", readFileSync(dst, "utf8") === "café ✓ déjà\n" && seenLines.join() === "café ✓ déjà", JSON.stringify(readFileSync(dst, "utf8")));
+}
+
+/* ------------------------------------------- H-10: a login in the container */
+{
+  // Independent re-review: nothing let a subscription reach the containerised
+  // CLI, and nothing said so. The token goes by name, like any secret.
+  const none = credentialAdvice({ sandbox: "podman", cli: "claude" }, { secrets: [], egress: null });
+  ok("a containerised claude run with no credential is told how to give it one", none.some((l) => /claude setup-token/.test(l) && /--secret CLAUDE_CODE_OAUTH_TOKEN/.test(l)), JSON.stringify(none));
+  ok("…and that the default network has no route to the API", none.some((l) => /--egress api\.anthropic\.com/.test(l)));
+  ok("with the token and the route, nothing is missing", credentialAdvice({ sandbox: "podman", cli: "claude" }, { secrets: ["CLAUDE_CODE_OAUTH_TOKEN"], egress: { allow: ["api.anthropic.com"] } }).length === 0);
+  ok("…an API key counts, and so does a wider allowlist entry", credentialAdvice({ sandbox: "podman" }, { secrets: ["ANTHROPIC_API_KEY"], egress: { allow: [".anthropic.com"] } }).length === 0);
+  ok("on the host (sandbox none) it is your own login, so nothing is said", credentialAdvice({ sandbox: "none", cli: "claude" }).length === 0);
+  ok("…nor for another adapter, which makes the model call itself", credentialAdvice({ sandbox: "podman", adapter: "openai-compatible" }).length === 0);
+  // That the token then reaches podman by NAME only, never its value, is
+  // harness.test's "environment is passed with -e, by NAME" check.
 }
 
 /* -------------------------------------------------------------- run.mjs */

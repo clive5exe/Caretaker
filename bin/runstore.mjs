@@ -69,6 +69,26 @@ export { stateDirFor };
 const inside = within;
 
 /** Refuse a state dir the next agent could read. See the header for why. */
+/**
+ * H-10: what a CLI run in a container is missing to reach its model, said
+ * before it runs rather than discovered as an auth error inside it. Returns
+ * advice lines, [] when nothing is missing. Only the claude preset is known.
+ */
+export const CLAUDE_CREDENTIALS = ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"];
+export function credentialAdvice(policy = {}, { secrets = [], egress = null } = {}) {
+  const inContainer = (policy.sandbox ?? "podman") !== "none";
+  const cli = typeof policy.cli === "string" ? policy.cli : policy.cli ? "custom" : "claude";
+  if (!inContainer || (policy.adapter ?? "cli") !== "cli" || cli !== "claude") return [];
+  const out = [];
+  if (!secrets.some((s) => CLAUDE_CREDENTIALS.includes(s))) {
+    out.push("the claude CLI in the container has no credential: nothing of your login is mounted. For a subscription, run `claude setup-token` once, put the token in ~/.config/caretaker/secrets.env as CLAUDE_CODE_OAUTH_TOKEN, and pass --secret CLAUDE_CODE_OAUTH_TOKEN (or --secret ANTHROPIC_API_KEY for a key)");
+  }
+  if (!egress || !egress.allow?.some((h) => h === "api.anthropic.com" || "api.anthropic.com".endsWith(h.startsWith(".") ? h : `.${h}`))) {
+    out.push("the container has no route to api.anthropic.com: the default network is none. Pass --egress api.anthropic.com to give this run its own allowlisted proxy");
+  }
+  return out;
+}
+
 export function checkStateDir(stateDir, workspace) {
   if (workspace && inside(stateDir, workspace)) {
     throw new RunStoreError(
@@ -356,6 +376,8 @@ if (isEntry) {
         if (dir) policy.skillsDir = dir;
       }
       const secrets = flags.secret.length ? Object.fromEntries(requireSecrets(flags.secret, { repoRoot: workspace }).values) : {};
+      const egressFlag = flags.egress !== undefined ? { allow: flags.egress.split(",").map((h) => h.trim()).filter(Boolean) } : null;
+      for (const line of credentialAdvice(policy, { secrets: flags.secret, egress: egressFlag })) console.error(`[runstore] warning: ${line}`);
       const out = await runArchived(workspace, prompt, policy, {
         stateDir: stateDirFromFlags(),
         task: flags.task ?? null,

@@ -11,15 +11,20 @@
  *
  * `cli` (DEFAULT) shells out to an agent CLI, INSIDE the dev-environment
  * container unless sandbox is none. It is the default because the CLI is where
- * subscription auth lives (`claude login` on a Pro or Max plan).
+ * subscription auth lives (a Claude Pro or Max plan).
  *
  * WHAT REACHES THAT CLI, stated because the default's reason depends on it:
- * on the host (sandbox none) it is your own login. In the container it is NOT:
- * HOME there is a fresh tmpfs and nothing of your login is mounted, so a
- * containerised CLI authenticates with an API key given to the run by name
- * (`--secret ANTHROPIC_API_KEY`, which runstore passes as environment), and
- * reaches the API only through the run's egress proxy. Carrying a
- * subscription login into the container is not built (independent review).
+ * on the host (sandbox none) it is your own login. In the container, HOME is a
+ * fresh tmpfs and nothing of your ~/.claude is mounted. A subscription reaches
+ * it as a long-lived token from `claude setup-token`, given to the run BY NAME
+ * (`--secret CLAUDE_CODE_OAUTH_TOKEN`): the name goes on podman's argv, the
+ * value through its environment, never into `ps`, and the transcript is
+ * redacted with it. An API key goes the same way (`--secret ANTHROPIC_API_KEY`).
+ * Either way the CLI reaches the API only through the run's egress proxy
+ * (`--egress api.anthropic.com`); the default network is none, which has no
+ * route. runstore says so before a run that has no credential or no route
+ * (credentialAdvice). The agent can read the token it runs with, as with any
+ * credential a CLI uses; the allowlist is what keeps it from going elsewhere.
  *
  * `openai-compatible` makes the model call from the harness, above the
  * container, and runs the tools inside it. `sdk` is registered and NOT

@@ -542,8 +542,21 @@ for one run are laid over both:
 }
 ```
 
-`claude` signs in with a Claude subscription and `codex` with ChatGPT, inside the
-container. `clis` adds your own agent CLI: it gets the prompt on stdin, like the
+**Signing in, inside the container.** Nothing of your own login is mounted: the
+container's HOME is empty, on purpose. What reaches the CLI is a credential you give
+the run by name, whose value goes through the environment, never onto the command
+line, and is redacted from everything the run leaves behind:
+
+- `claude` on a Claude subscription: run `claude setup-token` once, put the token in
+  `~/.config/caretaker/secrets.env` as `CLAUDE_CODE_OAUTH_TOKEN`, then
+  `--secret CLAUDE_CODE_OAUTH_TOKEN --egress api.anthropic.com` on the run. (Or
+  `--secret ANTHROPIC_API_KEY` with an API key.)
+- `codex`: `--secret OPENAI_API_KEY` with its API host allowed. A ChatGPT-plan login
+  is not carried into the container.
+
+`runstore.mjs run` says before the run when a containerised `claude` has no
+credential or no route to the API. With `--sandbox none` the CLI runs on your
+machine and uses your own login. `clis` adds your own agent CLI: it gets the prompt on stdin, like the
 built-ins, and is recorded as `custom:<name>`. `node bin/harness-config.mjs show` prints
 what each job will use and where each value came from.
 
