@@ -727,8 +727,8 @@ ADR-0002.
 
 ## Proposed tasks
 
-These are not added to `docs/board.json` by this change; the reviewer adds
-them.
+These are on the board as the phase "Layer 5 — Web client". None is closed:
+every gate verdict is left for a reviewer.
 
 | id | title | deps | gates |
 |---|---|---|---|
@@ -744,7 +744,8 @@ them.
 | W-3 | SSE stream with offset resume | W-1 | reviewer, qa |
 | W-4 | command endpoint over core only | W-1, C-6 | reviewer, qa, security |
 | W-5 | client shell, api module, boundary test | W-2 | reviewer, qa |
-| W-6…W-13 | one per page, pages 1 to 7 and 9 of PRODUCT.md | W-5, plus C-4/C-5 for runs pages | reviewer, qa |
+| W-6 | pages over the board: Dashboard, Work item, Inbox, Specs, Settings | W-5 | reviewer, qa |
+| W-7 | pages over runs: Runs, Run detail, Agents | W-5, C-4, C-5 | reviewer, qa |
 | W-14 | install upgrade mode; backward-compat end to end | all | reviewer, qa |
 | W-15 | Metrics page (PRODUCT.md page 8) | W-5, C-2 | reviewer, qa |
 | W-16 | command menu over `commandsFor`, and the Getting started page | W-5 | reviewer, qa |

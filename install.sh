@@ -10,15 +10,66 @@
 # IT REFUSES TO OVERWRITE. If ops/foreman already exists in the target, this
 # stops. Copying over a live board is the one mistake here that loses work, and
 # a --force flag would exist only to be used in a hurry.
+#
+#     bash install.sh --upgrade /path/to/repo
+#
+# UPGRADE REPLACES THE TOOL FILES AND NOTHING ELSE. board.mjs, dashboard.mjs,
+# run.mjs, loop.sh and RULES.md are copied over; config.json, prompt.txt and the
+# board itself are what the refusal above protects, and upgrade never opens
+# them. Every file it replaces is kept in ops/foreman/.upgrade-backup-<time>/,
+# and if the upgraded board cannot read the repo's own board, the old files go
+# back and it exits 1. An upgrade that leaves a repo with a board it cannot
+# read is the same lost work the refusal exists to prevent.
 
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TOOLS="board.mjs dashboard.mjs run.mjs loop.sh"
+
+if [ "${1:-}" = "--upgrade" ]; then
+  TARGET="${2:-}"
+  [ -n "$TARGET" ] || { echo "usage: bash install.sh --upgrade /path/to/repo"; exit 2; }
+  DEST="$TARGET/ops/foreman"
+  [ -f "$DEST/config.json" ] || { echo "REFUSING — no install at $DEST (no config.json). Install first."; exit 1; }
+  BACKUP="$DEST/.upgrade-backup-$(date -u +%Y%m%dT%H%M%SZ)"
+  mkdir -p "$BACKUP"
+  changed=""
+  for f in $TOOLS; do
+    if [ -e "$DEST/$f" ] && cmp -s "$HERE/bin/$f" "$DEST/$f"; then continue; fi
+    [ -e "$DEST/$f" ] && cp -p "$DEST/$f" "$BACKUP/$f"
+    cp "$HERE/bin/$f" "$DEST/$f" || { echo "FAILED copying $f"; exit 1; }
+    changed="$changed $f"
+  done
+  if ! cmp -s "$HERE/RULES.md" "$DEST/RULES.md"; then
+    [ -e "$DEST/RULES.md" ] && cp -p "$DEST/RULES.md" "$BACKUP/RULES.md"
+    cp "$HERE/RULES.md" "$DEST/RULES.md"
+    changed="$changed RULES.md"
+  fi
+  chmod +x "$DEST/loop.sh"
+  # The check is a READ: `status` loads the repo's board through the new code
+  # and writes nothing, so a failed upgrade is undone without a board rebuild.
+  if ! ( cd "$TARGET" && node ops/foreman/board.mjs status >/dev/null 2>&1 ); then
+    for f in $TOOLS RULES.md; do [ -e "$BACKUP/$f" ] && cp -p "$BACKUP/$f" "$DEST/$f"; done
+    echo "ROLLED BACK — the upgraded board.mjs could not read $TARGET's board. The previous files are restored."
+    exit 1
+  fi
+  if [ -z "$changed" ]; then
+    rmdir "$BACKUP"
+    echo "already current — nothing replaced in $DEST"
+  else
+    echo "upgraded$changed in $DEST"
+    echo "previous files kept in $BACKUP"
+    echo "config.json, prompt.txt and the board were not touched."
+  fi
+  exit 0
+fi
+
 TARGET="${1:-}"
 NAME="${2:-}"
 
 if [ -z "$TARGET" ]; then
   echo "usage: bash install.sh /path/to/repo \"Project Name\""
+  echo "       bash install.sh --upgrade /path/to/repo"
   exit 2
 fi
 
@@ -35,7 +86,7 @@ fi
 NAME="${NAME:-$(basename "$TARGET")}"
 mkdir -p "$DEST" "$TARGET/docs"
 
-for f in board.mjs dashboard.mjs run.mjs loop.sh; do
+for f in $TOOLS; do
   cp "$HERE/bin/$f" "$DEST/$f" || { echo "FAILED copying $f"; exit 1; }
 done
 cp "$HERE/RULES.md" "$DEST/RULES.md"

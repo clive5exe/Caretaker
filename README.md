@@ -58,6 +58,12 @@ node ops/foreman/dashboard.mjs          # rebuild docs/board.html
 Copying over a live board is the one mistake here that loses work, so there is no
 `--force`.
 
+To bring an existing install up to date, use `bash install.sh --upgrade
+/path/to/repo`. It replaces the tool files only, and never touches
+`config.json`, `prompt.txt` or the board. It keeps what it replaced in
+`ops/foreman/.upgrade-backup-<time>/`, and puts the old files back if the new
+board cannot read yours.
+
 ## The idea
 
 A board is only worth keeping if it can tell you something you did not already
