@@ -32,7 +32,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { estHours, quality, tokenStats } from "./dashboard.mjs";
+import { estHours, quality, rowTokens, tokenStats } from "./dashboard.mjs";
 
 export const ANTI_KPIS = [
   { name: "lines of code", why: "rewards volume; the cheapest way to raise it is to write worse code" },
@@ -61,15 +61,22 @@ export function parseTokens(v) {
 export function actualsByTask(runs) {
   const out = new Map();
   for (const r of runs ?? []) {
-    if (!r.task || !Number.isFinite(r.tokens)) continue;
-    out.set(r.task, (out.get(r.task) ?? 0) + r.tokens);
+    // The parts when a row has them, as every other reader takes it (round-3
+    // review: the CLI believed a stored 400000 beside in:10 and out:10).
+    const tok = rowTokens(r);
+    if (!r.task || !Number.isFinite(tok)) continue;
+    out.set(r.task, (out.get(r.task) ?? 0) + tok);
   }
   return out;
 }
 
 /* -------------------------------------------------------------------- B-2 */
 
-export function tokenEstimates(board, runs) {
+/** Rows with `tokens` set to the sum of their parts where they have parts (rowTokens). */
+const withDerivedTokens = (runs) => (runs ? runs.map((r) => ({ ...r, tokens: rowTokens(r) })) : runs);
+
+export function tokenEstimates(board, rawRuns) {
+  const runs = withDerivedTokens(rawRuns);
   const actual = actualsByTask(runs);
   const tasks = allTasks(board).filter((t) => t.status !== "dropped");
   const typeOf = (t) => t.owner ?? "(no owner)";
@@ -187,7 +194,8 @@ export function dollars(row, pricing) {
   return ["in", "cached", "write", "out"].reduce((n, k) => n + ((row[k] ?? 0) * (p[k] ?? 0)) / 1e6, 0);
 }
 
-export function ai(board, runs, facts, { gates = ["reviewer", "qa", "security"], pricing = null } = {}) {
+export function ai(board, rawRuns, facts, { gates = ["reviewer", "qa", "security"], pricing = null } = {}) {
+  const runs = withDerivedTokens(rawRuns);
   const tasks = allTasks(board);
   const closed = tasks.filter((t) => t.status === "done");
   const actual = actualsByTask(runs);

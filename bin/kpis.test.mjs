@@ -13,7 +13,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ANTI_KPIS, ai, delivery, dollars, gitFacts, kpis, parseTokens, tokenEstimates } from "./kpis.mjs";
+import { ANTI_KPIS, actualsByTask, ai, delivery, dollars, gitFacts, kpis, parseTokens, tokenEstimates } from "./kpis.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 let failures = 0;
@@ -176,6 +176,18 @@ git("2026-09-03T22:00:00Z", "revert", "--no-edit", bad);
   git("2026-09-04T10:00:00Z", "merge", "-q", "--no-ff", "-m", "Merge f3", "f3");
   const m = gitFacts(R, { days: 30, now: new Date("2026-09-10T00:00:00Z") }).merges.find((x) => x.shas.length === 2 && x.at.startsWith("2026-09-04"));
   ok("a branch's first commit is the earliest in time, not in text", Date.parse(m?.firstAt) === Date.parse("2026-09-04T07:30:00Z"), m?.firstAt);
+}
+
+/* ------------------------------------------- B-8: parts beat a stored total */
+{
+  // Round-3 review: the CLI believed a stored 400000 beside in:10 and out:10,
+  // so its calibration was 4000x the dashboard's.
+  const lying = [{ t: "2026-09-02T09:00:00Z", task: "B1", model: "big", in: 10, out: 10, tokens: 400_000 }];
+  ok("an actual is the sum of a row's parts, not a total stored beside them", actualsByTask(lying).get("B1") === 20);
+  const a = ai(BOARD, lying, null, { gates: ["qa"] });
+  ok("…in tokens per closed task too", a.tokensPerClosedTask === 20, String(a.tokensPerClosedTask));
+  const honest = [{ ...lying[0], tokens: 20 }];
+  ok("…and in the calibration: the same as a row that stores the true total", JSON.stringify(tokenEstimates(BOARD, lying).calibration) === JSON.stringify(tokenEstimates(BOARD, honest).calibration));
 }
 
 /* -------------------------------------------------------------------- cli */
