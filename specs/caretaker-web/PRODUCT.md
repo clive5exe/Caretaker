@@ -336,7 +336,12 @@ rows: run log rows and gate verdicts. A figure with no dates behind it says
 - How to rotate the access token (restart the server).
 
 ### 10. Getting started
-How to build the client and start the server, both copied from TECH.md §1, and
+First, a new repo walked to its first closed task, in terminal commands:
+install, try to close T-001 and be refused, start it, a reviewer and qa
+verdict from someone else, then close it. `bin/getting-started.test.mjs` runs
+exactly those commands, from the page, in a scratch repo.
+
+Then how to build the client and start the server, both copied from TECH.md §1, and
 how to reach it over `ssh -L`. It also lists what the server promises: no
 daemon, no database, loopback only, and the token handling. It says plainly that
 paths and commands still say `caretaker`.
