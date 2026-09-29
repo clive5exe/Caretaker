@@ -61,7 +61,7 @@
  *   node bin/harness.mjs adapters
  */
 import { spawn, spawnSync } from "node:child_process";
-import { createWriteStream, existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
+import { chmodSync, createWriteStream, existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { randomBytes } from "node:crypto";
@@ -290,7 +290,11 @@ export function buildContainerArgv({
     "--name",
     containerName,
   ];
-  for (const [k, v] of Object.entries(env)) extra.push("-e", `${k}=${v}`);
+  // NAMES ONLY. `-e NAME` makes podman take the value from its own
+  // environment (execWithTimeout's `env`), so a key never sits in argv, where
+  // `ps` and `podman inspect` show it to every user on the box. secrets.mjs
+  // measured that leak; this path used to reproduce it.
+  for (const k of Object.keys(env)) extra.push("-e", k);
   extra.push(...extraRunFlags);
   return spliceRunFlags(base, extra);
 }
@@ -566,7 +570,7 @@ export function parseUsage(transcriptText, { billing = null, source = "transcrip
  * output, and the TUI's job is to tail the file — so nothing here writes the
  * agent's bytes to this process's stdout.
  */
-function execWithTimeout({ file, args, cwd, stdinData, stdoutPath, stderrPath, timeoutMs, graceMs, onKill }) {
+function execWithTimeout({ file, args, cwd, env, stdinData, stdoutPath, stderrPath, timeoutMs, graceMs, onKill }) {
   return new Promise((res) => {
     const startedAt = Date.now();
     /*
@@ -583,7 +587,7 @@ function execWithTimeout({ file, args, cwd, stdinData, stdoutPath, stderrPath, t
     };
     let child;
     try {
-      child = spawn(file, args, { cwd, stdio: ["pipe", "pipe", "pipe"], detached: true });
+      child = spawn(file, args, { cwd, env: env ? { ...process.env, ...env } : undefined, stdio: ["pipe", "pipe", "pipe"], detached: true });
     } catch (e) {
       return finish({ spawnError: e, exitCode: null, signal: null, killed: false, durationMs: 0, startedAt });
     }
@@ -863,6 +867,10 @@ async function cliAdapter({ workspace, prompt, policy, paths, warnings }) {
     // sandbox:none there is nothing to do it, and a CLI started in the wrong
     // directory edits the wrong repository.
     cwd: policy.sandbox === "none" ? workspace : undefined,
+    // Values reach the container through podman's own environment (the argv
+    // carries names only). On the host, only the run's own env applies: the
+    // preset's HOME is the container's, and would lose the host CLI its login.
+    env: policy.sandbox === "none" ? policy.env : env,
     stdinData: PROMPT_VIA_STDIN ? prompt : undefined,
     stdoutPath: paths.stdout,
     stderrPath: paths.stderr,
@@ -889,21 +897,18 @@ async function cliAdapter({ workspace, prompt, policy, paths, warnings }) {
  * caller records a completed run, the board moves, and no model was ever
  * called. So this throws.
  *
- * What is actually missing, rather than "TODO":
- *   - H-0. There is no mechanism yet for an API key to reach the harness
- *     without touching the repo, the image or the event log. Adding an SDK call
- *     before that lands is how the key ends up in one of them.
- *   - No vendor SDK is a dependency of this repo, and adding one here is the
- *     decision H-10 exists to make deliberately rather than as a side effect.
- *   - Tool execution has to be routed down into the dev environment, which is
- *     the several-hundred-line part the architecture doc prices honestly. The
- *     cli adapter gets that for free by running inside the container.
+ * What is missing, rather than "TODO": no vendor SDK is a dependency of this
+ * repo, and adding one here is the decision H-10 exists to make deliberately
+ * rather than as a side effect. The API-key half now exists (runstore passes a
+ * run's --secret values to it as environment variables, by name, never in argv
+ * or the archive), and the openai-compatible adapter already makes model calls
+ * from the harness with its tools routed into the container, which is what an
+ * sdk adapter would need to reuse.
  */
 async function sdkAdapter() {
   throw new HarnessError(
     "adapter \"sdk\" is not implemented. It is registered so it fails by name rather than " +
-      "silently falling back to cli. Blocked on H-0 (a key that reaches the harness without " +
-      "touching the repo, image or log) and on routing tool execution into the dev environment.",
+      "silently falling back to cli. For an API model use adapter \"openai-compatible\".",
     { adapter: "sdk", implemented: false },
   );
 }
@@ -938,7 +943,11 @@ function ensureLogDir(policy, workspace) {
       { logDir: dir, workspace },
     );
   }
-  mkdirSync(dir, { recursive: true });
+  // PRIVATE TO THIS USER. The raw transcript (unredacted) and the shadow copy
+  // of the workspace live here; under a shared /tmp at the default umask every
+  // user on the box could read both (independent review).
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  chmodSync(dir, 0o700);
   return dir;
 }
 

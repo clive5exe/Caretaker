@@ -16,7 +16,7 @@
  * Run: node bin/harness.test.mjs
  */
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -109,6 +109,14 @@ const basePolicy = (label, cli, over = {}) => ({
   ok("…and an ordinary run in a repo carries no such warning", !clean.verdict.warnings.some((w) => /CREATED/.test(w)));
 }
 
+{
+  // The raw transcript and the shadow copy live in the run's log dir; under a
+  // shared /tmp at the default umask every user could read them.
+  const r = await run(makeWorkspace("private"), "go", basePolicy("private", fakeCli("cat > /dev/null; echo hi")));
+  const mode = statSync(dirname(r.transcript.path)).mode & 0o777;
+  ok("a run's log dir is private to this user (0700)", mode === 0o700, mode.toString(8));
+}
+
 const MARKER = "MARKER_TRANSCRIPT_7f3a";
 
 /** An agent that writes one file and lies about writing another. */
@@ -138,7 +146,7 @@ echo "Done. I refactored committed.txt and added three files."
     runtime: "podman",
     containerName: "caretaker-r_dead",
     cliArgv: ["claude", "--print"],
-    env: { HOME: "/tmp/agent-home" },
+    env: { HOME: "/tmp/agent-home", ANTHROPIC_API_KEY: "sk-ant-argv-leak-check-0123456789" },
   });
   const has = (flag, value) => {
     const i = argv.indexOf(flag);
@@ -150,7 +158,9 @@ echo "Done. I refactored committed.txt and added three files."
     "measured: `echo X | podman run --rm IMAGE sh -c cat` prints nothing without -i");
   ok("the container is named, so a killed run has a handle to remove", has("--name", "caretaker-r_dead"),
     "measured: SIGKILL on the podman client leaves the container Up despite --rm");
-  ok("environment is passed with -e", has("-e", "HOME=/tmp/agent-home"));
+  const envNames = argv.flatMap((a, i) => (a === "-e" ? [argv[i + 1]] : []));
+  ok("environment is passed with -e, by NAME", envNames.join() === "HOME,ANTHROPIC_API_KEY", JSON.stringify(envNames));
+  ok("NO ENV VALUE IS IN THE ARGV, where ps and podman inspect show it", !argv.some((a) => /sk-ant-argv-leak-check|agent-home/.test(String(a))), JSON.stringify(argv));
   ok("the agent CLI is the container's command", argv.slice(-2).join(" ") === "claude --print", argv.slice(-3).join(" "));
   ok("THE CONTAINER SOCKET IS STILL NEVER MOUNTED", !argv.some((a) => String(a).includes(".sock")));
   ok("the prompt is not on the command line", !argv.some((a) => /prompt/i.test(String(a))),

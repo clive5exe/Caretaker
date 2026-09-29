@@ -39,7 +39,7 @@
  *   node bin/runstore.mjs where [--config F]      print the state dir
  */
 import {
-  closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, renameSync, statSync, writeFileSync, appendFileSync,
+  closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync, appendFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -237,7 +237,11 @@ export async function runArchived(workspace, prompt, policy = {}, { stateDir, ta
   const logDir = policy.logDir ?? join(tmpdir(), "caretaker-runs", runId);
   const dir = join(stateDir, "runs", runId);
   const mirror = startMirror({ from: join(logDir, "transcript.log"), to: join(dir, "transcript.live.log"), redact, onLine: liveRecorder(dir) });
-  const harnessPolicy = { ...policy, runId, logDir, ...(task ? { task } : {}) };
+  // H-0: the run's secrets REACH it, as environment variables by name. The
+  // harness passes names on the container's argv and values through podman's
+  // own environment, so a value is never in argv, the image, the repo or the
+  // log (the redactor below, built from the same values, scrubs the archive).
+  const harnessPolicy = { ...policy, runId, logDir, ...(task ? { task } : {}), env: { ...(policy.env ?? {}), ...secrets } };
   let result;
   let egressRecord = null;
   try {
@@ -251,7 +255,7 @@ export async function runArchived(workspace, prompt, policy = {}, { stateDir, ta
             ...harnessPolicy,
             net,
             extraRunFlags: [...(policy.extraRunFlags ?? []), ...extraRunFlags],
-            env: { ...(policy.env ?? {}), ...env },
+            env: { ...harnessPolicy.env, ...env },
           }),
       );
       result = out.result;
@@ -266,6 +270,10 @@ export async function runArchived(workspace, prompt, policy = {}, { stateDir, ta
   const archived = archive(result, {
     stateDir, workspace, task, parent, model: policy.model ?? null, policy: harnessPolicy, redact, egress: egressRecord,
   });
+  // The raw run directory (unredacted transcript, shadow copy of the
+  // workspace) has served its purpose once the redacted archive exists. Kept
+  // only when the caller chose where it lives.
+  if (!policy.logDir) rmSync(logDir, { recursive: true, force: true });
   // H-6: surface what the run decided and no document records. Never fails
   // the run: the archive is already written, and a harvest can be re-run.
   let harvested;
@@ -275,7 +283,10 @@ export async function runArchived(workspace, prompt, policy = {}, { stateDir, ta
   } catch (e) {
     harvested = { error: e.message };
   }
-  return { ...result, archived, harvested };
+  // The paths handed back are the ARCHIVED (redacted) ones: the raw directory
+  // is gone unless the caller named it.
+  const transcript = policy.logDir ? result.transcript : { ...result.transcript, path: join(archived, "transcript.log"), stderrPath: join(archived, "stderr.log") };
+  return { ...result, transcript, archived, harvested };
 }
 
 /* -------------------------------------------------------------------- cli */

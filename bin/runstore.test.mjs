@@ -79,7 +79,9 @@ echo '{"type":"result","num_turns":2,"usage":{"input_tokens":10,"cache_read_inpu
 printf 'unterminated tail ${SECRET}'
 `);
 
-const policy = (over = {}) => ({ adapter: "cli", cli: AGENT, sandbox: "none", events: join(REPO, "ops", "caretaker", "events"), timeoutMs: 20_000, env: { TEST_API_KEY: SECRET }, ...over });
+// A named logDir keeps the raw run directory, so these checks can compare the
+// raw transcript with the archive; by default runstore deletes it.
+const policy = (over = {}) => ({ adapter: "cli", cli: AGENT, sandbox: "none", events: join(REPO, "ops", "caretaker", "events"), timeoutMs: 20_000, env: { TEST_API_KEY: SECRET }, logDir: join(TMP, `raw-${Math.random().toString(36).slice(2, 8)}`), ...over });
 
 /* --------------------------------------------------------- one real run */
 const pending = runArchived(WS, "do the thing", policy(), { stateDir: STATE, task: "T-001", secrets: SECRETS });
@@ -148,6 +150,26 @@ const childRec = JSON.parse(readFileSync(join(child.archived, "run.json"), "utf8
 ok("a child run records its parent", childRec.parent === runId);
 const parentDetail = (await open(CFG)).run(runId);
 ok("the parent's detail lists the child", (parentDetail?.children ?? []).includes(child.verdict.runId), JSON.stringify(parentDetail?.children));
+
+/* ------------------------------------------------ H-0: the key reaches the run */
+{
+  // Given only through `secrets` (runstore's --secret), never in policy.env:
+  // the agent reads it from its OWN environment and prints it.
+  const agent = join(TMP, "env-agent.sh");
+  writeFileSync(agent, "#!/bin/sh\ncat > /dev/null\necho \"from my env: $TEST_API_KEY\"\n");
+  chmodSync(agent, 0o755);
+  const evDir = join(TMP, "h0-events");
+  const got = await runArchived(WS, "x", { adapter: "cli", cli: { argv: [agent] }, sandbox: "none", events: evDir, timeoutMs: 20_000, logDir: join(TMP, "h0-raw") }, { stateDir: STATE, task: "T-001", secrets: SECRETS });
+  ok("H-0: a --secret REACHES the agent, in its environment", readFileSync(got.transcript.path, "utf8").includes(`from my env: ${SECRET}`), readFileSync(got.transcript.path, "utf8").slice(0, 120));
+  const archivedFiles = readdirSync(got.archived).map((f) => readFileSync(join(got.archived, f), "utf8")).join("\n");
+  ok("…and is in no archived file", !archivedFiles.includes(SECRET) && archivedFiles.includes("from my env: [redacted:TEST_API_KEY]"), archivedFiles.slice(0, 300));
+  const logged = existsSync(evDir) ? readdirSync(evDir).map((f) => readFileSync(join(evDir, f), "utf8")).join("") : "";
+  ok("…nor in the event log the run wrote", logged.length > 0 && !logged.includes(SECRET));
+  const dflt = await runArchived(WS, "x", { adapter: "cli", cli: { argv: [agent] }, sandbox: "none", events: evDir, timeoutMs: 20_000 }, { stateDir: STATE, task: "T-001", secrets: SECRETS });
+  const rawDefault = join(tmpdir(), "caretaker-runs", dflt.verdict.runId);
+  ok("the raw run directory (unredacted transcript, shadow copy) is gone once the archive exists", !existsSync(rawDefault) && dflt.transcript.path === join(dflt.archived, "transcript.log"), rawDefault);
+  ok("…and run.json records the variable's NAME, never its value", JSON.parse(readFileSync(join(got.archived, "run.json"), "utf8")).policy.env?.TEST_API_KEY !== SECRET);
+}
 
 /* --------------------------------------------------------------- refusals */
 ok("a state dir inside the workspace is refused by name", throwsCode(() => checkStateDir(join(WS, ".state"), WS), "STATE_IN_WORKSPACE"));
