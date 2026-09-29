@@ -64,12 +64,6 @@ To bring an existing install up to date, use `bash install.sh --upgrade
 `ops/caretaker/.upgrade-backup-<time>/`, and puts the old files back if the new
 board cannot read yours.
 
-An install from before the project was renamed Caretaker is moved by the same
-command. `--upgrade` moves its directory to `ops/caretaker/` (with `git mv`, so
-history follows) and rewrites only the old paths inside `config.json` and
-`prompt.txt`, keeping the originals. If cron runs the loop, point it at the new
-`ops/caretaker/loop.sh`.
-
 ## The idea
 
 A board is only worth keeping if it can tell you something you did not already
