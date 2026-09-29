@@ -198,6 +198,8 @@ ok("a missing devcontainer.json is null, not a throw", readDevcontainer(join(wor
 
 ok("a/**/b matches a/b with no directory between", globToRegExp("a/**/b").test("a/b"));
 ok("a/**/b matches a/x/y/b", globToRegExp("a/**/b").test("a/x/y/b"));
+ok("a/**/b does NOT match a/xb: ** spans whole directories only", !globToRegExp("a/**/b").test("a/xb") && !globToRegExp("src/**/foo.ts").test("src/xfoo.ts"));
+ok("…while src/**/foo.ts still matches src/foo.ts and src/x/y/foo.ts", globToRegExp("src/**/foo.ts").test("src/foo.ts") && globToRegExp("src/**/foo.ts").test("src/x/y/foo.ts"));
 ok("a dot is literal, not any-character", !globToRegExp("a.ts").test("axts"));
 
 console.log(failures === 0 ? "\n[spec] all checks passed" : `\n[spec] ${failures} FAILURE(S) above.`);

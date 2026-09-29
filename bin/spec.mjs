@@ -216,12 +216,14 @@ export function globToRegExp(glob) {
     const c = glob[i];
     if (c === "*") {
       if (glob[i + 1] === "*") {
-        out += ".*";
         i++;
         if (glob[i + 1] === "/") {
-          out += "/?";
+          // `**/` is zero or more WHOLE directories. `.*/?` let it end
+          // mid-name, so `a/**/b` matched `a/xb` and a spec claimed files
+          // it does not govern (independent review).
+          out += "(?:.*/)?";
           i++;
-        }
+        } else out += ".*";
       } else out += "[^/]*";
     } else if (c === "?") out += "[^/]";
     else out += c.replace(/[.+^${}()|[\]\\]/g, "\\$&");
