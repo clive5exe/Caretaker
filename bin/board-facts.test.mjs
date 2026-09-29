@@ -129,6 +129,12 @@ const ISO = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d+Z$/;
   t = task(f, "T-2");
   ok("a task reopened and dropped again keeps the earlier drop, with its by and at", r.status === 0 && t.dropped.why === "gone for good" && t.dropped.history?.[0]?.why === "out of scope" && t.dropped.history[0].at === firstDrop.at, JSON.stringify(t.dropped));
   ok("an unknown task is refused", f.cli("ask", "T-404", "x").status === 1);
+  // W-4: a transition records who, when and from where; a refused one records nothing.
+  f.cli("start", "T-1");
+  const refused = f.cli("done", "T-1");
+  const moves = task(f, "T-1").transitions ?? [];
+  ok("a CLI transition records by the operator, an ISO at, via cli", moves.length === 1 && moves[0].cmd === "start" && moves[0].by === "five" && moves[0].via === "cli" && ISO.test(moves[0].at), JSON.stringify(moves));
+  ok("a refused done records no transition", refused.status === 1 && moves.every((m) => m.cmd !== "done"));
   ok("the usage lists the new commands", /spec-approve/.test(f.cli("help").stdout));
   rmSync(f.root, { recursive: true, force: true });
 }

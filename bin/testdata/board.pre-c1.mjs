@@ -17,6 +17,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
+import os from "node:os";
 
 // PATHS COME FROM config.json, so this file is the same in every project. It
 // Paths come from config.json beside this file, so board.mjs is identical in
@@ -467,6 +468,10 @@ if (!cmd || cmd === "status") {
     else delete t.blockedReason;
     if (cmd === "block" && text) t.note = t.note ? `${t.note} — BLOCKED: ${text}` : `BLOCKED: ${text}`;
   }
+  // W-4 (an intentional change, mirrored here): who moved it, when, from where.
+  let by = "unknown";
+  try { by = CFG.operator ? String(CFG.operator) : os.userInfo().username; } catch { /* unknown */ }
+  (t.transitions ||= []).push({ cmd, by, at: new Date().toISOString(), via: "cli" });
   d.meta.updated = today();
   save(d);
   const o = build();

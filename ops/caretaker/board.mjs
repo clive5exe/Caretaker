@@ -618,6 +618,10 @@ export function transition(d, id, cmd, text = "", opts = {}) {
     else delete t.blockedReason;
     if (cmd === "block" && text) t.note = t.note ? `${t.note} — BLOCKED: ${text}` : `BLOCKED: ${text}`;
   }
+  // W-4: who moved it, when, and from where (independent review: the web
+  // claimed to record the operator and "via web", and nothing did). Appended,
+  // like every other fact; a refused `done` records nothing.
+  if (opts.by) (t.transitions ||= []).push({ cmd, ...stamp(opts) });
   d.meta.updated = today();
   return { ok: true, task: t };
 }
@@ -817,7 +821,7 @@ export function command(d, id, cmd, args = {}, opts = {}) {
       return transition(d, id, cmd, "", opts);
     case "block":
     case "note":
-      return transition(d, id, cmd, String(args.text ?? ""));
+      return transition(d, id, cmd, String(args.text ?? ""), opts);
     case "ask":
       return ask(d, id, args.text, opts);
     case "answer":
@@ -899,7 +903,8 @@ function cli(argv) {
   } else if (TRANSITIONS.includes(cmd)) {
     if (!id) { console.error("need a task id, e.g. T-012"); process.exit(1); }
     const ctx = loadConfig();
-    const res = mutate(ctx, (d) => transition(d, id, cmd, text, cmd === "done" ? { driftFailing: driftGateFailing(ctx, id) } : {}));
+    const opts = { by: operator(ctx.cfg), via: "cli", ...(cmd === "done" ? { driftFailing: driftGateFailing(ctx, id) } : {}) };
+    const res = mutate(ctx, (d) => transition(d, id, cmd, text, opts));
     if (res.refused) {
       const { missing, docsOnly } = res.refused;
       const t = res.task;

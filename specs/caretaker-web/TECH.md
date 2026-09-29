@@ -277,6 +277,9 @@ after they exist and are tested in core.
 | `pr <id> <url>` | `pr {url, by, at, history?}`: a later pr is current, and the one it replaced moves to `history` with its by and at |
 | `drop <id> "why"` | `status: "dropped"` plus `dropped {why, by, at, history?}`; a task reopened and dropped again keeps the earlier drop in `history`. `dropped` already exists as a status (`board.mjs:49`), but no command sets it. |
 
+- The status commands (`start`, `block`, `todo`, `note`, `done`) append
+  `transitions[] {cmd, by, at, via}`, from the CLI and the web alike. A refused
+  `done` records nothing.
 - All fields are optional and additive, so existing readers ignore them.
 - `ops/caretaker/prompt.txt` currently says to write a needed decision "into the
   task note". It changes to `ask`, so the question becomes a fact the Inbox can

@@ -18,7 +18,7 @@
  * Run: node bin/serve.test.mjs
  */
 import { spawn, spawnSync } from "node:child_process";
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync, appendFileSync } from "node:fs";
+import { existsSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync, appendFileSync } from "node:fs";
 import { request } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -249,8 +249,13 @@ const post = (path, obj, headers = WRITE()) => req("POST", path, { headers, body
   ok("a file not recorded is 404 saying so", r.status === 404 && /not recorded/.test(r.json?.error ?? ""));
   r = await get("/board.html");
   ok("board.html is served under CSP sandbox", r.status === 200 && r.headers["content-security-policy"] === "sandbox");
-  r = await get("/..%2f..%2fdocs%2fboard.json");
-  ok("static traversal does not leave dist", !r.text.includes("phases"), r.text.slice(0, 80));
+  // dist is <root>/dist and the board is <root>/docs/board.json: ONE level up.
+  // Independent review: this climbed two, so it could not fail.
+  ok("the traversal target is really one level above dist", existsSync(join(dist, "..", "docs", "board.json")));
+  for (const path of ["/..%2fdocs%2fboard.json", "/%2e%2e/docs/board.json", "/assets/..%2f..%2fdocs%2fboard.json"]) {
+    r = await get(path);
+    ok(`static traversal does not leave dist: ${path}`, !r.text.includes("phases"), `${r.status} ${r.text.slice(0, 80)}`);
+  }
   r = await get("/assets/a.js");
   ok("static assets are served with their type", r.status === 200 && /javascript/.test(r.headers["content-type"]));
   r = await get("/work/T-1");
@@ -285,6 +290,10 @@ const post = (path, obj, headers = WRITE()) => req("POST", path, { headers, body
   const q = JSON.parse(readFileSync(boardFile, "utf8")).phases[0].tasks.find((t) => t.id === "T-2").questions?.[0];
   ok("an accepted command returns the updated work item", r.status === 200 && r.json?.task?.openQuestions === 1, r.text);
   ok("and core recorded it by the operator, via web", q?.by === "five" && q?.via === "web" && q?.q === "which port?", JSON.stringify(q));
+  // W-4 (independent review): transitions ignored by and via, though the UI said they were recorded.
+  r = await post("/api/v1/work/T-2/commands", { cmd: "block", args: { text: "waiting on a key" } });
+  const moves = JSON.parse(readFileSync(boardFile, "utf8")).phases[0].tasks.find((t) => t.id === "T-2").transitions ?? [];
+  ok("a transition through the web records by the operator, via web", r.status === 200 && moves.at(-1)?.cmd === "block" && moves.at(-1)?.by === "five" && moves.at(-1)?.via === "web" && /T/.test(moves.at(-1)?.at ?? ""), JSON.stringify(moves));
 }
 
 /* 5. numbers -------------------------------------------------------------- */

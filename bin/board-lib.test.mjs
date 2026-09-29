@@ -6,8 +6,9 @@
  *      testdata/board.pre-c1.mjs. Both copies run the same command script over
  *      the same fixture board, every command and every refusal path, and after
  *      each step stdout, stderr, the exit code, board.json and board.md must be
- *      identical. Two things are normalised, and only these: today's date
- *      (a run that crosses midnight) and the fixture's absolute path. The
+ *      identical. Three things are normalised, and only these: today's date
+ *      (a run that crosses midnight), the fixture's absolute path, and ISO
+ *      instants (a transition's `at`, which carries milliseconds). The
  *      usage text may only grow: C-6 appends lines for its commands.
  *   2. IMPORT. Importing board.mjs reads nothing and prints nothing, and the
  *      exported domain returns results instead of exiting.
@@ -87,7 +88,7 @@ function fixture(boardFile) {
 }
 
 const TODAY = new Date().toISOString().slice(0, 10);
-const norm = (s, root) => String(s ?? "").split(root).join("<root>").split(TODAY).join("<today>");
+const norm = (s, root) => String(s ?? "").split(root).join("<root>").replace(/\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d+Z/g, "<instant>").split(TODAY).join("<today>");
 
 /* 1. golden --------------------------------------------------------------- */
 const SCRIPT = [
