@@ -269,6 +269,20 @@ export interface Specs {
   drift: LogEvent[] | null;
   approvals: { task: string; title: string; path: string; governing: boolean; exists: boolean; needed: boolean; last: Review | null }[];
   dismissCommand: string;
+  /** P-5/B-3, computed by bin/freshness.mjs; null when this is not a git checkout. */
+  freshness: Freshness | null;
+}
+
+export interface CommitRef {
+  day: string;
+  sha: string;
+  subject: string;
+}
+export interface Freshness {
+  stale: { spec: string; updated: string | null; lastGoverned: CommitRef | null; governedPaths: number }[];
+  lying: { doc: string; updated: string; lastCommit: CommitRef }[];
+  undated: string[];
+  ok: boolean;
 }
 
 export interface TokenComp {

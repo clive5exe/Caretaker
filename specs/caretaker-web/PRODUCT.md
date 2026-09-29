@@ -280,6 +280,10 @@ out in TECH.md §Run detail. Until then, those sections say *not recorded*.
 - The latest drift verdicts from the event log, with dismissals, their reason
   and who made them.
 - Spec approval state per work item.
+- **Whether each document can be trusted**, computed from git on every load:
+  a spec older than the code it governs is *stale*, a doc edited after the
+  `updated:` date it claims has a *date that lies*, and a doc with no date is
+  *undated*. There is no freshness flag to set (P-5, B-3).
 - Read-only for drift. Dismissal stays with `drift.mjs check --dismiss`, and
   the page shows the exact command.
 

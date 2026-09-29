@@ -1,7 +1,7 @@
 {
   "meta": {
     "name": "Caretaker",
-    "updated": "2026-08-30"
+    "updated": "2026-09-29"
   },
   "phases": [
     {
@@ -86,13 +86,13 @@
           "title": "Staleness is computed, never declared",
           "owner": "backend",
           "est": "1d",
-          "status": "todo",
+          "status": "doing",
           "deps": [
             "P-3"
           ],
           "spec": "docs/memory.md",
           "ac": "a check reports stale (the doc's updated: is older than the last commit touching the paths it GOVERNS), orphaned (governs paths that no longer exist) and unowned (code no spec claims), with no manual freshness flag anywhere",
-          "note": "A manual 'is this current?' flag stops being updated the first time someone is in a hurry, and then there is no way to tell a current doc from an abandoned one. Comparing against the governed paths rather than the doc's own last commit is the stronger check: a doc can be true and untouched while the code under it moves."
+          "note": "A manual 'is this current?' flag stops being updated the first time someone is in a hurry, and then there is no way to tell a current doc from an abandoned one. Comparing against the governed paths rather than the doc's own last commit is the stronger check: a doc can be true and untouched while the code under it moves. — Built in bin/freshness.mjs, checked by bin/freshness.test.mjs and mutation-checked: stale compares a spec's updated: against the last commit touching the paths it GOVERNS; orphaned and unowned come from the drift ownership map. No freshness flag exists anywhere. Gate verdicts not recorded."
         }
       ]
     },
@@ -454,11 +454,12 @@
           "title": "A task points at its spec, and a stale doc is visible",
           "owner": "backend",
           "est": "4h",
-          "status": "todo",
+          "status": "doing",
           "deps": [
             "P-1"
           ],
-          "ac": "a task carries a spec path rendered as a link on its card, and a check compares each doc's claimed updated: date against the last commit that touched it and names the ones that lie"
+          "ac": "a task carries a spec path rendered as a link on its card, and a check compares each doc's claimed updated: date against the last commit that touched it and names the ones that lie",
+          "note": "Built: freshness.mjs names every doc whose updated: is older than its own last commit, and the web Specs page shows stale, lying and undated docs. The task's spec already shows on the web work item. On its first run it caught docs/board.md claiming 2026-08-30 after today's edits. Gate verdicts not recorded."
         },
         {
           "id": "B-4",

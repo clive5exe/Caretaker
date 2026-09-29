@@ -22,6 +22,7 @@ import { dirname, join, resolve, sep } from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import * as drift from "./drift.mjs";
 import * as events from "./events.mjs";
+import { freshness as computeFreshness } from "./freshness.mjs";
 import { commandsFor, openQuestions, requiredGates, specApprovalNeeded, stageOf, STAGES } from "./lifecycle.mjs";
 import { KEY_SHAPES } from "./secrets.mjs";
 import { stateDirFor } from "./runstore.mjs";
@@ -569,6 +570,17 @@ export function createReadModel({ cfgPath, board, dash, now = () => new Date(), 
       drift: ev === null ? null : ev.filter((e) => e.kind === "drift" || (e.kind === "gate" && /drift|governed/.test(e.detail ?? ""))).slice(-100).reverse(),
       approvals,
       dismissCommand: `node bin/drift.mjs check --dismiss <glob> --reason "why" --by <you> [--dismiss-task T-1]`,
+      // Computed from git on every read (P-5, B-3). null, not empty, when this
+      // is not a git checkout: "nothing is stale" and "cannot tell" differ.
+      freshness: (() => {
+        if (tree === null) return null;
+        try {
+          const f = computeFreshness({ repo: root, specsDir });
+          return { stale: f.stale, lying: f.lying, undated: f.undated, ok: f.ok };
+        } catch {
+          return null;
+        }
+      })(),
     };
   }
 

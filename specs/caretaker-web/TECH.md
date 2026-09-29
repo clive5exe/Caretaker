@@ -389,7 +389,7 @@ zero.
 | `GET /runs/:id` | one run: identity, parent, children, verdict, cost, diff summary, drift events for it | same, plus the event log |
 | `GET /runs/:id/transcript?from=<byte>`, `/stderr?from=`, `/diff`, `/egress` | raw text or JSONL, byte-ranged | the run archive (C-4, C-5) |
 | `GET /agents` | roles, models, runs and tokens aggregate, current work | `agentsDir` frontmatter (as `dashboard.mjs` `agents()` reads it), runs |
-| `GET /specs` | specs, `governs`, parse errors | `drift.loadSpecs` |
+| `GET /specs` | specs, `governs`, parse errors, and `freshness` (stale, lying, undated; null outside git) | `drift.loadSpecs`, `freshness.freshness` |
 | `GET /specs/ownership` | the ownership map, unowned, orphaned | `drift.buildOwnership`, `findOrphaned`, `treeFromGit` |
 | `GET /specs/drift` | recent drift and gate events, dismissals | the event log, `kind in (drift, gate)` |
 | `GET /settings` | read-only config, `stateDir`, sources, binding | config, server |
