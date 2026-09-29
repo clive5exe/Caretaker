@@ -97,12 +97,13 @@
  * JSON on stdout, one summary line on stderr. Exit 0 clean, 1 blocked, 2 misuse.
  */
 import {
-  readFileSync, readdirSync, appendFileSync, mkdirSync, existsSync,
+  readFileSync, readdirSync, existsSync,
 } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join, relative, resolve, dirname } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseSpec, extractBlock, globToRegExp } from "./spec.mjs";
+import { append as appendEvents } from "./events.mjs";
 
 /* ------------------------------------------------------------------- paths */
 
@@ -449,14 +450,18 @@ export function eventLines(report, { at, run = null, task = null, stage = "revie
   return lines;
 }
 
-/** Append to `events-YYYY-MM-DD.jsonl`, rotated by the day in the line's own `t`. */
+/**
+ * Append through the one event writer (`bin/events.mjs`), which validates each
+ * line and rotates it by its own `t`. Returns the first file written, or null.
+ *
+ * A spec's parse error or a dismissal's reason can span lines, and the writer
+ * refuses a multi-line `detail`. Folding them here keeps a dismissal from
+ * being refused over its formatting, which the CLI would report as "could not
+ * be recorded".
+ */
 export function writeEvents(dir, lines) {
-  if (!lines.length) return null;
-  const day = String(lines[0].t).slice(0, 10);
-  const file = join(dir, `events-${day}.jsonl`);
-  mkdirSync(dir, { recursive: true });
-  appendFileSync(file, lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
-  return file;
+  const oneLine = lines.map((l) => ({ ...l, detail: String(l.detail).replace(/\s*[\r\n]+\s*/g, " ") }));
+  return appendEvents(dir, oneLine)[0] ?? null;
 }
 
 /* --------------------------------------------------------------------- git */

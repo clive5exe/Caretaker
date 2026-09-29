@@ -63,6 +63,7 @@ import { tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { randomBytes } from "node:crypto";
 import { pathToFileURL } from "node:url";
+import { DEFAULT_DIR as DEFAULT_EVENTS_DIR, STAGES, append as appendEvents } from "./events.mjs";
 import { buildArgs, checkLimits, delegatedControllers } from "./sandbox.mjs";
 import { readDevcontainer, toLimits } from "./spec.mjs";
 
@@ -110,6 +111,11 @@ const DEFAULTS = {
   extraRunFlags: [],
   extraCliArgs: [],
   allowLogDirInWorkspace: false,
+  // The event log (B-6, `bin/events.mjs`). null is its default directory;
+  // false turns it off. `task` and `stage` are copied onto both events.
+  events: null,
+  task: null,
+  stage: "build",
 };
 
 const newRunId = () => `r_${randomBytes(4).toString("hex")}`;
@@ -128,6 +134,14 @@ export function normalisePolicy(policy = {}) {
   p.runId = policy.runId ?? newRunId();
   if (!Number.isFinite(p.timeoutMs) || p.timeoutMs <= 0) {
     throw new HarnessError(`timeoutMs must be a positive number, got ${policy.timeoutMs}`);
+  }
+  // Checked here, not left to the event writer: a bad stage there would only
+  // turn into a warning on every run, and nobody reads warnings they expect.
+  if (p.stage !== null && !STAGES.includes(p.stage)) {
+    throw new HarnessError(`stage must be one of ${STAGES.join(", ")} or null, got ${JSON.stringify(p.stage)}`);
+  }
+  if (p.task !== null && (typeof p.task !== "string" || !p.task)) {
+    throw new HarnessError(`task must be a non-empty string or null, got ${JSON.stringify(p.task)}`);
   }
   return p;
 }
@@ -916,6 +930,37 @@ export async function run(workspace, prompt, policy = {}) {
   };
   const warnings = [];
 
+  /*
+   * THE RUN'S TWO EVENTS, placed around the snapshots on purpose. `start` is
+   * written BEFORE the first snapshot and `end` AFTER the second, so if the
+   * event directory is inside the workspace neither line lands between them
+   * and neither is measured as the agent's work. `start` is what makes a run
+   * whose harness process died visible at all: a start with no end.
+   *
+   * A log that cannot be written does not fail the run. The run happened, and
+   * losing its result over a full disk would be the worse outcome, so the
+   * failure goes into verdict.warnings where the caller sees it.
+   */
+  const eventBase = {
+    run: p.runId,
+    ...(p.task ? { task: p.task } : {}),
+    ...(p.stage ? { stage: p.stage } : {}),
+    kind: "agent",
+  };
+  const logEvent = (ev) => {
+    if (p.events === false) return;
+    try {
+      appendEvents(p.events ?? DEFAULT_EVENTS_DIR, { ...eventBase, ...ev });
+    } catch (e) {
+      warnings.push(`the event log was not written (${e.message}); this run has no ${ev.phase} event`);
+    }
+  };
+  logEvent({
+    phase: "start",
+    level: "info",
+    detail: `run started: adapter ${p.adapter}, cli ${typeof p.cli === "string" ? p.cli : "custom"}, sandbox ${p.sandbox}, ceiling ${p.timeoutMs}ms`,
+  });
+
   // Snapshot BEFORE anything runs. Everything after this point is the delta.
   const shadow = openShadow(join(logDir, "shadow"), ws);
   const before = snapshot(shadow);
@@ -931,7 +976,15 @@ export async function run(workspace, prompt, policy = {}) {
    * snapshot below covers it. The adapter throws only when nothing ran at all
    * (an unknown CLI, no image), and then there is no diff to report.
    */
-  const result = await adapter({ workspace: ws, prompt, policy: p, paths, warnings });
+  let result;
+  try {
+    result = await adapter({ workspace: ws, prompt, policy: p, paths, warnings });
+  } catch (e) {
+    // The adapter throws only when nothing ran (see above). Without this line
+    // the log would hold a start with no end, which reads as a dead harness.
+    logEvent({ phase: "end", level: "error", state: "not-started", detail: `run did not start: ${e.message}`.replace(/[\r\n]+/g, " ") });
+    throw e;
+  }
 
   const after = snapshot(shadow);
   const diff = measureDiff(shadow, before, after);
@@ -1004,6 +1057,16 @@ export async function run(workspace, prompt, policy = {}) {
     tail: stdoutText.slice(-4000),
     stderrTail: stderrText.slice(-4000),
   };
+
+  logEvent({
+    phase: "end",
+    level: state === "completed" ? "info" : state === "killed" ? "warn" : "error",
+    state,
+    tokens: Number.isInteger(cost.tokens.total) ? cost.tokens.total : null,
+    files: diff.measured ? diff.files.length : null,
+    durationMs: exec.durationMs,
+    detail: `run ${state}${reason ? `: ${reason}` : ""}`.replace(/[\r\n]+/g, " "),
+  });
 
   return { diff, transcript, verdict, cost };
 }
