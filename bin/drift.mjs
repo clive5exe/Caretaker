@@ -672,6 +672,14 @@ if (isEntry) {
   // The direction: --direction wins; otherwise the project's config, with the
   // task's own override read from the board that config names.
   let direction = opt.direction ?? "spec";
+  // With no --config, the project's own config, where install puts it: a
+  // project that declared `drift.direction: "code"` got a CI gate blocking
+  // every drift, because only an explicit --config was read (independent
+  // review). Absent, the default direction applies.
+  if (!opt.config) {
+    const found = join(resolve(repo), "ops", "caretaker", "config.json");
+    if (existsSync(found)) opt.config = found;
+  }
   if (!opt.direction && opt.config) {
     let cfg;
     try {

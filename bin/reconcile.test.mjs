@@ -206,6 +206,16 @@ const specPatch = `--- a/specs/pricing.md\n+++ b/specs/pricing.md\n${realDiff.sp
   writeFileSync(BOARD, JSON.stringify(b));
   const run = (...a) => spawnSync("node", [join(HERE, "drift.mjs"), "check", "--repo", REPO, "--path", "src/fee.js", "--no-events", "--no-tree", ...a], { encoding: "utf8" });
   ok("drift check with no direction blocks", run().status === 1);
+  {
+    // The reviewer's case: a project that declared code as the authority, and
+    // the CI step graduate writes, which passes no --config.
+    const cfgFile = join(REPO, "ops", "caretaker", "config.json");
+    const cfgBefore = readFileSync(cfgFile, "utf8");
+    writeFileSync(cfgFile, JSON.stringify({ ...JSON.parse(cfgBefore), drift: { direction: "code" } }));
+    const r = run();
+    writeFileSync(cfgFile, cfgBefore);
+    ok("with no --config, the project's own config sets the direction", r.status === 0, r.stderr.slice(0, 300));
+  }
   const viaTask = run("--config", CFG, "--task", "T-001");
   ok("drift check --config honours the task's own direction", viaTask.status === 0 && JSON.parse(viaTask.stdout).direction === "code", viaTask.stderr);
   ok("--direction wins over config", run("--config", CFG, "--task", "T-001", "--direction", "spec").status === 1);
