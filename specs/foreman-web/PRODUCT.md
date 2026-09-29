@@ -144,7 +144,7 @@ The layout is Warp Factories' web app, taken from the screenshots in Warp's
 docs. TECH.md §4 has the colors, font and logo.
 
 - **Sidebar, left.**
-  - At the top: the Caretaker wordmark, search, and a collapse button.
+  - At the top: the CARETAKER wordmark, search, and a collapse button.
   - Next, the two lists you check most: **Inbox**, with an unread count, and
     **Runs**.
   - Under **Project**: Dashboard, Activity, Agents, Specs & drift, Metrics and

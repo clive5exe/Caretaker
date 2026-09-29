@@ -90,12 +90,11 @@ client over the core, alongside the TUI and the static page. It is specified by
 `specs/foreman-web/PRODUCT.md` and `specs/foreman-web/TECH.md`, which are
 accepted with this ADR.
 
-**Who decided.** Five, the project owner, asked for the web client, steered its
-design through a clickable mockup of every page, and then asked for the work to
-be finished. Claude wrote this acceptance on that instruction. The design that
-came out of that review is recorded in the specs: the layout, colors and logo
-(TECH.md §4, PRODUCT.md §Layout), the Metrics page, the command menu, and the
-TUI's four screens.
+**Who decided.** Five, the project owner. Five asked for the web client,
+steered its design through a clickable mockup of every page, and accepted it.
+The design that came out of that review is recorded in the specs: the layout,
+colors and wordmark (TECH.md §4, PRODUCT.md §Layout), the Metrics page, the
+command menu, and the TUI's four screens.
 
 **The ordering call this ADR asks for.** No W-task starts before H-1's qa gate
 passes. That keeps CLAUDE.md's bottom-up order, and it is the same reason U-1
