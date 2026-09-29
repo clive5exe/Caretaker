@@ -690,12 +690,13 @@ export function createReadModel({ cfgPath, board, dash, now = () => new Date(), 
   /* --------------------------------------------------------------- command */
   /**
    * Every mutation goes through core's own `command`, under core's lock, and
-   * core checks again. The server adds only who (`by`, with `via: "web"`) and
+   * core checks again. The caller adds only who (`by`, with `via`: "web" from
+   * the server, "tui" from the terminal view) and
    * the spec's current blob for spec review, computed by core's specInfo.
    */
-  function command(id, cmd, args = {}) {
+  function command(id, cmd, args = {}, { via = "web" } = {}) {
     if (!COMMANDS.includes(cmd)) return { status: 400, body: { error: `unknown command: ${cmd}` } };
-    const opts = { by: board.operator(cfg), via: "web" };
+    const opts = { by: board.operator(cfg), via };
     const res = board.mutate(ctx, (d) => {
       const hit = board.find(d, id);
       if (!hit) return { ok: false, notFound: true, error: `no such task: ${id}` };

@@ -102,7 +102,7 @@ export function Dashboard() {
             <b style={{ left: `${p.pctTasks}%` }} />
           </div>
           <p className="ft">
-            ETA: <b>{s.eta ? `${s.eta.date} (${s.eta.days} days at ${s.eta.perDay}h a day)` : "no rate"}</b>
+            ETA: <b>{s.eta ? `${s.eta.date} (${s.eta.days} days at ${Number(s.eta.perDay).toFixed(1)}h a day)` : "no rate"}</b>
             {s.eta ? "" : ": nothing closed in the window"}. The bar is effort weighted by estimates; the notch is task count
             {gap >= 10 ? `, and they are ${gap} points apart` : ""}.
             {p.unestimated ? ` ${p.unestimated} task${p.unestimated === 1 ? " has" : "s have"} no estimate.` : ""}

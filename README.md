@@ -644,6 +644,11 @@ Open the printed URL. From another machine, tunnel: `ssh -L 7420:127.0.0.1:7420
 you@box`. Without the build, the server still answers the API under `/api/v1`
 and links `docs/board.html`.
 
+The same project in a terminal, over SSH, with nothing listening on a port:
+`node bin/tui.mjs ops/foreman/config.json`. Four screens (1 Runs, 2 Board,
+3 Inbox, 4 Metrics), read from the same read model, and `:` for the commands
+core offers on the selected work item.
+
 The pages are Dashboard, Activity (the work board, by lifecycle stage or by
 status), each work item, Inbox, Runs and Run detail, Agents, Specs & drift,
 Metrics, Settings and Getting started. Ctrl-K opens a command menu that lists
