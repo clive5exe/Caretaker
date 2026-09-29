@@ -47,7 +47,12 @@ const DEV = join(DEVDIR, "devcontainer.json");
   const built = { build: { dockerfile: "Dockerfile", context: "..", args: { V: "1" }, target: "dev" } };
   const argv = buildArgv(built, DEV);
   ok("a Dockerfile is built with paths taken from the devcontainer's own directory",
-    JSON.stringify(argv) === JSON.stringify(["build", "-t", buildTag(DEV), "-f", join(DEVDIR, "Dockerfile"), "--build-arg", "V=1", "--target", "dev", join(TMP, "proj")]), JSON.stringify(argv));
+    JSON.stringify(argv) === JSON.stringify(["build", "--network", "none", "-t", buildTag(DEV), "-f", join(DEVDIR, "Dockerfile"), "--build-arg", "V=1", "--target", "dev", join(TMP, "proj")]), JSON.stringify(argv));
+  ok("THE IMAGE BUILD HAS NO NETWORK by default: its Dockerfile is agent-editable", argv[1] === "--network" && argv[2] === "none");
+  {
+    const w = resolveImage({ dev: built, devcontainerPath: DEV, exec: () => ({ status: 0 }), buildNetwork: "host" }).warnings;
+    ok("…a build given a network is named in the warnings", w.some((x) => /built with network "host"/.test(x)), JSON.stringify(w));
+  }
   ok("the build tag is stable for one devcontainer and distinct for another", buildTag(DEV) === buildTag(DEV) && buildTag(DEV) !== buildTag(join(TMP, "other.json")));
   ok("a build-only devcontainer no longer passes its Dockerfile path off as an image name", toLimits(built).image === null);
 

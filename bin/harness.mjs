@@ -108,6 +108,9 @@ const DEFAULTS = {
   graceMs: 5000,
   sandbox: "podman",
   net: "none",
+  // E-5: the network an image BUILD gets. None: the Dockerfile is agent-editable
+  // (environment.mjs buildArgv says why). Per run, on the command line only.
+  buildNetwork: "none",
   image: null,
   devcontainer: ".devcontainer/devcontainer.json",
   logDir: null,
@@ -147,7 +150,7 @@ export const cliLabel = (cli) =>
  */
 export function imageFor(policy, dev, warnings, { exec } = {}) {
   try {
-    const r = resolveImage({ image: policy.image ?? null, dev, devcontainerPath: policy.devcontainer, runtime: policy.sandbox, exec });
+    const r = resolveImage({ image: policy.image ?? null, dev, devcontainerPath: policy.devcontainer, runtime: policy.sandbox, exec, buildNetwork: policy.buildNetwork ?? "none" });
     warnings.push(...r.warnings);
     return { image: r.image, built: r.built, imageId: imageId(r.image, { runtime: policy.sandbox, exec }) };
   } catch (e) {

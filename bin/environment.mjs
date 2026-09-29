@@ -28,7 +28,7 @@
  * and — the one that matters most — an UNDECLARED host that can.
  *
  * Usage:
- *   node bin/environment.mjs image [--devcontainer .devcontainer/devcontainer.json]
+ *   node bin/environment.mjs image [--devcontainer .devcontainer/devcontainer.json] [--build-network NET]
  *   node bin/environment.mjs check [--devcontainer F] [--specs specs] [--image I]
  *        [--sandbox podman|none] [--egress] [--egress-network N] [--json]
  * Exit (check): 0 no differences, 1 differences named, 2 misuse or could not run.
@@ -59,11 +59,22 @@ export function buildTag(devcontainerPath) {
   return `localhost/caretaker-env-${createHash("sha256").update(resolve(devcontainerPath)).digest("hex").slice(0, 12)}`;
 }
 
-/** The `podman build` argv for a devcontainer's `build` section, paths resolved from its own directory. */
-export function buildArgv(dev, devcontainerPath) {
+/**
+ * The `podman build` argv for a devcontainer's `build` section, paths resolved
+ * from its own directory.
+ *
+ * THE BUILD HAS NO NETWORK unless one is named. The Dockerfile and its context
+ * are in the workspace, which the last run's agent could edit, and a build's
+ * RUN steps are a container too: with the host's network they would reach the
+ * internet with the repo as their build context, around the egress proxy the
+ * run itself is held to. The base image is still pulled (podman fetches it,
+ * not the build container); a RUN that downloads needs `buildNetwork`, given
+ * per run on the command line and named in the run's warnings.
+ */
+export function buildArgv(dev, devcontainerPath, { network = "none" } = {}) {
   const base = dirname(resolve(devcontainerPath));
   const b = dev.build ?? {};
-  const args = ["build", "-t", buildTag(devcontainerPath), "-f", resolve(base, b.dockerfile)];
+  const args = ["build", "--network", network, "-t", buildTag(devcontainerPath), "-f", resolve(base, b.dockerfile)];
   for (const [k, v] of Object.entries(b.args ?? {})) args.push("--build-arg", `${k}=${v}`);
   if (b.target) args.push("--target", String(b.target));
   args.push(resolve(base, b.context ?? "."));
@@ -74,7 +85,7 @@ export function buildArgv(dev, devcontainerPath) {
  * The image for a run. `policy.image` wins; then devcontainer `image`; then
  * devcontainer `build`, built now. Returns { image, built, warnings }.
  */
-export function resolveImage({ image = null, dev, devcontainerPath, runtime = "podman", exec }) {
+export function resolveImage({ image = null, dev, devcontainerPath, runtime = "podman", exec, buildNetwork = "none" }) {
   const warnings = [];
   const features = Object.keys(dev?.features ?? {});
   if (features.length) {
@@ -87,7 +98,10 @@ export function resolveImage({ image = null, dev, devcontainerPath, runtime = "p
   if (dev?.image) return { image: dev.image, built: false, warnings };
   if (dev?.build?.dockerfile) {
     const run = exec ?? defaultExec(runtime);
-    const args = buildArgv(dev, devcontainerPath);
+    const args = buildArgv(dev, devcontainerPath, { network: buildNetwork });
+    if (buildNetwork !== "none") {
+      warnings.push(`the image was built with network "${buildNetwork}": its Dockerfile is in the workspace, where an agent can edit it, and its RUN steps were not held to the egress allowlist`);
+    }
     const r = run(args);
     if (r.status !== 0) {
       throw new EnvironmentError("BUILD_FAILED", `building the image from ${devcontainerPath} failed (exit ${r.status}): ${String(r.stderr ?? "").trim().split("\n").slice(-5).join(" | ")}`);
@@ -268,7 +282,7 @@ export async function check({ devcontainerPath, specs, image = null, sandbox = "
 const isEntry = process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href;
 if (isEntry) {
   const [cmd, ...argv] = process.argv.slice(2);
-  const KNOWN = new Set(["devcontainer", "specs", "image", "sandbox", "egress", "egress-network", "json"]);
+  const KNOWN = new Set(["devcontainer", "specs", "image", "sandbox", "egress", "egress-network", "json", "build-network"]);
   const f = {};
   for (let i = 0; i < argv.length; i++) {
     const key = argv[i].replace(/^--/, "");
@@ -281,7 +295,7 @@ if (isEntry) {
   const devcontainerPath = f.devcontainer ?? ".devcontainer/devcontainer.json";
   try {
     if (cmd === "image") {
-      const r = resolveImage({ image: f.image ?? null, dev: readDevcontainer(devcontainerPath), devcontainerPath });
+      const r = resolveImage({ image: f.image ?? null, dev: readDevcontainer(devcontainerPath), devcontainerPath, buildNetwork: f["build-network"] ?? "none" });
       for (const w of r.warnings) console.error(`WARNING  ${w}`);
       console.log(`${r.image}${r.built ? "  (built now)" : ""}  id ${imageId(r.image) ?? "unknown"}`);
       process.exit(0);

@@ -58,6 +58,13 @@ also sees a change to a file the Dockerfile copies. A build-only devcontainer is
 never handed to podman as if its Dockerfile path were an image name. Each run
 records the image id it ran in, because a tag moves.
 
+**The build has no network.** Its Dockerfile and context are in the workspace,
+which the last run's agent could edit, and a build's `RUN` steps would otherwise
+reach the internet with the repo as their context, around the egress proxy the
+run itself is held to. The base image still pulls; a build that downloads
+packages is given a network per run on the command line (`--build-network`),
+never in a settings file, and the run says so.
+
 Devcontainer `features` are not installed by this runner; that is the
 devcontainer CLI's job. They are named in a warning rather than skipped.
 

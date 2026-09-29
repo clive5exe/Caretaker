@@ -288,7 +288,7 @@ if (isEntry) {
   const KNOWN = new Set([
     "workspace", "prompt-file", "prompt", "config", "state-dir", "task", "parent", "secret",
     "adapter", "cli", "model", "sandbox", "net", "timeout", "image", "egress", "egress-network",
-    "endpoint", "api-key-env", "max-turns", "skills", "harness-config",
+    "endpoint", "api-key-env", "max-turns", "skills", "harness-config", "build-network",
   ]);
   const flags = { secret: [] };
   for (let i = 0; i < argv.length; i++) {

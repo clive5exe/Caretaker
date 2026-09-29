@@ -64,7 +64,7 @@ export class HarnessConfigError extends Error {
 export const ROLES = ["builder", "refuter", "reconciler"];
 /** What a profile may set: which AI, which model, how long. Nothing about isolation. */
 export const PROFILE_KEYS = ["adapter", "cli", "model", "endpoint", "apiKeyEnv", "maxTurns", "timeoutMs", "image"];
-const ISOLATION = new Set(["sandbox", "net", "extraRunFlags", "extraCliArgs", "env", "allowLogDirInWorkspace", "logDir", "devcontainer", "graceMs", "events"]);
+const ISOLATION = new Set(["sandbox", "net", "buildNetwork", "extraRunFlags", "extraCliArgs", "env", "allowLogDirInWorkspace", "logDir", "devcontainer", "graceMs", "events"]);
 const CLI_KEYS = ["argv", "modelFlag", "env", "skillsPath"];
 const SECRET_NAME = /KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL/i;
 const ADAPTERS = ["cli", "openai-compatible"];
@@ -223,6 +223,7 @@ export function policyFlags(flags) {
     timeoutMs: num("timeout"),
     sandbox: flags.sandbox,
     net: flags.net,
+    buildNetwork: flags["build-network"],
     image: flags.image,
   };
   return Object.fromEntries(Object.entries(out).filter(([, v]) => v !== undefined));
