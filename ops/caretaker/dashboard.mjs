@@ -613,7 +613,10 @@ function gateRail(t) {
 function specMeta(t, pageRel) {
   if (!t.spec) return "";
   const s = String(t.spec);
-  const href = /^[a-z][a-z0-9+.-]*:/i.test(s) || s.startsWith("/") || s.split("/").includes("..") ? null : posix.relative(posix.dirname(pageRel), s);
+  // Plain path characters only, and the result checked too: "docs/javascript:x"
+  // relative to docs/ came out as a javascript: link (independent review).
+  const rel = /^[\w.\/-]+$/.test(s) && !s.startsWith("/") && !s.split("/").includes("..") ? posix.relative(posix.dirname(pageRel), s) : null;
+  const href = rel && !/^[a-z][a-z0-9+.-]*:/i.test(rel) && !rel.startsWith("/") ? rel : null;
   return `<span class="es">spec ${href ? `<a href="${esc(href)}">${esc(s)}</a>` : esc(s)}</span>`;
 }
 

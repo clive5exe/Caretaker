@@ -301,8 +301,12 @@ function acBlock(ac) {
  */
 const specHref = (spec, pageRel) => {
   const s = String(spec ?? "");
-  if (!s || /^[a-z][a-z0-9+.-]*:/i.test(s) || s.startsWith("/") || s.split("/").includes("..")) return null;
-  return path.posix.relative(path.posix.dirname(pageRel), s);
+  // Plain path characters only, and the RESULT checked too: the relative path
+  // strips leading directories, so "docs/javascript:x" came out as
+  // "javascript:x" and passed a check made before it (independent review).
+  if (!/^[\w.\/-]+$/.test(s) || s.startsWith("/") || s.split("/").includes("..")) return null;
+  const href = path.posix.relative(path.posix.dirname(pageRel), s);
+  return /^[a-z][a-z0-9+.-]*:/i.test(href) || href.startsWith("/") ? null : href;
 };
 const specMeta = (t, pageRel, cls) => {
   if (!t.spec) return "";

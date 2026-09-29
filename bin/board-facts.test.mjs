@@ -72,6 +72,7 @@ const ISO = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d+Z$/;
     { id: "T-4", title: "four", owner: "b", status: "todo", spec: "https://evil.example/x" },
     { id: "T-5", title: "five", owner: "b", status: "todo", spec: "../outside.md" },
     { id: "T-6", title: "six", owner: "b", status: "todo", spec: 'specs/"><script>x</script>.md' },
+    { id: "T-7", title: "seven", owner: "b", status: "todo", spec: "docs/javascript:alert(document.cookie)" },
   );
   writeFileSync(join(f.root, "docs", "board.json"), JSON.stringify(b));
   const r = f.cli("build");
@@ -80,6 +81,9 @@ const ISO = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d+Z$/;
   ok("a card links its spec, relative to board.md", r.status === 0 && md.includes('spec <a href="../specs/gov.md">specs/gov.md</a>') && md.includes('<a href="context.md">docs/context.md</a>'), md.slice(0, 600));
   ok("a URL, an absolute path or one climbing out with .. is text, not a link", md.includes("spec https://evil.example/x</span>") && md.includes("spec ../outside.md</span>") && !md.includes('href="https:') && !md.includes('href="../../'));
   ok("a spec path is escaped, in the text and in the href", !md.includes("<script>x") && md.includes("&lt;script&gt;x"));
+  // Independent re-review: the scheme check ran before the relative path
+  // stripped "docs/", so this became href="javascript:…".
+  ok("a scheme that only appears after the relative path is taken is not a link either", !/href="javascript/i.test(md) && md.includes("spec docs/javascript:alert(document.cookie)</span>"));
   rmSync(f.root, { recursive: true, force: true });
 }
 

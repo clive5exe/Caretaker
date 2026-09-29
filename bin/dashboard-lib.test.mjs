@@ -177,6 +177,7 @@ const normalise = (html) =>
       specHtml: m.render(m.metrics({ phases: [{ name: "Phase 1", tasks: [
         { id: "S-1", title: "s", owner: "b", status: "doing", spec: "specs/a.md" },
         { id: "S-2", title: "t", owner: "b", status: "doing", spec: "javascript:alert(1)" },
+        { id: "S-3", title: "u", owner: "b", status: "doing", spec: "docs/javascript:alert(2)" },
       ] }] }, null, { commitsByDay: [], commitsPerTask: new Map() }, cfg), { cfg }),
     }));
   `;
@@ -210,7 +211,7 @@ const normalise = (html) =>
   ok("…and a gate with no attempt has null, not 0%", o.gs?.find(([g]) => g === "security")?.[1].passPct === null);
   // B-3 (independent review): no card showed the task's spec.
   ok("a card links its spec, relative to board.html", o.specHtml?.includes('spec <a href="../specs/a.md">specs/a.md</a>'), (o.specHtml ?? "").match(/spec[^\n]{0,80}/)?.[0]);
-  ok("…and a spec that is not a plain repo path is text, never a link", o.specHtml?.includes("spec javascript:alert(1)</span>") && !o.specHtml.includes('href="javascript'));
+  ok("…and a spec that is not a plain repo path is text, never a link", o.specHtml?.includes("spec javascript:alert(1)</span>") && o.specHtml.includes("spec docs/javascript:alert(2)</span>") && !/href="javascript/i.test(o.specHtml));
   rmSync(f.root, { recursive: true, force: true });
 }
 
