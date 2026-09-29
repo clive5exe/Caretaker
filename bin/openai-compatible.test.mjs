@@ -151,6 +151,30 @@ const policy = (model, over = {}) => ({ adapter: "openai-compatible", endpoint: 
   ok("confine: a path that stays inside is kept", confine("/w", "a/../b") === "b" && confine("/w", "../x") === null && confine("/w", "/etc") === null);
   void out;
 }
+{
+  // The reviewer's escape: a DANGLING link. existsSync follows links, so the
+  // old check saw "not there yet", approved the (inside) parent, and the write
+  // followed the link out.
+  const ws = workspace();
+  const target = join(TMP, "outside", "via-dangling.txt");
+  symlinkSync(target, join(ws, "dangle"));
+  writeFileSync(join(ws, "real.txt"), "inside\n");
+  symlinkSync(join(ws, "real.txt"), join(ws, "inner-link"));
+  scripts.dangle = [say([call("write_file", { path: "dangle", content: "x" }), call("read_file", { path: "inner-link" })]), say(null, null, "tried")];
+  await run(ws, "x", policy("dangle"));
+  const replies = lastToolReply("dangle");
+  ok("a write through a DANGLING symlink is refused, and nothing lands outside", /refused: path is outside/.test(replies[0] ?? "") && !existsSync(target), JSON.stringify(replies));
+  ok("…while a link that points inside can still be read", replies[1] === "inside\n", JSON.stringify(replies[1]));
+}
+
+{
+  // The key goes only over https, or to this machine.
+  process.env.OAI_TEST_KEY = "k-cleartext-check";
+  const refused = await run(workspace(), "x", policy("x", { endpoint: "http://models.example.test/v1", apiKeyEnv: "OAI_TEST_KEY" })).then(() => null, (e) => e.message);
+  ok("a key is never sent to a remote endpoint over plain http", /refusing to send the OAI_TEST_KEY key .* plain http/.test(refused ?? ""), String(refused));
+  const local = await run(workspace(), "x", policy("x", { endpoint: "http://127.0.0.1:1/v1", apiKeyEnv: "OAI_TEST_KEY" })).then((r) => r.verdict.state, (e) => e.message);
+  ok("…while plain http to a model server on this machine is fine", local === "unavailable", String(local));
+}
 
 /* --------------------------------------------------- failure outcomes */
 {

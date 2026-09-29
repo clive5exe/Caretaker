@@ -20,8 +20,10 @@
  *                    container is started for the run (rebuilt, limits,
  *                    read-only root, the repo at /work, no socket) and every
  *                    tool call is a `podman exec` in it. With sandbox "none"
- *                    tools run on the host, confined to the workspace, and the
- *                    run carries the same warning the CLI adapter gives.
+ *                    tools run ON THE HOST: the three file tools are held to
+ *                    the workspace by path checks, and `run` is a host shell
+ *                    held to nothing at all. The run's warning says exactly
+ *                    that; none is not a sandbox.
  *
  * FOUR TOOLS, deliberately few: list_files, read_file, write_file, run. A
  * small model with a short context does worse with a large menu, and every
@@ -41,6 +43,7 @@
 import { spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { within } from "./paths.mjs";
 import { buildArgs, checkLimits, delegatedControllers } from "./sandbox.mjs";
 import { readDevcontainer, toLimits } from "./spec.mjs";
 import { staged } from "./skills.mjs";
@@ -106,19 +109,31 @@ export function confine(root, p) {
 
 /* -------------------------------------------------------------- executors */
 
-/** Tools on the host, confined to the workspace. Only for sandbox:none. */
+/**
+ * Tools on the host, for sandbox:none only. The FILE tools are held to the
+ * workspace by path checks; `run` is a host shell and is held to nothing.
+ */
 export function hostExecutor(ws) {
-  const realRoot = realpathSync(ws);
-  const guard = (p) => {
+  const guard = (p, { write = false } = {}) => {
     const rel = confine(ws, p);
     if (rel === null) return null;
-    // Follow the deepest EXISTING ancestor's symlinks: a link inside the repo
-    // that points outside it is a way out, whatever the path string says.
-    let probe = resolve(ws, rel);
-    while (!existsSync(probe) && probe !== realRoot && probe !== ws) probe = dirname(probe);
-    const real = realpathSync(probe);
-    if (real !== realRoot && !real.startsWith(realRoot + sep)) return null;
-    return resolve(ws, rel);
+    const abs = resolve(ws, rel);
+    // A WRITE never goes through a link. existsSync follows links, so a
+    // DANGLING one used to read as "not there yet", the check walked up to its
+    // (inside) parent, and writeFileSync then followed it out of the
+    // workspace (independent review, reproduced). A link that exists and
+    // points inside may still be READ.
+    let isLink = false;
+    try {
+      isLink = lstatSync(abs).isSymbolicLink();
+    } catch {
+      /* not there */
+    }
+    if (write && isLink) return null;
+    // Everything else is judged where it really lands, symlinks resolved
+    // through the deepest part that exists (paths.mjs).
+    if (!within(abs, ws) || !within(dirname(abs), ws)) return null;
+    return abs;
   };
   return {
     list(p) {
@@ -134,7 +149,7 @@ export function hostExecutor(ws) {
       return { ok: true, output: cap(readFileSync(abs, "utf8")) };
     },
     write(p, content) {
-      const abs = guard(p);
+      const abs = guard(p, { write: true });
       if (!abs) return { ok: false, output: "refused: path is outside the repository" };
       mkdirSync(dirname(abs), { recursive: true });
       writeFileSync(abs, String(content));
@@ -241,6 +256,19 @@ export async function openaiCompatibleAdapter({ workspace, prompt, policy, paths
   const url = `${String(policy.endpoint).replace(/\/+$/, "")}/chat/completions`;
   const headers = { "content-type": "application/json" };
   if (policy.apiKeyEnv) {
+    // A KEY NEVER CROSSES A NETWORK IN CLEARTEXT. Plain http is fine for a
+    // model server on this machine (Ollama, llama.cpp); anywhere else it would
+    // hand the key to every hop on the way (independent review).
+    let u;
+    try {
+      u = new URL(String(policy.endpoint));
+    } catch {
+      throw new HarnessError(`policy.endpoint ${policy.endpoint} is not a URL`);
+    }
+    const local = ["localhost", "127.0.0.1", "[::1]"].includes(u.hostname) || /^127\.\d+\.\d+\.\d+$/.test(u.hostname);
+    if (u.protocol !== "https:" && !local) {
+      throw new HarnessError(`refusing to send the ${policy.apiKeyEnv} key to ${u.origin} over plain http; use https, or a model server on this machine`);
+    }
     const key = process.env[policy.apiKeyEnv];
     if (!key) throw new HarnessError(`policy.apiKeyEnv names ${policy.apiKeyEnv}, which is not set in the harness's environment`);
     headers.authorization = `Bearer ${key}`;
@@ -250,8 +278,8 @@ export async function openaiCompatibleAdapter({ workspace, prompt, policy, paths
   let container = null;
   if (policy.sandbox === "none") {
     warnings.push(
-      "sandbox:none — tools ran on the HOST, confined to the workspace by path checks only. No filesystem " +
-        "isolation beyond that, no resource ceiling and no egress control applied to the agent's commands.",
+      "sandbox:none — tools ran on the HOST. The file tools were held to the workspace by path checks; the run " +
+        "tool was a host shell held to nothing: no filesystem isolation, no resource ceiling and no egress control.",
     );
     ex = hostExecutor(workspace);
   } else {
