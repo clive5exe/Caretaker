@@ -45,11 +45,14 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { randomBytes } from "node:crypto";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { spawnSync } from "node:child_process";
 import { makeRedactor, requireSecrets } from "./secrets.mjs";
 import { stateDirFor } from "./statedir.mjs";
 import { within } from "./paths.mjs";
 import { harvest, liveRecorder } from "./harvest.mjs";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
 
 export const RUN_ID = /^r_[0-9a-f]{8}$/;
 export const newRunId = () => `r_${randomBytes(4).toString("hex")}`;
@@ -390,6 +393,28 @@ if (isEntry) {
           : null,
       });
       console.log(`[runstore] ${out.verdict.runId} ${out.verdict.state} -> ${out.archived}`);
+      // B-2: the run's cost goes on the project's run log, through run.mjs
+      // (the one writer, which derives the total from the parts), carrying
+      // its task and run id. Estimates are calibrated from that log, and
+      // nothing wrote it without a person typing run.mjs (independent QA).
+      // The workspace's own config: the run log belongs to the project that
+      // was worked on, not to whatever directory this was started from.
+      const cfgFile = flags.config ? resolve(flags.config) : join(workspace, "ops", "caretaker", "config.json");
+      if (existsSync(cfgFile)) {
+        const t = out.cost?.tokens ?? {};
+        const part = (flag, v) => (Number.isFinite(v) ? [flag, String(v)] : []);
+        const args = [
+          "end", "--name", "builder", "--config", cfgFile, "--run", out.verdict.runId,
+          "--state", out.verdict.ok ? "done" : "failed",
+          ...(flags.task ? ["--task", flags.task] : []),
+          ...part("--in", t.in), ...part("--cached", t.cached), ...part("--write", t.write), ...part("--out", t.out), ...part("--turns", out.cost?.turns),
+          ...(policy.model ? ["--model", String(policy.model)] : []),
+          ...(out.verdict.adapter ? ["--adapter", out.verdict.adapter] : []),
+          ...(out.verdict.cli ? ["--cli", out.verdict.cli] : []),
+        ];
+        const w = spawnSync(process.execPath, [join(HERE, "run.mjs"), ...args], { encoding: "utf8" });
+        if (w.status !== 0) console.error(`[runstore] warning: the run log was not written: ${String(w.stderr).trim()}`);
+      }
       // H-4: a run for a task is checked by the drift gate on its own diff,
       // so `done` refuses while the spec it drifted from is unchanged. Only a
       // run whose diff was measured has a change set to check.

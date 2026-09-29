@@ -63,7 +63,7 @@ const server = createServer((req, res) => {
       ? { role: "assistant", content: null, tool_calls: [{ id: "c1", type: "function", function: { name: "write_file", arguments: JSON.stringify({ path: "src/fee.js", content: "export const FEE = 0.03;\n" }) } }] }
       : { role: "assistant", content: "done" };
     res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify({ choices: [{ message: msg }] }));
+    res.end(JSON.stringify({ choices: [{ message: msg }], usage: { prompt_tokens: 100, completion_tokens: 20 } }));
   });
 });
 await new Promise((r) => server.listen(0, "127.0.0.1", r));
@@ -87,6 +87,13 @@ const evDir = join(R, "ops", "caretaker", "events");
 const evFile = existsSync(evDir) ? readdirSync(evDir).map((f) => join(evDir, f))[0] : null;
 const gateEv = evFile ? readFileSync(evFile, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)).find((e) => e.kind === "gate") : null;
 ok("…recorded against the task and the run, with the path that failed it", gateEv?.task === "T-1" && /^r_[0-9a-f]{8}$/.test(gateEv?.run ?? "") && JSON.stringify(gateEv?.flagged) === '["src/fee.js"]', JSON.stringify(gateEv));
+// B-2 (independent QA): nothing put a run's cost on the run log with its
+// task, so estimates were never calibrated without a person typing it.
+const logRows = existsSync(join(R, "ops", "caretaker", "runs.jsonl")) ? readFileSync(join(R, "ops", "caretaker", "runs.jsonl"), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)) : [];
+const row = logRows.find((r) => r.run === gateEv?.run);
+ok("the run's cost is on the project's run log, with its task and run id", row?.task === "T-1" && row.state === "done" && Number.isFinite(row.tokens) && row.tokens > 0 && row.tokens === ["in", "cached", "write", "out"].reduce((n, k) => n + (row[k] ?? 0), 0), JSON.stringify(logRows));
+const { actualsByTask } = await import("./kpis.mjs");
+ok("…so the task has an actual to calibrate estimates with", !!row && actualsByTask(logRows).get("T-1") === row.tokens);
 let d = done();
 ok("so done refuses, though reviewer and qa passed", d.status === 1 && /drift gate/.test(d.stderr), d.stderr);
 spawnSync(process.execPath, [join(HERE, "drift.mjs"), "check", "--repo", R, "--task", "T-1", "--path", "README.md", "--quiet"], { cwd: R });
