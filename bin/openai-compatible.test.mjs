@@ -176,6 +176,35 @@ const policy = (model, over = {}) => ({ adapter: "openai-compatible", endpoint: 
   ok("…while plain http to a model server on this machine is fine", local === "unavailable", String(local));
 }
 
+/* --------------------------------------- the ceiling holds inside a turn */
+{
+  // H-9, as the reviewers measured it: a 1s ceiling took 8s with two sleeps in
+  // one turn, and 120s with a long one; a backgrounded process outlived it all.
+  const ws = workspace();
+  const pidFile = join(ws, "bg.pid");
+  scripts.slow = [say([call("run", { command: `sleep 37 & echo $! > ${pidFile}; sleep 4` }), call("run", { command: "sleep 4" })]), say(null, null, "done")];
+  const t0 = Date.now();
+  const out = await run(ws, "x", policy("slow", { timeoutMs: 1000 }));
+  const took = Date.now() - t0;
+  ok("a run past its ceiling is KILLED mid-turn, not after its tools finish", out.verdict.state === "killed" && took < 3000, `${out.verdict.state} in ${took}ms`);
+  // Running, not merely present: a killed process stays a zombie (state Z)
+  // until something reaps it, which a container's init may be slow to do.
+  await new Promise((r) => setTimeout(r, 200));
+  const pid = Number(readFileSync(pidFile, "utf8"));
+  let alive = false;
+  try {
+    alive = readFileSync(`/proc/${pid}/stat`, "utf8").split(" ")[2] !== "Z";
+  } catch {
+    try {
+      process.kill(pid, 0);
+      alive = !existsSync("/proc/self");
+    } catch {
+      /* gone, as it should be */
+    }
+  }
+  ok("…and a process a tool left in the background does not outlive the call", !alive);
+}
+
 /* --------------------------------------------------- failure outcomes */
 {
   const dead = await run(workspace(), "x", policy("x", { endpoint: "http://127.0.0.1:1/v1" }));
@@ -251,7 +280,9 @@ else {
     say(null, null, "done"),
   ];
   const out = await run(ws, "x", policy("live", { sandbox: "podman", image: IMAGE, net: "none" }));
-  ok(`${LIVE}: completed`, out.verdict.state === "completed", JSON.stringify(out.verdict));
+  // stderr on failure: this check failed intermittently in CI ("exited 1" on
+  // turn 2) and the verdict alone did not say why.
+  ok(`${LIVE}: completed`, out.verdict.state === "completed", `${JSON.stringify(out.verdict)}\n      stderr: ${out.transcript.stderrTail}`);
   ok(`${LIVE}: the write reached the repo through /work and was measured`, readFileSync(join(ws, "made", "inside.txt"), "utf8") === "from the container\n" && out.diff.files.some((f) => f.path === "made/inside.txt"));
   const replies = lastToolReply("live").join("\n");
   ok(`${LIVE}: the container had no route out`, replies.includes("NET-CLOSED") && !replies.includes("NET-OPEN"), replies);

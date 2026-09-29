@@ -40,7 +40,7 @@
  * into the policy (which runstore records), not into the transcript, not into
  * the container. A local server usually needs none, so the default is none.
  */
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { within } from "./paths.mjs";
@@ -110,6 +110,58 @@ export function confine(root, p) {
 /* -------------------------------------------------------------- executors */
 
 /**
+ * Run one tool command WITHOUT blocking the process, bounded by `timeoutMs`.
+ *
+ * A blocking spawnSync froze the whole harness for the length of the call, so
+ * the run's own ceiling could not fire until it returned (a 1s ceiling took
+ * 120s, independent review). Here the event loop keeps running, the limit is
+ * the run's remaining time, and the whole process group is killed when the
+ * command ends or runs out of time, so a `sleep 999 &` it left behind does not
+ * hold the pipes open or outlive the call.
+ */
+export function runBounded(file, args, { cwd, input, timeoutMs }) {
+  return new Promise((resolve) => {
+    let stdout = "";
+    let stderr = "";
+    let done = false;
+    let timer = null;
+    let child;
+    const cap16 = (buf, d) => (buf.length < 16 * 1024 * 1024 ? buf + d : buf);
+    const finish = (status, signal, timedOut = false) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      try {
+        process.kill(-child.pid, "SIGKILL");
+      } catch {
+        /* already gone */
+      }
+      resolve({ status, signal, stdout, stderr, timedOut });
+    };
+    try {
+      child = spawn(file, args, { cwd, detached: true, stdio: ["pipe", "pipe", "pipe"] });
+    } catch (e) {
+      return resolve({ status: null, signal: null, stdout: "", stderr: String(e.message), timedOut: false });
+    }
+    timer = setTimeout(() => finish(null, "SIGKILL", true), Math.max(1, timeoutMs));
+    child.stdout.on("data", (d) => (stdout = cap16(stdout, d)));
+    child.stderr.on("data", (d) => (stderr = cap16(stderr, d)));
+    child.on("error", (e) => {
+      stderr += String(e.message);
+      finish(null, null);
+    });
+    child.on("close", (code, signal) => finish(code, signal));
+    // A background child can hold the pipes open after the command itself has
+    // exited; `close` would then wait for it. Give the pipes a moment, then end.
+    child.on("exit", (code, signal) => setTimeout(() => finish(code, signal), 250));
+    child.stdin.on("error", () => {});
+    child.stdin.end(input === undefined ? undefined : String(input));
+  });
+}
+
+const timedOutNote = (r) => (r.timedOut ? "\nerror: stopped at the run's time limit" : "");
+
+/**
  * Tools on the host, for sandbox:none only. The FILE tools are held to the
  * workspace by path checks; `run` is a host shell and is held to nothing.
  */
@@ -155,9 +207,9 @@ export function hostExecutor(ws) {
       writeFileSync(abs, String(content));
       return { ok: true, output: `wrote ${Buffer.byteLength(String(content))} bytes to ${confine(ws, p)}` };
     },
-    run(command) {
-      const r = spawnSync("sh", ["-c", String(command)], { cwd: ws, encoding: "utf8", timeout: CMD_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024 });
-      return { ok: r.status === 0, output: cap(`exit ${r.status ?? r.signal}\n${r.stdout ?? ""}${r.stderr ?? ""}`) };
+    async run(command, { timeoutMs = CMD_TIMEOUT_MS } = {}) {
+      const r = await runBounded("sh", ["-c", String(command)], { cwd: ws, timeoutMs });
+      return { ok: r.status === 0, output: cap(`exit ${r.status ?? r.signal}\n${r.stdout}${r.stderr}${timedOutNote(r)}`) };
     },
     close() {
       return null;
@@ -171,36 +223,34 @@ export function hostExecutor(ws) {
  * command that wanders is wandering inside the sandbox, not on the host.
  */
 export function containerExecutor({ runtime, name }) {
-  const exec = (args, input) =>
-    spawnSync(runtime, ["exec", ...(input !== undefined ? ["-i"] : []), "-w", "/work", name, ...args], {
-      encoding: "utf8",
-      input,
-      timeout: CMD_TIMEOUT_MS,
-      maxBuffer: 16 * 1024 * 1024,
-    });
+  let limit = CMD_TIMEOUT_MS;
+  const exec = (args, input) => runBounded(runtime, ["exec", ...(input !== undefined ? ["-i"] : []), "-w", "/work", name, ...args], { input, timeoutMs: limit });
   const inRepo = (p) => confine("/work", p);
   return {
-    list(p) {
+    setLimit(ms) {
+      limit = Math.max(1, Math.min(CMD_TIMEOUT_MS, ms));
+    },
+    async list(p) {
       const rel = inRepo(p ?? ".");
       if (rel === null) return { ok: false, output: "refused: path is outside the repository" };
-      const r = exec(["ls", "-1Ap", "--", rel]);
+      const r = await exec(["ls", "-1Ap", "--", rel]);
       return { ok: r.status === 0, output: cap(r.status === 0 ? r.stdout.trim() : `${r.stderr}`.trim()) };
     },
-    read(p) {
+    async read(p) {
       const rel = inRepo(p);
       if (rel === null) return { ok: false, output: "refused: path is outside the repository" };
-      const r = exec(["cat", "--", rel]);
+      const r = await exec(["cat", "--", rel]);
       return { ok: r.status === 0, output: cap(r.status === 0 ? r.stdout : r.stderr.trim()) };
     },
-    write(p, content) {
+    async write(p, content) {
       const rel = inRepo(p);
       if (rel === null) return { ok: false, output: "refused: path is outside the repository" };
-      const r = exec(["sh", "-c", 'mkdir -p "$(dirname "$1")" && cat > "$1"', "sh", rel], String(content));
+      const r = await exec(["sh", "-c", 'mkdir -p "$(dirname "$1")" && cat > "$1"', "sh", rel], String(content));
       return { ok: r.status === 0, output: r.status === 0 ? `wrote ${Buffer.byteLength(String(content))} bytes to ${rel}` : r.stderr.trim() };
     },
-    run(command) {
-      const r = exec(["sh", "-c", String(command)]);
-      return { ok: r.status === 0, output: cap(`exit ${r.status ?? r.signal}\n${r.stdout ?? ""}${r.stderr ?? ""}`) };
+    async run(command) {
+      const r = await exec(["sh", "-c", String(command)]);
+      return { ok: r.status === 0, output: cap(`exit ${r.status ?? r.signal}\n${r.stdout}${r.stderr}${timedOutNote(r)}`) };
     },
     close() {
       const r = spawnSync(runtime, ["rm", "-f", "-t", "2", name], { encoding: "utf8", timeout: 30_000 });
@@ -211,7 +261,7 @@ export function containerExecutor({ runtime, name }) {
 
 /* ------------------------------------------------------------------ loop */
 
-function dispatch(ex, call, offered, skill) {
+async function dispatch(ex, call, offered, skill, timeoutMs) {
   const name = call?.function?.name;
   const names = new Set(offered.map((t) => t.name));
   if (!names.has(name)) return { invented: true, ok: false, output: `error: there is no tool named ${JSON.stringify(name)}. The tools are: ${[...names].join(", ")}` };
@@ -226,10 +276,11 @@ function dispatch(ex, call, offered, skill) {
   const missing = spec.parameters.required.filter((k) => typeof args[k] !== "string");
   if (missing.length) return { malformed: true, ok: false, output: `error: ${name} needs ${missing.join(", ")} as string(s)` };
   if (name === "read_skill") return skill(args.name, args.file);
+  ex.setLimit?.(timeoutMs);
   if (name === "list_files") return ex.list(args.path);
   if (name === "read_file") return ex.read(args.path);
   if (name === "write_file") return ex.write(args.path, args.content);
-  return ex.run(args.command);
+  return ex.run(args.command, { timeoutMs });
 }
 
 const systemPrompt = (containerised, skills) =>
@@ -399,13 +450,20 @@ export async function openaiCompatibleAdapter({ workspace, prompt, policy, paths
         break;
       }
       for (const call of calls) {
+        if (Date.now() >= deadline) {
+          exec.killed = true;
+          exec.killReason = "timeout";
+          break;
+        }
         toolUse.calls += 1;
         // A tool that THROWS (a write into a directory, a permission error) is
         // a failed tool call, answered to the model like any other. Letting it
         // escape would end the whole run over one bad call and lose the diff.
         let out;
         try {
-          out = dispatch(ex, call, offered, skill);
+          // Each tool gets what is left of the run, never more: the ceiling
+          // holds inside a turn, not only between turns.
+          out = await dispatch(ex, call, offered, skill, Math.min(CMD_TIMEOUT_MS, deadline - Date.now()));
         } catch (e) {
           out = { ok: false, output: `error: the ${call?.function?.name ?? "tool"} call failed: ${e.message}` };
         }
