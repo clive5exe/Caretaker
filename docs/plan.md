@@ -128,6 +128,8 @@ The budget is 5 hours. Each step ends in a commit you can check.
 
 | 4 review → gate | done: `bin/review-gate.mjs` records `reviewer` pass/fail from Warp's `review.json` (`by: review-pr`), only after **Warp's own validator** accepts it. It runs from your machine (step 5 calls it). Recording it from inside GitHub's review job is **not** done: that job is read-only on purpose (it reviews untrusted PRs), and giving it write access is your call | this commit |
 
+| 5 local review | done with a **fake model and a fake `gh`**. `node bin/review.mjs <pr>` runs the steps of Warp's installed review workflow as written, in a throwaway worktree: resolve, prepare, the agent, materialize, and Warp's validator. `--task` records the board gate; `--post` runs Warp's publish step. Nothing posts by default | this commit |
+
 ### How the agent's work becomes a PR (option A, chosen 2026-09-29)
 
 The agent never pushes. Caretaker's sandbox mounts `.git` read-only, because a

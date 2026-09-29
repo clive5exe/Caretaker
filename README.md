@@ -21,9 +21,9 @@ The plan, with who does what and the order, is **[docs/plan.md](docs/plan.md)**.
 
 | | from | status |
 |---|---|---|
-| Skills: triage, spec, implementation, review-pr, verify-behavior, improve-review-pr | **Warp** (MIT), copied unmodified | being vendored: plan step 1 |
-| The five GitHub workflows | **Warp**, one line changed in each (Oz → Caretaker) | plan step 3 |
-| The Oz replacement (`caretaker-agent`) | **Caretaker** | plan step 2 |
+| Skills: triage, spec, implementation, review-pr, verify-behavior, improve-review-pr | **Warp** (MIT), copied unmodified into `vendor/` | done |
+| The five GitHub workflows | **Warp**; the Oz step patched to Caretaker (`vendor/patches/`) | done; not yet run on GitHub with a real login |
+| The Oz replacement (`factory/caretaker-agent`) | **Caretaker** | done; proven with a fake model only so far |
 | Harness: runs Claude or ChatGPT behind one interface | **Caretaker** | works |
 | Sandbox, egress allowlist, secrets by name | **Caretaker** | works; needs podman |
 | Board, gates, dashboard, web UI | **Caretaker** | works |
@@ -74,7 +74,20 @@ node bin/runstore.mjs run --workspace . --prompt "fix the failing test" \
 - Afterwards you get the diff, the transcript and the cost. The drift gate
   checks the change against your specs.
 
-**4. Watch it:**
+**4. Review a pull request with Warp's review skill, on your machine:**
+
+```sh
+node bin/review.mjs 12 --task T-1 --sandbox none   # uses your own claude login
+```
+
+- **What runs:** the steps of Warp's review workflow, as Warp wrote them,
+  around your AI.
+- **Where:** a throwaway copy of your checkout.
+- **What you get:** the review printed. `--task` records the board's
+  reviewer gate.
+- **Posting:** nothing goes to GitHub unless you add `--post`.
+
+**5. Watch it:**
 
 ```sh
 node bin/serve.mjs ops/caretaker/config.json   # prints a local URL
