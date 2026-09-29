@@ -49,6 +49,13 @@ export class SkillsError extends Error {
 }
 
 const REMOTE = /^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)(?:@([A-Za-z0-9_./-]+))?$/;
+/**
+ * A skill's name becomes a directory name when it is staged, ON THE HOST. It
+ * comes from a third party's SKILL.md, so it is held to a plain name: a skill
+ * called `../../x` wrote its files outside the staging directory (independent
+ * review, reproduced), and could have dropped a file anywhere this user can.
+ */
+export const SKILL_NAME = /^(?!\.{1,2}$)[A-Za-z0-9._-]{1,64}$/;
 const isRemote = (s) => REMOTE.test(s) && !s.startsWith(".") && !s.startsWith("/");
 
 /** `name` and `description` from a SKILL.md's frontmatter. */
@@ -139,6 +146,9 @@ export function collect(cfg, { root, cacheDir }) {
       );
     }
     for (const sk of discover(dir)) {
+      if (!SKILL_NAME.test(sk.name)) {
+        throw new SkillsError("BAD_NAME", `skill at ${sk.dir} is named "${sk.name}"; a skill's name must be letters, digits, ".", "_" or "-" (it becomes a directory name)`);
+      }
       const prior = byName.get(sk.name);
       if (prior) throw new SkillsError("DUPLICATE_SKILL", `skill "${sk.name}" is in both ${prior.source} and ${source}; remove one, so it is clear which instructions a run followed`);
       byName.set(sk.name, { ...sk, source });
@@ -150,7 +160,15 @@ export function collect(cfg, { root, cacheDir }) {
 /** Copy the skills into `into/<name>/`, outside the workspace. Returns `into`. */
 export function stage(skills, into) {
   mkdirSync(into, { recursive: true });
-  for (const sk of skills) cpSync(sk.dir, join(into, sk.name), { recursive: true, filter: (src) => basename(src) !== ".git" });
+  for (const sk of skills) {
+    // Checked again here, not only in collect(): stage() is exported, and the
+    // destination must stay inside `into` whoever built the list.
+    const dest = resolve(into, sk.name);
+    if (!SKILL_NAME.test(sk.name) || dirname(dest) !== resolve(into)) {
+      throw new SkillsError("BAD_NAME", `refusing to stage skill "${sk.name}": it would land outside ${into}`);
+    }
+    cpSync(sk.dir, dest, { recursive: true, filter: (src) => basename(src) !== ".git" });
+  }
   return into;
 }
 
