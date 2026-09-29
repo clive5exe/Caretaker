@@ -15,6 +15,9 @@
  * Run: node bin/sandbox.test.mjs
  */
 import { spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { buildArgs, checkLimits, delegatedControllers, detect, installHint } from "./sandbox.mjs";
 
 let failures = 0;
@@ -56,6 +59,19 @@ const has = (a, flag, value) => {
     !a.some((x) => String(x).includes("docker.sock") || String(x).includes("podman.sock")),
     "mounting it is root on the host, and is how most sandboxed agent tools are quietly not",
   );
+}
+
+{
+  // .git runs code on the host (hooks, core.fsmonitor), so it is mounted over
+  // the writable repo read-only, after it: the later, narrower mount wins.
+  const ws = mkdtempSync(join(tmpdir(), "sandbox-git-"));
+  mkdirSync(join(ws, ".git"));
+  const a = buildArgs({ image: "img", limits: LIMITS, workdir: ws, cmd: ["true"] });
+  const repo = a.indexOf(`${ws}:/work:Z`);
+  const git = a.indexOf(`${join(ws, ".git")}:/work/.git:ro,Z`);
+  ok("THE REPO'S .git IS MOUNTED READ-ONLY, over the writable repo", repo !== -1 && git > repo && a[git - 1] === "-v", JSON.stringify(a));
+  ok("a workspace with no .git gets no .git mount (nothing to mount)", !args().some((x) => String(x).includes("/work/.git")));
+  rmSync(ws, { recursive: true, force: true });
 }
 
 {

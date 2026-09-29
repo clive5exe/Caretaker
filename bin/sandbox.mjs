@@ -21,7 +21,7 @@
  */
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { readDevcontainer, toLimits } from "./spec.mjs";
 
 /* ----------------------------------------------------------------- runtime */
@@ -170,6 +170,16 @@ export function buildArgs({ image, limits, workdir, net = "none", cmd, runtime =
     // the error looks like a permissions bug in the app.
     "-v",
     `${workdir}:/work:Z`,
+  );
+  // THE REPO'S .git IS READ-ONLY INSIDE. It is the one place in the workspace
+  // that runs code on the HOST: a hook, or `core.fsmonitor` in .git/config, is
+  // executed by the next `git status` anyone runs there — including this
+  // harness's own drift and freshness checks. A writable .git is a sandbox
+  // escape with a delay on it, and the shadow-git diff never sees .git, so it
+  // would not even show in the run's measured change. (A worktree's .git is a
+  // file pointing outside the workspace; mounting it read-only covers that too.)
+  if (workdir && existsSync(join(workdir, ".git"))) args.push("-v", `${join(workdir, ".git")}:/work/.git:ro,Z`);
+  args.push(
     "-w",
     "/work",
     // Drop everything, add nothing back. An agent editing files needs no

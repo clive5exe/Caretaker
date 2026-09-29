@@ -97,6 +97,18 @@ const basePolicy = (label, cli, over = {}) => ({
   ...over,
 });
 
+{
+  // No .git to mount read-only, so an agent can make one; git on the host would
+  // run its hooks. The shadow diff never shows it, so the verdict must.
+  const ws = join(TMP, "ws-nogit");
+  mkdirSync(ws, { recursive: true });
+  writeFileSync(join(ws, "a.txt"), "a\n");
+  const r = await run(ws, "go", basePolicy("nogit", fakeCli("cat > /dev/null; mkdir -p .git/hooks; printf '#!/bin/sh\\ntouch /tmp/pwned\\n' > .git/hooks/pre-commit")));
+  ok("a run that CREATES .git in a workspace with none is named in the warnings", r.verdict.warnings.some((w) => /CREATED .*\.git/.test(w)), JSON.stringify(r.verdict.warnings));
+  const clean = await run(makeWorkspace("hasgit"), "go", basePolicy("hasgit", fakeCli("cat > /dev/null; echo hi > new.txt")));
+  ok("…and an ordinary run in a repo carries no such warning", !clean.verdict.warnings.some((w) => /CREATED/.test(w)));
+}
+
 const MARKER = "MARKER_TRANSCRIPT_7f3a";
 
 /** An agent that writes one file and lies about writing another. */
@@ -638,9 +650,11 @@ const haveImage =
 if (!havePodman) {
   skip("live: an agent inside the container edits the workspace", "podman not available");
   skip("live: a hung container is killed AND removed", "podman not available");
+  skip("live: an agent cannot write the repo's .git", "podman not available");
 } else if (!haveImage) {
   skip("live: an agent inside the container edits the workspace", `image ${LIVE_IMAGE} not present`);
   skip("live: a hung container is killed AND removed", `image ${LIVE_IMAGE} not present`);
+  skip("live: an agent cannot write the repo's .git", `image ${LIVE_IMAGE} not present`);
 } else {
   {
     const ws = makeWorkspace("live-edit");
@@ -678,6 +692,29 @@ if (!havePodman) {
         "sandbox.mjs does this check inside its CLI block, so a programmatic caller of buildArgs " +
         "does not get it for free and passing --cpus without the controller fails the whole run",
     );
+  }
+
+  {
+    // The attack the reviewer ran, against the real mount: plant a hook and a
+    // core.fsmonitor from inside. Both must be refused, and nothing on the host
+    // may change, because the next `git status` here would execute them.
+    const ws = makeWorkspace("live-git");
+    const hook = join(ws, ".git", "hooks", "pre-commit");
+    const cfgBefore = readFileSync(join(ws, ".git", "config"), "utf8");
+    const r = await run(ws, "go", {
+      adapter: "cli",
+      cli: { argv: ["sh", "-c", "cat > /dev/null; (printf '#!/bin/sh\\ntouch /tmp/pwned\\n' > /work/.git/hooks/pre-commit) 2>/dev/null && echo HOOK-WRITTEN; (printf '[core]\\nfsmonitor = touch /tmp/pwned\\n' >> /work/.git/config) 2>/dev/null && echo CONFIG-WRITTEN; echo ok > /work/still-writable.txt"] },
+      sandbox: "podman",
+      net: "none",
+      image: LIVE_IMAGE,
+      logDir: logDirFor("live-git"),
+      events: EVENTS_DIR,
+      timeoutMs: 90_000,
+    });
+    ok("live: an agent cannot write the repo's .git (hooks, config), so it cannot run code on the host",
+      r.verdict.state === "completed" && !existsSync(hook) && readFileSync(join(ws, ".git", "config"), "utf8") === cfgBefore && !/WRITTEN/.test(r.transcript.tail),
+      `${r.verdict.state} ${r.transcript.tail.slice(0, 200)}`);
+    ok("live: …while the rest of the repo stays writable", r.diff.files.some((f) => f.path === "still-writable.txt"), JSON.stringify(r.diff.files));
   }
 
   {

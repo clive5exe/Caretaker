@@ -1031,6 +1031,10 @@ export async function run(workspace, prompt, policy = {}) {
    * snapshot below covers it. The adapter throws only when nothing ran at all
    * (an unknown CLI, no image), and then there is no diff to report.
    */
+  // A workspace with no .git has nothing to mount read-only (sandbox.mjs), so
+  // an agent could create one; git on this host would then run its hooks and
+  // config. The shadow diff never sees a .git, so it is checked for here.
+  const hadGit = existsSync(join(ws, ".git"));
   let result;
   try {
     result = await adapter({ workspace: ws, prompt, policy: p, paths, warnings });
@@ -1043,6 +1047,12 @@ export async function run(workspace, prompt, policy = {}) {
 
   const after = snapshot(shadow);
   const diff = measureDiff(shadow, before, after);
+  if (!hadGit && existsSync(join(ws, ".git"))) {
+    warnings.push(
+      `the run CREATED ${join(ws, ".git")} in a workspace that had none. Git on this host runs a repository's hooks and ` +
+        "config, so do not run git there until you have looked at it or deleted it; it is not in the measured diff",
+    );
+  }
 
   const stdoutText = readIfExists(paths.stdout);
   const stderrText = readIfExists(paths.stderr);

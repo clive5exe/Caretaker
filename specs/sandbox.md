@@ -21,11 +21,19 @@ anything this file did not declare.
 
 **Isolation** is table stakes and is the easy half: enforced memory and pids
 ceilings, a read-only root with tmpfs for `/tmp` and `/run`, the repo bind
-mounted at `/work`, every capability dropped, `no-new-privileges`, and never the
-container socket. Verified from inside a running container rather than by
+mounted at `/work` with its `.git` mounted over it read-only, every capability
+dropped, `no-new-privileges`, and never the container socket. Verified from inside a running container rather than by
 reading the flags back: `memory.max` is the declared ceiling, a write to `/`
 is refused, and a file written as root inside is owned by the unprivileged host
 user outside.
+
+**The repo's `.git` is read-only inside,** because it is the part of the
+workspace that runs code on the host: a hook, or `core.fsmonitor` in its config,
+runs at the next `git status` anyone types there, this harness's own drift and
+freshness checks included. A writable `.git` is an escape with a delay on it, and
+the shadow-git diff never sees `.git`, so it would not even show in the run's
+measured change. A workspace with no `.git` has nothing to mount, so a run that
+creates one is named in the verdict's warnings instead.
 
 **Egress** is the control that actually matters. A container with open internet
 can exfiltrate the repo, which is worse and quieter than the machine damage a
