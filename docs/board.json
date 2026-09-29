@@ -847,6 +847,11 @@
               "verdict": "pass",
               "at": "2026-09-29",
               "note": "Independent review (fresh agent, not the builder): ADR-0002 is marked accepted (2026-09-29, by Five) and records the ordering call explicitly: no W-task starts before H-1's qa gate passes. AC met. Notes: its line 'The proposed tasks are still not on the board' is now overtaken (they are), and the ordering it records is being contradicted by W-1..W-17 being built while H-1's latest qa is still fail; that needs a superseding decision or the W-tasks wait, not a quiet pass."
+            },
+            "qa": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "note": "Independent QA (fresh agent, not the builder): read docs/decisions/0002-an-optional-web-client.md at 46927f2. Frontmatter status: accepted, and the Decision section says Accepted on 2026-09-29 by Five and records the ordering call explicitly: No W-task starts before H-1's qa gate passes; C-1/C-2/C-3/C-6 may start now; C-4/C-5 wait on H-1 and B-6. Both halves of the AC hold. Outside this AC: the board contradicts that recorded call (W-1..W-17 are doing while H-1 is todo with qa fail), and the ADR's closing line that the tasks are still not on the board is stale."
             }
           }
         },
@@ -935,6 +940,11 @@
               "verdict": "pass",
               "at": "2026-09-29",
               "note": "Independent review (fresh agent, not the builder): runstore.mjs archives run.json/diff.patch/redacted transcript+stderr under stateDir/runs/<id>, never shadow/, live mirror redacts whole lines only, STATE_IN_WORKSPACE refused before running, no-redactor and bad-id refusals; runstore.test green and mutation-checked here (mirror redaction removed -> red by name). Nits: run.json redaction (runstore.mjs:219) is untested (removing it stays green); --parent is validated only after the run so a typo loses the archive (:173); relative cfg.stateDir resolves against cwd, not the repo (statedir.mjs:14); checkStateDir uses resolve not realpath; the raw transcript and shadow copy stay in TMPDIR world-readable (harness behaviour, outside C-4)."
+            },
+            "qa": {
+              "verdict": "fail",
+              "at": "2026-09-29",
+              "note": "Independent QA (fresh agent, not the builder): the archive, diff.patch, redacted transcripts and live mirror hold (node bin/runstore.test.mjs green), but the refusal when stateDir is inside the workspace does not. checkStateDir tests path.relative(...).startsWith('..') on unresolved paths, so a directory whose name starts with two dots is treated as outside: checkStateDir('/tmp/ws/..state','/tmp/ws') is ACCEPTED, and runArchived('/tmp/qa-w-ws2', p, {sandbox:'none'}, {stateDir:'/tmp/qa-w-ws2/..state'}) completed and wrote run.json, transcript.log and diff.patch into /tmp/qa-w-ws2/..state/runs/r_13f6811e, i.e. inside the workspace the next agent gets at /work. Symlinks also bypass it (no realpath): a stateDir that is a symlink into the workspace, or a workspace given by a symlinked path, are both accepted. The test only tries ws/state and ws itself. The same containment idiom is in harness.mjs:923 and harness-config.mjs:85."
             }
           }
         },
@@ -955,6 +965,11 @@
               "verdict": "pass",
               "at": "2026-09-29",
               "note": "Independent review (fresh agent, not the builder): withRunEgress creates fm-int-<id> (internal, DNS off) and fm-egress-<id> with the archive dir as the only writable mount, tears both down in finally and records a failed teardown instead of throwing; sandbox:none refused; egress.jsonl redacted with the run's secrets at archive; proxy survives an unwritable --log. egress-attribution.test green here (live half skipped: no podman), mutations of the redaction, the sandbox refusal and the try/catch each go red by name; CI pulls the images. Notes: while a run is in flight egress.jsonl is raw and /runs/:id/egress serves it with only the KEY_SHAPES pass; ADR-0003 is still draft; netns.mjs:81-85 'WHAT THIS DOES NOT DO' is half-stale now that runstore wires --add-host through the harness."
+            },
+            "qa": {
+              "verdict": "fail",
+              "at": "2026-09-29",
+              "note": "Independent QA (fresh agent, not the builder): per-run network and proxy wiring holds (node bin/egress-attribution.test.mjs green offline; live half skipped here, no podman, reported passing in CI at 63c0a8a, and netns.mjs/egress.mjs are unchanged since). But the hosts do not land in the archive redacted: the proxy appends raw lines into <stateDir>/runs/<id>/egress.jsonl and only archive() redacts them, after the run. (1) While the run is in flight the file is raw, and the web API serves it (egress.jsonl is in RUN_FILES; Run detail live-tails it) with only the KEY_SHAPES pass. A harness that calls readmodel.runFile mid-run got host hunter2prodpassword.evil.example for a run whose secret DB_PASS=hunter2prodpassword; after the run the same line reads [redacted:DB_PASS].evil.example. (2) If harness.run throws (it throws HarnessError on several paths), runArchived never reaches archive(), and egress.jsonl stays unredacted in the archive for good: same demo with a throwing harness left hunter2prodpassword.evil.example on disk. The test only checks the archive after a clean run."
             }
           }
         },
@@ -998,6 +1013,11 @@
               "verdict": "fail",
               "at": "2026-09-29",
               "note": "Independent review (fresh agent, not the builder): the controls themselves are right (loopback-only bind, 256-bit in-process token, timingSafeEqual on /auth and cookie, HttpOnly SameSite=Strict port-named cookie, 302 to /, exact Host on every request, exact Origin + application/json + X-Caretaker on POST, no CORS, CSP, run-id regex, fixed names, realpath under the archive), and mutating host, X-Caretaker, content-type, cookie compare, realpath and sandbox CSP each turns serve.test red. But the static-traversal attack is decorative: serve.test.mjs:252 requests /..%2f..%2fdocs%2fboard.json, which from dist=<root>/dist resolves to the fixture's PARENT, so it can never hit board.json. Deleting the prefix check at serve.mjs:170 leaves the suite green, and with it deleted /..%2fdocs%2fboard.json returns the board (reproduced in a copy). The AC says each control is attacked in a test; this one is not. Fix: one level of ../ and assert 404."
+            },
+            "qa": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "note": "Independent QA (fresh agent, not the builder): node bin/serve.test.mjs green. Then ran node bin/serve.mjs against a copy of this repo and attacked it with curl: Hosts 127.0.0.1.:port, LOCALHOST:port, [::1]:port, empty Host and evil.com:port all 421, even for static files; no cookie 401 on /api, the stream and /board.html; wrong or short token 403; cookie is caretaker_<port>, HttpOnly, SameSite=Strict, Path=/, and /auth 302s to /; writes with no/foreign/other-port/https/null Origin, form or text/plain content type, or no X-Caretaker refused (test); CSP present on 200, 302, 401, 403, 404, 421 and SSE responses, board.html gets CSP sandbox; bad run ids, ../ in id or name, shadow/, a symlink out of the archive and encoded ../ static traversal all fail to leak; binding 0.0.0.0, 192.168.1.5 and :: refused naming ssh -L; token absent from /proc argv and environ. In Chromium the built client loads with no CSP violation and a transcript <script> renders as text. Note for security: one-time holds only as printed once. The bootstrap URL can be replayed for the life of the process (three /auth calls each set the cookie), and the cookie value is the token itself, as TECH.md specifies."
             }
           }
         },
@@ -1019,6 +1039,11 @@
               "verdict": "fail",
               "at": "2026-09-29",
               "note": "Independent review (fresh agent, not the builder): routes do go through readmodel and carry sources, and the numbers are dashboard.metrics'/kpis.mjs's. But the event log is served unredacted over REST while the same records are redacted on the stream: readmodel.mjs:128 eventLog() feeds /events (:700), /snapshot (:641), /work/:id (:331), /runs/:id (:477) and /specs (:590) raw, whereas serve.mjs:81 runs redactShapes on every streamed line. Reproduced: an event with detail 'leaked sk-ant-…' came back verbatim from /events, /snapshot, /work/W-2 and /inbox, and serve.test's 'a key in a streamed event is redacted' passes over the same record. Events are written unredacted on disk (TECH Findings 4), so the second pass is the only one; apply redactShapes to event records on the REST path too, and test it there."
+            },
+            "qa": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "note": "Independent QA (fresh agent, not the builder): every route handler in bin/serve.mjs calls a readmodel.mjs function and none opens a data file itself. Against a copy of this repo with runs.jsonl, the archive and agentsDir absent, curl of snapshot, work, work/W-2, inbox, runs, agents, specs, metrics, events and settings each returned a sources object naming them absent, and the stream's hello event carries sources too. Absent data comes back as null or as a 404 saying not recorded (snapshot.tokensPerClosedTask null, runs null, the raw transcript/diff/egress/stderr routes 404 not recorded: no <file> in the run archive), and in Chromium those pages say Not recorded. Gaps, not blocking: the raw byte-ranged file routes return text with no sources (TECH.md defines them as raw), 404 bodies carry none, serve.test.mjs asserts sources on one route only, and snapshot's m.medDays || null would turn a real 0 into null."
             }
           }
         },
