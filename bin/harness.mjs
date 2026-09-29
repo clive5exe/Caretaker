@@ -899,8 +899,8 @@ async function cliAdapter({ workspace, prompt, policy, paths, warnings }) {
  *
  * What is missing, rather than "TODO": no vendor SDK is a dependency of this
  * repo, and adding one here is the decision H-10 exists to make deliberately
- * rather than as a side effect. The API-key half now exists (runstore passes a
- * run's --secret values to it as environment variables, by name, never in argv
+ * rather than as a side effect. The API-key half now exists (runstore hands a
+ * run the secrets it names as environment variables, by name, never in argv
  * or the archive), and the openai-compatible adapter already makes model calls
  * from the harness with its tools routed into the container, which is what an
  * sdk adapter would need to reuse.
