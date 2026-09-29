@@ -42,13 +42,13 @@ const SECRETS = { TEST_API_KEY: SECRET };
 
 // A repo the read model can open: installed board.mjs + dashboard.mjs + config.
 const REPO = join(TMP, "repo");
-mkdirSync(join(REPO, "ops", "foreman"), { recursive: true });
+mkdirSync(join(REPO, "ops", "caretaker"), { recursive: true });
 mkdirSync(join(REPO, "docs"), { recursive: true });
-copyFileSync(join(HERE, "board.mjs"), join(REPO, "ops", "foreman", "board.mjs"));
-copyFileSync(join(HERE, "dashboard.mjs"), join(REPO, "ops", "foreman", "dashboard.mjs"));
+copyFileSync(join(HERE, "board.mjs"), join(REPO, "ops", "caretaker", "board.mjs"));
+copyFileSync(join(HERE, "dashboard.mjs"), join(REPO, "ops", "caretaker", "dashboard.mjs"));
 const STATE = join(TMP, "state");
-const CFG = join(REPO, "ops", "foreman", "config.json");
-writeFileSync(CFG, JSON.stringify({ name: "Fixture", board: "docs/board.json", repo: ".", stateDir: STATE, events: "ops/foreman/events" }));
+const CFG = join(REPO, "ops", "caretaker", "config.json");
+writeFileSync(CFG, JSON.stringify({ name: "Fixture", board: "docs/board.json", repo: ".", stateDir: STATE, events: "ops/caretaker/events" }));
 writeFileSync(
   join(REPO, "docs", "board.json"),
   JSON.stringify({ meta: { name: "Fixture" }, phases: [{ name: "P", tasks: [{ id: "T-001", title: "t", status: "doing", owner: "you", est: "1h", ac: "a" }] }] }),
@@ -79,7 +79,7 @@ echo '{"type":"result","num_turns":2,"usage":{"input_tokens":10,"cache_read_inpu
 printf 'unterminated tail ${SECRET}'
 `);
 
-const policy = (over = {}) => ({ adapter: "cli", cli: AGENT, sandbox: "none", events: join(REPO, "ops", "foreman", "events"), timeoutMs: 20_000, env: { TEST_API_KEY: SECRET }, ...over });
+const policy = (over = {}) => ({ adapter: "cli", cli: AGENT, sandbox: "none", events: join(REPO, "ops", "caretaker", "events"), timeoutMs: 20_000, env: { TEST_API_KEY: SECRET }, ...over });
 
 /* --------------------------------------------------------- one real run */
 const pending = runArchived(WS, "do the thing", policy(), { stateDir: STATE, task: "T-001", secrets: SECRETS });
@@ -185,12 +185,12 @@ ok("archive with a malformed parent is refused", throwsCode(() => archive(out, {
 /* -------------------------------------------------------------- run.mjs */
 {
   const rr = join(TMP, "rr");
-  mkdirSync(join(rr, "ops", "foreman"), { recursive: true });
-  copyFileSync(join(HERE, "run.mjs"), join(rr, "ops", "foreman", "run.mjs"));
-  writeFileSync(join(rr, "ops", "foreman", "config.json"), JSON.stringify({ runs: "ops/foreman/runs.jsonl", repo: "." }));
-  const cli = (...a) => spawnSync("node", [join(rr, "ops", "foreman", "run.mjs"), ...a], { encoding: "utf8" });
+  mkdirSync(join(rr, "ops", "caretaker"), { recursive: true });
+  copyFileSync(join(HERE, "run.mjs"), join(rr, "ops", "caretaker", "run.mjs"));
+  writeFileSync(join(rr, "ops", "caretaker", "config.json"), JSON.stringify({ runs: "ops/caretaker/runs.jsonl", repo: "." }));
+  const cli = (...a) => spawnSync("node", [join(rr, "ops", "caretaker", "run.mjs"), ...a], { encoding: "utf8" });
   const good = cli("start", "--name", "qa", "--task", "T-1", "--run", "r_0a1b2c3d", "--parent", "r_11112222", "--adapter", "cli", "--cli", "claude");
-  const row = JSON.parse(readFileSync(join(rr, "ops", "foreman", "runs.jsonl"), "utf8").trim().split("\n").pop());
+  const row = JSON.parse(readFileSync(join(rr, "ops", "caretaker", "runs.jsonl"), "utf8").trim().split("\n").pop());
   ok("run.mjs records --run, --parent, --adapter and --cli", good.status === 0 && row.run === "r_0a1b2c3d" && row.parent === "r_11112222" && row.adapter === "cli" && row.cli === "claude", good.stderr);
   const bad = cli("end", "--name", "qa", "--run", "run-7");
   ok("run.mjs refuses a malformed --run by name", bad.status === 2 && /--run must be a run id/.test(bad.stderr), bad.stderr);

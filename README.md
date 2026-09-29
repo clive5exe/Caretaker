@@ -15,11 +15,11 @@ Today it is two things:
   handling, a drift gate and the harness seam. These live in `bin/`, are tested
   on their own, and are not wired together end to end yet.
 
-> **About the name.** The project was called foreman, and the code still is.
-> Installed files live in `ops/foreman/`, the config variable is
-> `FACTORY_CONFIG`, containers are named `foreman-<runId>`, and run logs default
-> to `$TMPDIR/foreman-runs/`. Every path and command in this README is the real
-> one, so it still says `foreman` wherever the code does.
+> **About the name.** The project was called caretaker, and the code still is.
+> Installed files live in `ops/caretaker/`, the config variable is
+> `FACTORY_CONFIG`, containers are named `caretaker-<runId>`, and run logs default
+> to `$TMPDIR/caretaker-runs/`. Every path and command in this README is the real
+> one, so it still says `caretaker` wherever the code does.
 
 ## Contents
 
@@ -49,19 +49,19 @@ You need node and git. Nothing else is installed: no npm packages, no service.
 ```
 bash install.sh /path/to/repo "Project Name"
 cd /path/to/repo
-node ops/foreman/board.mjs status       # show the board
-node ops/foreman/board.mjs done T-001   # watch it refuse you
-node ops/foreman/dashboard.mjs          # rebuild docs/board.html
+node ops/caretaker/board.mjs status       # show the board
+node ops/caretaker/board.mjs done T-001   # watch it refuse you
+node ops/caretaker/dashboard.mjs          # rebuild docs/board.html
 ```
 
-`install.sh` refuses to run if `ops/foreman/` already exists in the target.
+`install.sh` refuses to run if `ops/caretaker/` already exists in the target.
 Copying over a live board is the one mistake here that loses work, so there is no
 `--force`.
 
 To bring an existing install up to date, use `bash install.sh --upgrade
 /path/to/repo`. It replaces the tool files only, and never touches
 `config.json`, `prompt.txt` or the board. It keeps what it replaced in
-`ops/foreman/.upgrade-backup-<time>/`, and puts the old files back if the new
+`ops/caretaker/.upgrade-backup-<time>/`, and puts the old files back if the new
 board cannot read yours.
 
 ## The idea
@@ -71,15 +71,15 @@ believe. Most boards cannot, because the person who did the work is the person
 who marks it done, and nothing in the tool disagrees.
 
 ```
-$ node ops/foreman/board.mjs done T-001
+$ node ops/caretaker/board.mjs done T-001
 
   REFUSED — T-001 has not passed the gate.
 
   Missing: reviewer, qa
 
   Record verdicts first:
-    node ops/foreman/board.mjs reviewer T-001 pass
-    node ops/foreman/board.mjs qa T-001 pass
+    node ops/caretaker/board.mjs reviewer T-001 pass
+    node ops/caretaker/board.mjs qa T-001 pass
 
   This is enforced. Builder-says-done is a status report, not a completion.
 ```
@@ -141,7 +141,7 @@ flowchart LR
   end
   I{{install.sh}}
   subgraph tgt["your repo"]
-    subgraph ops["ops/foreman/"]
+    subgraph ops["ops/caretaker/"]
       T1[board.mjs]
       T2[dashboard.mjs]
       T3[run.mjs]
@@ -173,8 +173,8 @@ flowchart LR
   BJ[(docs/board.json)]
   MD[docs/board.md]
   HTML[docs/board.html]
-  RUNS[(ops/foreman/runs.jsonl)]
-  HIST[(ops/foreman/history.jsonl)]
+  RUNS[(ops/caretaker/runs.jsonl)]
+  HIST[(ops/caretaker/history.jsonl)]
   GIT[(git log)]
   AG[agent definitions<br/>agentsDir]
 
@@ -195,13 +195,13 @@ flowchart LR
 
 | File | What it does |
 |---|---|
-| `ops/foreman/board.mjs` | Moves a task, records a gate verdict, and refuses `done` until the gates pass. Rebuilds `docs/board.md` after every change. |
-| `ops/foreman/dashboard.mjs` | Reads the board, git, the run log and agent definitions, and writes one self-contained `docs/board.html`. |
-| `ops/foreman/run.mjs` | Appends one line per run start or end to the run log: what ran, on which task, and the tokens it spent. |
-| `ops/foreman/loop.sh` | Runs one unattended pass from cron. |
-| `ops/foreman/config.json` | Paths, the active phase, gates and columns. |
-| `ops/foreman/prompt.txt` | What an unattended pass is told to do, and what it is forbidden to do. |
-| `ops/foreman/RULES.md` | The rules the gates enforce. |
+| `ops/caretaker/board.mjs` | Moves a task, records a gate verdict, and refuses `done` until the gates pass. Rebuilds `docs/board.md` after every change. |
+| `ops/caretaker/dashboard.mjs` | Reads the board, git, the run log and agent definitions, and writes one self-contained `docs/board.html`. |
+| `ops/caretaker/run.mjs` | Appends one line per run start or end to the run log: what ran, on which task, and the tokens it spent. |
+| `ops/caretaker/loop.sh` | Runs one unattended pass from cron. |
+| `ops/caretaker/config.json` | Paths, the active phase, gates and columns. |
+| `ops/caretaker/prompt.txt` | What an unattended pass is told to do, and what it is forbidden to do. |
+| `ops/caretaker/RULES.md` | The rules the gates enforce. |
 | `docs/board.json` | Your board. |
 | `docs/board.html` | The page. |
 
@@ -232,26 +232,26 @@ stateDiagram-v2
 ```
 
 ```
-node ops/foreman/board.mjs start T-012            todo or blocked -> doing
-node ops/foreman/board.mjs block T-012 "reason"   -> blocked, reason kept in the note
-node ops/foreman/board.mjs todo  T-012            reset
-node ops/foreman/board.mjs done  T-012            -> done, only through the gate
-node ops/foreman/board.mjs note  T-012 "text"     append to the note
-node ops/foreman/board.mjs status                 show the board
-node ops/foreman/board.mjs build                  rebuild docs/board.md
+node ops/caretaker/board.mjs start T-012            todo or blocked -> doing
+node ops/caretaker/board.mjs block T-012 "reason"   -> blocked, reason kept in the note
+node ops/caretaker/board.mjs todo  T-012            reset
+node ops/caretaker/board.mjs done  T-012            -> done, only through the gate
+node ops/caretaker/board.mjs note  T-012 "text"     append to the note
+node ops/caretaker/board.mjs status                 show the board
+node ops/caretaker/board.mjs build                  rebuild docs/board.md
 ```
 
 Seven more commands record facts a human acts on. Each appends a record with
 `by` (the config's `operator`, or your OS user) and a full ISO `at`:
 
 ```
-node ops/foreman/board.mjs ask    T-012 "question"          questions[]; the Inbox shows it until answered
-node ops/foreman/board.mjs answer T-012 q1 "text"           the answer, on that question
-node ops/foreman/board.mjs triage T-012 accept|reject "why" triage[]
-node ops/foreman/board.mjs spec-approve T-012               specReview[], keyed on the spec's git blob
-node ops/foreman/board.mjs spec-reject  T-012 "why"
-node ops/foreman/board.mjs pr     T-012 https://…           the PR link
-node ops/foreman/board.mjs drop   T-012 "why"               -> dropped, with the reason
+node ops/caretaker/board.mjs ask    T-012 "question"          questions[]; the Inbox shows it until answered
+node ops/caretaker/board.mjs answer T-012 q1 "text"           the answer, on that question
+node ops/caretaker/board.mjs triage T-012 accept|reject "why" triage[]
+node ops/caretaker/board.mjs spec-approve T-012               specReview[], keyed on the spec's git blob
+node ops/caretaker/board.mjs spec-reject  T-012 "why"
+node ops/caretaker/board.mjs pr     T-012 https://…           the PR link
+node ops/caretaker/board.mjs drop   T-012 "why"               -> dropped, with the reason
 ```
 
 Spec approval is tied to the spec's content: edit the spec and the approval no
@@ -277,9 +277,9 @@ A gate is a named verdict, `pass` or `fail`, that someone records against a
 task. There are three: `reviewer`, `qa` and `security`.
 
 ```
-node ops/foreman/board.mjs reviewer T-012 pass "read the diff"
-node ops/foreman/board.mjs qa       T-012 fail "suite red on the edge case"
-node ops/foreman/board.mjs qa       T-012 pass "fixed and re-run"
+node ops/caretaker/board.mjs reviewer T-012 pass "read the diff"
+node ops/caretaker/board.mjs qa       T-012 fail "suite red on the edge case"
+node ops/caretaker/board.mjs qa       T-012 pass "fixed and re-run"
 ```
 
 **Verdicts append; they never overwrite.** `gate.qa` is always the latest
@@ -385,9 +385,9 @@ recovered afterwards. An agent reports its token use once, when it finishes,
 and if nothing records it the number is gone.
 
 ```
-node ops/foreman/run.mjs start --name qa --task T-277 --note "money gates"
-node ops/foreman/run.mjs end   --name qa --task T-277 --tokens 356251 --state done
-node ops/foreman/run.mjs end   --name qa --task T-277 --state failed --note "OOM"
+node ops/caretaker/run.mjs start --name qa --task T-277 --note "money gates"
+node ops/caretaker/run.mjs end   --name qa --task T-277 --tokens 356251 --state done
+node ops/caretaker/run.mjs end   --name qa --task T-277 --state failed --note "OOM"
 ```
 
 - **Append-only, one JSON object per line.** A start and an end are two
@@ -407,12 +407,12 @@ node ops/foreman/run.mjs end   --name qa --task T-277 --state failed --note "OOM
 open.
 
 ```
-crontab -e  ->  */30 * * * * /path/to/repo/ops/foreman/loop.sh
+crontab -e  ->  */30 * * * * /path/to/repo/ops/caretaker/loop.sh
 ```
 
 ```mermaid
 flowchart TD
-  C([cron fires]) --> P{ops/foreman/PAUSED<br/>exists?}
+  C([cron fires]) --> P{ops/caretaker/PAUSED<br/>exists?}
   P -- yes --> S1[log 'paused' and exit]
   P -- no --> L{Lock free?<br/>flock -n, one lock per repo}
   L -- no --> S2[log 'previous pass still running'<br/>and exit]
@@ -428,7 +428,7 @@ flowchart TD
 
 Each guard is there because of something that went wrong:
 
-- **The pause file.** `touch ops/foreman/PAUSED` stops it with no crontab
+- **The pause file.** `touch ops/caretaker/PAUSED` stops it with no crontab
   edit, and `ls` shows whether it is paused.
 - **A non-blocking lock.** A pass can outlast the interval. Without the lock,
   fires stack until the machine dies. The lock is namespaced by repo path, so
@@ -639,11 +639,11 @@ it cost, and an Inbox of the decisions only a human can make. It is a client of
 the core, never a peer. If it and the CLI ever disagree, the web client is the
 one that is wrong. The decision record is
 `docs/decisions/0002-an-optional-web-client.md`; the product and technical specs
-are in `specs/foreman-web/`.
+are in `specs/caretaker-web/`.
 
 ```
 npm --prefix web ci && npm --prefix web run build   # once; optional
-node bin/serve.mjs ops/foreman/config.json          # prints a sign-in URL once
+node bin/serve.mjs ops/caretaker/config.json          # prints a sign-in URL once
 ```
 
 Open the printed URL. From another machine, tunnel: `ssh -L 7420:127.0.0.1:7420
@@ -651,7 +651,7 @@ you@box`. Without the build, the server still answers the API under `/api/v1`
 and links `docs/board.html`.
 
 The same project in a terminal, over SSH, with nothing listening on a port:
-`node bin/tui.mjs ops/foreman/config.json`. Four screens (1 Runs, 2 Board,
+`node bin/tui.mjs ops/caretaker/config.json`. Four screens (1 Runs, 2 Board,
 3 Inbox, 4 Metrics), read from the same read model, and `:` for the commands
 core offers on the selected work item.
 
@@ -714,7 +714,7 @@ What it does not change:
   metric functions the server uses, so the two cannot disagree.
 - **The install stays dependency-free.** The optional React client in `web/`
   holds the only npm dependencies in the repo, and nothing in `bin/` or
-  `ops/foreman/` imports it. `bin/web-boundary.test.mjs` fails if `web/src`
+  `ops/caretaker/` imports it. `bin/web-boundary.test.mjs` fails if `web/src`
   imports from `bin/`, names a gate or stage outside its one label module,
   uses `innerHTML`, makes an external request or holds a color outside
   `web/src/theme.css`.
@@ -762,15 +762,15 @@ more.
 
 ## Configuration
 
-`ops/foreman/config.json`, written by `install.sh` from `config.example.json`:
+`ops/caretaker/config.json`, written by `install.sh` from `config.example.json`:
 
 ```json
 {
   "name": "Project",
   "board": "docs/board.json",
   "boardMarkdown": "docs/board.md",
-  "runs": "ops/foreman/runs.jsonl",
-  "history": "ops/foreman/history.jsonl",
+  "runs": "ops/caretaker/runs.jsonl",
+  "history": "ops/caretaker/history.jsonl",
   "out": "docs/board.html",
   "agentsDir": ".claude/agents",
   "activePhase": "Phase 1",

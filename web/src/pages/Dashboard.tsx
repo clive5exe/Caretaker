@@ -224,7 +224,7 @@ export function Dashboard() {
         </div>
         {s.events === null && !stream.log.length ? (
           <div style={{ marginTop: 10 }}>
-            <NotRecorded what="No event log yet." why={`bin/events.mjs appends one per day under ops/foreman/events; the drift gate and agent runs write to it.`} />
+            <NotRecorded what="No event log yet." why={`bin/events.mjs appends one per day under ops/caretaker/events; the drift gate and agent runs write to it.`} />
           </div>
         ) : feed.length ? (
           <div className="tw" style={{ marginTop: 6 }}>

@@ -2,7 +2,7 @@
  * The one typed client over /api/v1 (TECH.md §2). Same origin only: the
  * session is an HttpOnly cookie the page never sees, and every write carries
  * the three things a cross-site request cannot: the exact Origin (the browser
- * adds it), application/json and X-Foreman: 1.
+ * adds it), application/json and X-Caretaker: 1.
  */
 import type { CommandResult, WorkItem } from "./types";
 
@@ -49,7 +49,7 @@ export async function runCommand(task: string, cmd: string, args: Record<string,
   const r = await fetch(`${API}/work/${encodeURIComponent(task)}/commands`, {
     method: "POST",
     credentials: "same-origin",
-    headers: { "Content-Type": "application/json", "X-Foreman": "1", Accept: "application/json" },
+    headers: { "Content-Type": "application/json", "X-Caretaker": "1", Accept: "application/json" },
     body: JSON.stringify({ cmd, args }),
   });
   let body: { task?: WorkItem; refused?: { missing: string[]; docsOnly: boolean }; error?: string } = {};

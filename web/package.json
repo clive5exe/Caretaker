@@ -3,7 +3,7 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "description": "The optional local web client for foreman serve. Nothing in bin/ imports this.",
+  "description": "The optional local web client for caretaker serve. Nothing in bin/ imports this.",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit -p . && vite build",

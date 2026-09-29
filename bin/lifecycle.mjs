@@ -6,7 +6,7 @@
  *
  * The stage is DERIVED, never declared: there is no `stage` field for anyone to
  * forget to update, and every stage comes with the recorded fact that put the
- * item there (specs/foreman-web/PRODUCT.md §The lifecycle, TECH.md §Lifecycle).
+ * item there (specs/caretaker-web/PRODUCT.md §The lifecycle, TECH.md §Lifecycle).
  * The rules live here and nowhere else; the web client and the TUI display
  * what this returns and compute none of it.
  *

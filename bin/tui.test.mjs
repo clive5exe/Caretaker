@@ -30,15 +30,15 @@ const ok = (name, cond, detail = "") => {
 };
 
 /* fixture ----------------------------------------------------------------- */
-const root = mkdtempSync(join(tmpdir(), "foreman-tui-"));
-const ops = join(root, "ops", "foreman");
+const root = mkdtempSync(join(tmpdir(), "caretaker-tui-"));
+const ops = join(root, "ops", "caretaker");
 const state = join(root, "state");
 mkdirSync(join(ops, "events"), { recursive: true });
 mkdirSync(join(root, "docs"), { recursive: true });
 copyFileSync(join(HERE, "board.mjs"), join(ops, "board.mjs"));
 copyFileSync(join(HERE, "dashboard.mjs"), join(ops, "dashboard.mjs"));
 const cfgPath = join(ops, "config.json");
-writeFileSync(cfgPath, JSON.stringify({ name: "Fixture", board: "docs/board.json", runs: "ops/foreman/runs.jsonl", repo: ".", activePhase: "P", operator: "five" }));
+writeFileSync(cfgPath, JSON.stringify({ name: "Fixture", board: "docs/board.json", runs: "ops/caretaker/runs.jsonl", repo: ".", activePhase: "P", operator: "five" }));
 const boardFile = join(root, "docs", "board.json");
 writeFileSync(
   boardFile,

@@ -20,7 +20,7 @@ export function Terminal() {
           <span>terminal</span>
         </div>
         <pre className="tpre">
-          {`$ node bin/tui.mjs ops/foreman/config.json\n\n  1 Runs   2 Board   3 Inbox   4 Metrics      : command   j/k move   q quit\n`}
+          {`$ node bin/tui.mjs ops/caretaker/config.json\n\n  1 Runs   2 Board   3 Inbox   4 Metrics      : command   j/k move   q quit\n`}
         </pre>
       </div>
       <div className="card flush">

@@ -1,5 +1,5 @@
 ---
-title: Foreman Web v1 — product
+title: Caretaker Web v1 — product
 status: accepted
 updated: 2026-09-29
 ---
@@ -9,9 +9,9 @@ hosts:
 governs: web/src/pages/**
 ```
 
-# Foreman Web v1 — product
+# Caretaker Web v1 — product
 
-An optional, local, real-time web view of a Foreman project: what is being
+An optional, local, real-time web view of a Caretaker project: what is being
 worked on, what is stuck, what ran, what it cost, and what needs a human.
 
 It is a **client of the core, never a peer**. The board, the gates, the run log,
@@ -113,7 +113,7 @@ answered. Nobody has to "clear" it.
    Action: read the failure and decide. A drift failure shows the exact
    `drift.mjs` dismissal command rather than a button (TECH.md explains why).
 4. **PRs ready for human review.** Every required gate passed and a PR is
-   recorded. Action: review and merge outside Foreman, then close with `done`.
+   recorded. Action: review and merge outside Caretaker, then close with `done`.
 
 **The Inbox is not verification.** ADR-0001 rejects "human approval gates as
 the verification story", because a person approving their fortieth diff of the
@@ -246,7 +246,7 @@ work item. When empty, it says so plainly.
 - Reconstructed rows (`src: reconstructed`) are labelled, never blended in.
 
 ### 5. Run detail
-Everything Foreman measured about one run. Each section shows its source, and
+Everything Caretaker measured about one run. Each section shows its source, and
 *not recorded* when that source is absent.
 
 | section | shows |
@@ -315,7 +315,7 @@ rows: run log rows and gate verdicts. A figure with no dates behind it says
 How to build the client and start the server, both copied from TECH.md §1, and
 how to reach it over `ssh -L`. It also lists what the server promises: no
 daemon, no database, loopback only, and the token handling. It says plainly that
-paths and commands still say `foreman`.
+paths and commands still say `caretaker`.
 
 ## The terminal view (U-2)
 
@@ -366,7 +366,7 @@ what isn't.
 
 ## Borrowed from Warp Factories: concepts, not code
 
-Studied for product ideas only. Foreman's runtime stays its own.
+Studied for product ideas only. Caretaker's runtime stays its own.
 
 **Sources read:**
 - `github.com/warpdotdev-demos/cloud-factory-demo`: README, `vision.md`,
@@ -384,8 +384,8 @@ Studied for product ideas only. Foreman's runtime stays its own.
 - **Stages are responsibilities, not a fixed pipeline.** Here that falls out of
   deriving the stage: a stage with nothing to do is simply never entered.
 - **Three human checkpoints:** spec approval, questions (ask rather than guess),
-  and merge. Foreman already forbids an unattended merge in
-  `ops/foreman/prompt.txt`.
+  and merge. Caretaker already forbids an unattended merge in
+  `ops/caretaker/prompt.txt`.
 - **An Inbox of things waiting on you, which clears itself** when an item stops
   being relevant.
 - **Product and tech specs side by side**, as `specs/<slug>/PRODUCT.md` and
@@ -406,7 +406,7 @@ of "nobody closes their own work".
 - **Cloud execution, a factory definition file, automations and webhooks,
   self-improvement loops, benchmarks, credits.** Out of scope, or at odds with
   a local-first tool.
-- **An orchestrator agent that decides what runs.** Foreman's control plane is
+- **An orchestrator agent that decides what runs.** Caretaker's control plane is
   code and gates, not a model.
 - **Human approval as the verification step.** See the Inbox, and ADR-0001.
 - **A Resolve button in the Inbox.** Items clear when their fact changes.

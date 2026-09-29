@@ -13,7 +13,7 @@
  * list or a 0, so the client can say "not recorded" and name what records it.
  *
  * The board and dashboard modules are the TARGET repo's own installed copies
- * (ops/foreman/board.mjs beside its config), so the server applies exactly the
+ * (ops/caretaker/board.mjs beside its config), so the server applies exactly the
  * rules that repo's CLI applies. drift, events, lifecycle and secrets come from
  * this checkout; none of them is installed into target repos.
  */
@@ -57,7 +57,7 @@ export async function open(cfgPath, { now = () => new Date(), stateDir: stateOve
   const cfgAbs = resolve(cfgPath);
   const opsDir = dirname(cfgAbs);
   const boardPath = join(opsDir, "board.mjs");
-  if (!existsSync(boardPath)) throw new Error(`no board.mjs beside ${cfgAbs}; point serve at an installed ops/foreman/config.json`);
+  if (!existsSync(boardPath)) throw new Error(`no board.mjs beside ${cfgAbs}; point serve at an installed ops/caretaker/config.json`);
   const board = await import(pathToFileURL(boardPath).href);
   if (board.API_VERSION !== 1 || typeof board.command !== "function") {
     throw new Error(
@@ -81,7 +81,7 @@ export function createReadModel({ cfgPath, board, dash, now = () => new Date(), 
   const root = ctx.root;
   const at = (p) => join(root, p);
   const GATES = cfg.gates ?? ["reviewer", "qa", "security"];
-  const eventsDir = at(cfg.events ?? "ops/foreman/events");
+  const eventsDir = at(cfg.events ?? "ops/caretaker/events");
   const specsDir = cfg.specs ?? "specs";
   // One definition of where runs live, shared with the writer (runstore.mjs).
   const stateDir = stateOverride ? resolve(stateOverride) : stateDirFor(root, cfg);
@@ -100,11 +100,11 @@ export function createReadModel({ cfgPath, board, dash, now = () => new Date(), 
   function sources() {
     return {
       board: existsSync(ctx.data) ? "present" : "absent",
-      runs: existsSync(at(cfg.runs ?? "ops/foreman/runs.jsonl")) ? "present" : "absent",
+      runs: existsSync(at(cfg.runs ?? "ops/caretaker/runs.jsonl")) ? "present" : "absent",
       events: hasFiles(eventsDir, /^events-\d{4}-\d\d-\d\d\.jsonl$/) ? "present" : "absent",
       archive: existsSync(archiveDir) ? "present" : "absent",
       agents: cfg.agentsDir && existsSync(at(cfg.agentsDir)) ? "present" : "absent",
-      history: existsSync(at(cfg.history ?? "ops/foreman/history.jsonl")) ? "present" : "absent",
+      history: existsSync(at(cfg.history ?? "ops/caretaker/history.jsonl")) ? "present" : "absent",
     };
   }
 
@@ -121,7 +121,7 @@ export function createReadModel({ cfgPath, board, dash, now = () => new Date(), 
   const loadBoard = () => board.load(ctx);
   // dashboard.mjs reads cfg.runs with no default; the server applies the one
   // every other reader here uses, so a config without it still finds the log.
-  const runRows = () => (sources().runs === "present" ? dash.readRuns(root, { ...cfg, runs: cfg.runs ?? "ops/foreman/runs.jsonl" }) : null);
+  const runRows = () => (sources().runs === "present" ? dash.readRuns(root, { ...cfg, runs: cfg.runs ?? "ops/caretaker/runs.jsonl" }) : null);
   const eventLog = () => (sources().events === "present" ? events.read(eventsDir).events : null);
 
   /* ------------------------------------------------------------------ runs */
@@ -675,8 +675,8 @@ export function createReadModel({ cfgPath, board, dash, now = () => new Date(), 
       specsDir: join(root, specsDir),
       paths: {
         board: ctx.data,
-        runs: at(cfg.runs ?? "ops/foreman/runs.jsonl"),
-        history: at(cfg.history ?? "ops/foreman/history.jsonl"),
+        runs: at(cfg.runs ?? "ops/caretaker/runs.jsonl"),
+        history: at(cfg.history ?? "ops/caretaker/history.jsonl"),
         archive: archiveDir,
         agents: cfg.agentsDir ? at(cfg.agentsDir) : null,
         page: cfg.out ? at(cfg.out) : null,
@@ -718,7 +718,7 @@ export function createReadModel({ cfgPath, board, dash, now = () => new Date(), 
     agents, specs, metrics, settings, events: recentEvents, command,
     watchPaths: () => ({
       board: ctx.data,
-      runs: at(cfg.runs ?? "ops/foreman/runs.jsonl"),
+      runs: at(cfg.runs ?? "ops/caretaker/runs.jsonl"),
       eventsDir,
       archiveDir,
       specsDir: join(root, specsDir),

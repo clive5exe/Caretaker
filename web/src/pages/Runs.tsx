@@ -157,7 +157,7 @@ export function RunsPage() {
       <>
         {head}
         <NotRecorded
-          what="No run log (ops/foreman/runs.jsonl), no agent events and no run archive."
+          what="No run log (ops/caretaker/runs.jsonl), no agent events and no run archive."
           why="bin/run.mjs writes the run log. Run ids, parents and the archive come from the harness (C-4); until then this page stays empty rather than inventing runs."
         />
         <div className="card">

@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 // Task board: single source of truth is tasks.json.
 //
-//   node ops/foreman/board.mjs                       show the board
-//   node ops/foreman/board.mjs status                same
-//   node ops/foreman/board.mjs start T-012           mark in progress
-//   node ops/foreman/board.mjs done  T-012           mark done, stamp the date
-//   node ops/foreman/board.mjs block T-012 "reason"  mark blocked
-//   node ops/foreman/board.mjs todo  T-012           reset
-//   node ops/foreman/board.mjs note  T-012 "text"    append a note
-//   node ops/foreman/board.mjs build                 regenerate the HTML page
+//   node ops/caretaker/board.mjs                       show the board
+//   node ops/caretaker/board.mjs status                same
+//   node ops/caretaker/board.mjs start T-012           mark in progress
+//   node ops/caretaker/board.mjs done  T-012           mark done, stamp the date
+//   node ops/caretaker/board.mjs block T-012 "reason"  mark blocked
+//   node ops/caretaker/board.mjs todo  T-012           reset
+//   node ops/caretaker/board.mjs note  T-012 "text"    append a note
+//   node ops/caretaker/board.mjs build                 regenerate the HTML page
 //
 // Any mutating command rebuilds the page automatically, so the docs site is
 // never stale relative to the data.
@@ -285,7 +285,7 @@ ${bar(currentPct, "big")}
     md += `| \`${o}\` | ${ts.length} | ${Math.ceil(rem)}d |\n`;
   }
 
-  md += `\n## Maintaining this\n\nGenerated from \`the board named in ops/foreman/config.json\`. **Never edit the generated page.**\n\n\`\`\`\nnode ops/foreman/board.mjs done T-012        mark complete, stamps today's date\nnode ops/foreman/board.mjs start T-012       mark in progress\nnode ops/foreman/board.mjs block T-012 "why" mark blocked with a reason\nnode ops/foreman/board.mjs note T-012 "text" append a note\nnode ops/foreman/board.mjs                   print the board to the terminal\n\`\`\`\n\nEvery mutating command rebuilds this page and the whole docs site, so it can never drift from the data.\n`;
+  md += `\n## Maintaining this\n\nGenerated from \`the board named in ops/caretaker/config.json\`. **Never edit the generated page.**\n\n\`\`\`\nnode ops/caretaker/board.mjs done T-012        mark complete, stamps today's date\nnode ops/caretaker/board.mjs start T-012       mark in progress\nnode ops/caretaker/board.mjs block T-012 "why" mark blocked with a reason\nnode ops/caretaker/board.mjs note T-012 "text" append a note\nnode ops/caretaker/board.mjs                   print the board to the terminal\n\`\`\`\n\nEvery mutating command rebuilds this page and the whole docs site, so it can never drift from the data.\n`;
 
   fs.writeFileSync(OUT, md);
 
@@ -345,7 +345,7 @@ if (!cmd || cmd === "status") {
   // sums Week 0 through Wave 3 — 45 tasks of pre-V1 scope that nobody is
   // building — so it reads far lower than the work actually in flight and moves
   // for reasons unrelated to today. The dashboard demoted it to a subline
-  // already; this printed it as THE number, so `ops/foreman/board.mjs status`, the stop
+  // already; this printed it as THE number, so `ops/caretaker/board.mjs status`, the stop
   // hook and the dashboard were quoting three different figures for the same
   // board. Founder, 2026-08-29: "We were at 34% not at 24, that board is
   // fucking useless." He was reading 35% on the dashboard and 23% here.
@@ -369,14 +369,14 @@ if (!cmd || cmd === "status") {
   const o = build();
   console.log(`board rebuilt — ${o.currentPct}% (${o.currentDone}/${o.currentTotal} ${o.currentName})  ·  all phases ${o.done}/${o.total}`);
 } else if (["reviewer", "qa", "security"].includes(cmd)) {
-  // record a gate verdict:  node ops/foreman/board.mjs reviewer T-012 pass "notes"
+  // record a gate verdict:  node ops/caretaker/board.mjs reviewer T-012 pass "notes"
   if (!id) { console.error("need a task id"); process.exit(1); }
   const d = load();
   const hit = find(d, id);
   if (!hit) { console.error(`no such task: ${id}`); process.exit(1); }
   const verdict = (rest[0] || "").toLowerCase();
   if (!["pass", "fail"].includes(verdict)) {
-    console.error("verdict must be pass or fail:  node ops/foreman/board.mjs " + cmd + " " + id + " pass");
+    console.error("verdict must be pass or fail:  node ops/caretaker/board.mjs " + cmd + " " + id + " pass");
     process.exit(1);
   }
   // APPEND, NEVER OVERWRITE (P-2). This used to replace the verdict, so a task
@@ -435,7 +435,7 @@ if (!cmd || cmd === "status") {
         console.error(`\n  REFUSED — ${t.id} has not passed the gate${docsOnly ? " (docs-only: reviewer required)" : ""}.\n`);
         console.error(`  Missing: ${missing.join(", ")}\n`);
         console.error(`  Record verdicts first:`);
-        for (const m of missing) console.error(`    node ops/foreman/board.mjs ${m.split(" ")[0]} ${t.id} pass`);
+        for (const m of missing) console.error(`    node ops/caretaker/board.mjs ${m.split(" ")[0]} ${t.id} pass`);
         console.error(`\n  This is enforced. Builder-says-done is a status report, not a completion.\n`);
         process.exit(1);
       }
@@ -452,6 +452,6 @@ if (!cmd || cmd === "status") {
   const o = build();
   console.log(`${t.id} → ${t.status}${t.completed ? ` (${t.completed})` : ""}   ${o.currentName} now ${o.currentPct}% (${o.currentDone}/${o.currentTotal})`);
 } else {
-  console.log("usage: node ops/foreman/board.mjs [status|build|start|done|block|todo|note] [T-012] [text]");
-  console.log("       node ops/foreman/board.mjs [reviewer|qa|security] T-012 [pass|fail] [note]");
+  console.log("usage: node ops/caretaker/board.mjs [status|build|start|done|block|todo|note] [T-012] [text]");
+  console.log("       node ops/caretaker/board.mjs [reviewer|qa|security] T-012 [pass|fail] [note]");
 }

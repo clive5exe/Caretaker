@@ -628,7 +628,7 @@ if (isEntry) {
 
   let logged = null;
   if (!opt["no-events"]) {
-    const dir = opt.events ?? join(resolve(repo), "ops", "foreman", "events");
+    const dir = opt.events ?? join(resolve(repo), "ops", "caretaker", "events");
     try {
       logged = writeEvents(dir, eventLines(report, { run: opt.run ?? null, task: opt.task ?? null }));
     } catch (e) {

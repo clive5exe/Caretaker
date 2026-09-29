@@ -43,8 +43,8 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
-/** Where events go when nobody says: `ops/foreman/events`, which is gitignored. */
-export const DEFAULT_DIR = resolve(HERE, "..", "ops", "foreman", "events");
+/** Where events go when nobody says: `ops/caretaker/events`, which is gitignored. */
+export const DEFAULT_DIR = resolve(HERE, "..", "ops", "caretaker", "events");
 
 export const KINDS = ["gate", "agent", "tool", "drift", "system"];
 export const LEVELS = ["debug", "info", "warn", "error"];
@@ -199,7 +199,7 @@ const USAGE = `usage: node bin/events.mjs emit --kind K --level L --detail "…"
 
 Reading is tail and jq, with no tool of its own:
   tail -F "$(node bin/events.mjs path)"
-  jq -cR 'fromjson? | select(.task=="T-1")' ops/foreman/events/events-*.jsonl
+  jq -cR 'fromjson? | select(.task=="T-1")' ops/caretaker/events/events-*.jsonl
 kinds: ${KINDS.join(" ")}   levels: ${LEVELS.join(" ")}   stages: ${STAGES.join(" ")}`;
 
 function parseFlags(argv) {

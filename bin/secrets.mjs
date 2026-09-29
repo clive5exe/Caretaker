@@ -224,13 +224,13 @@ export function parseSecretsFile(text) {
  * pointed the operator at the SECOND fallback whenever that override was unset,
  * which is every normal invocation.
  */
-export const PREFERRED_FILE = join(homedir(), ".config", "foreman", "secrets.env");
+export const PREFERRED_FILE = join(homedir(), ".config", "caretaker", "secrets.env");
 
 /** Default search order for a secrets file. Every entry is outside any repo. */
 export const DEFAULT_FILES = [
-  process.env.FOREMAN_SECRETS_FILE,
+  process.env.CARETAKER_SECRETS_FILE,
   PREFERRED_FILE,
-  join(homedir(), ".foreman", "secrets.env"),
+  join(homedir(), ".caretaker", "secrets.env"),
 ].filter(Boolean);
 
 function readSecretsFile(path, repoRoot) {
@@ -530,7 +530,7 @@ export function supportsPreserveFd(runtime = "podman") {
  * keeps it base64 on disk until something deletes it (measured; see the header).
  */
 export function withPodmanSecret(name, value, fn, { runtime = "podman" } = {}) {
-  const id = `foreman-${name.toLowerCase().replace(/[^a-z0-9]/g, "-")}-${process.pid}`;
+  const id = `caretaker-${name.toLowerCase().replace(/[^a-z0-9]/g, "-")}-${process.pid}`;
   spawnSync(runtime, ["secret", "rm", id], { stdio: "ignore" });
   const created = spawnSync(runtime, ["secret", "create", id, "-"], { input: String(value) });
   if (created.status !== 0) {

@@ -48,20 +48,20 @@ jobs:
           npm --prefix web ci
           npm --prefix web run build
 
-      # ops/foreman/ is this repo's installed copy of bin/ and RULES.md.
+      # ops/caretaker/ is this repo's installed copy of bin/ and RULES.md.
       # install.sh copies these files verbatim, so any difference is drift.
       - name: installed copy matches its source
         run: |
           status=0
           for f in board.mjs dashboard.mjs run.mjs loop.sh; do
-            cmp "bin/$f" "ops/foreman/$f" || { echo "::error file=ops/foreman/$f::differs from bin/$f"; status=1; }
+            cmp "bin/$f" "ops/caretaker/$f" || { echo "::error file=ops/caretaker/$f::differs from bin/$f"; status=1; }
           done
-          cmp RULES.md ops/foreman/RULES.md || { echo "::error file=ops/foreman/RULES.md::differs from RULES.md"; status=1; }
+          cmp RULES.md ops/caretaker/RULES.md || { echo "::error file=ops/caretaker/RULES.md::differs from RULES.md"; status=1; }
           exit $status
 
       # docs/board.md is generated from docs/board.json and must not be
       # hand-edited, so rebuilding it on a clean checkout must change nothing.
       - name: generated board is current
         run: |
-          node ops/foreman/board.mjs build
+          node ops/caretaker/board.mjs build
           git diff --exit-code -- docs/board.md

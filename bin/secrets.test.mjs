@@ -73,7 +73,7 @@ const refuses = (name, code, fn) => {
  */
 const KEY = "sk-ant-api03-TESTONLY-6Qx7n2Vb8Lm4Kd0Ry9Tz";
 const UNSHAPED = "correct-horse-battery-staple-9182736450";
-const TMP = mkdtempSync(join(tmpdir(), "foreman-secrets-test-"));
+const TMP = mkdtempSync(join(tmpdir(), "caretaker-secrets-test-"));
 
 try {
   /* ------------------------------------------------------------ refusals */
@@ -191,9 +191,9 @@ try {
     fingerprint(KEY),
   );
 
-  ok("a sibling directory is not 'inside' the repo", !isInside("/srv/foreman-backup/x", "/srv/foreman"));
-  ok("a subdirectory is inside the repo", isInside("/srv/foreman/bin/x", "/srv/foreman"));
-  ok("the repo root itself is not 'inside' itself", !isInside("/srv/foreman", "/srv/foreman"));
+  ok("a sibling directory is not 'inside' the repo", !isInside("/srv/caretaker-backup/x", "/srv/caretaker"));
+  ok("a subdirectory is inside the repo", isInside("/srv/caretaker/bin/x", "/srv/caretaker"));
+  ok("the repo root itself is not 'inside' itself", !isInside("/srv/caretaker", "/srv/caretaker"));
 
   /* ------------------------------------------------------------ redaction */
 
@@ -516,7 +516,7 @@ try {
     {
       // The headline claim. A container that is running with the secret loaded,
       // inspected from the host.
-      const name = `foreman-h0-inspect-${process.pid}`;
+      const name = `caretaker-h0-inspect-${process.pid}`;
       spawnSync("podman", ["rm", "-f", name], { stdio: "ignore" });
       const plan = preserveFdPlan(["ANTHROPIC_API_KEY"]);
       const child = spawn(

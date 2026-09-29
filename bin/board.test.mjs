@@ -13,7 +13,7 @@
  *   3. docs/board.html pulled fonts from Google, while the README says the
  *      page has "no CDN". The page now makes no external request; the font
  *      stacks already fall back to system fonts.
- *   4. ops/foreman/ is this repo's installed copy of bin/ and had drifted
+ *   4. ops/caretaker/ is this repo's installed copy of bin/ and had drifted
  *      (run.mjs lacked the token breakdown). The copies must be identical.
  *   5. board.mjs assumed every phase had start, end and goal and the board had
  *      a launch date. This repo's own board has none of them, so docs/board.md
@@ -40,8 +40,8 @@ const ok = (name, cond, detail = "") => {
 };
 
 function fixture({ withBuildHook = false, board } = {}) {
-  const root = mkdtempSync(join(tmpdir(), "foreman-board-test-"));
-  const ops = join(root, "ops", "foreman");
+  const root = mkdtempSync(join(tmpdir(), "caretaker-board-test-"));
+  const ops = join(root, "ops", "caretaker");
   mkdirSync(ops, { recursive: true });
   mkdirSync(join(root, "docs"), { recursive: true });
   copyFileSync(join(HERE, "board.mjs"), join(ops, "board.mjs"));
@@ -53,8 +53,8 @@ function fixture({ withBuildHook = false, board } = {}) {
       board: "docs/board.json",
       boardMarkdown: "docs/board.md",
       out: "docs/board.html",
-      runs: "ops/foreman/runs.jsonl",
-      history: "ops/foreman/history.jsonl",
+      runs: "ops/caretaker/runs.jsonl",
+      history: "ops/caretaker/history.jsonl",
       agentsDir: ".claude/agents",
       repo: ".",
       activePhase: "Phase 1",
@@ -139,8 +139,8 @@ const node = (args, cwd) => spawnSync("node", args, { cwd, encoding: "utf8" });
 /* 4. the installed copy matches the source --------------------------------- */
 for (const f of ["board.mjs", "dashboard.mjs", "run.mjs", "loop.sh"]) {
   const src = readFileSync(join(HERE, f), "utf8");
-  const inst = readFileSync(join(REPO, "ops", "foreman", f), "utf8");
-  ok(`ops/foreman/${f} is identical to bin/${f}`, src === inst);
+  const inst = readFileSync(join(REPO, "ops", "caretaker", f), "utf8");
+  ok(`ops/caretaker/${f} is identical to bin/${f}`, src === inst);
 }
 
 

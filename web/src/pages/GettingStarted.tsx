@@ -8,7 +8,7 @@ export function GettingStarted() {
         <span className="wordmark big">CARETAKER</span>
         <p>
           A local window onto the board, the runs and the gates. It reads the same files and calls the same core functions as the CLI, so the two can never disagree. Paths
-          and commands still say <span className="mono">foreman</span>; the UI says Caretaker.
+          and commands still say <span className="mono">caretaker</span>; the UI says Caretaker.
         </p>
       </div>
       <PageHead title="Getting started" />
@@ -22,7 +22,7 @@ export function GettingStarted() {
         </div>
         <div className="card">
           <h3>2 · Start the server</h3>
-          <pre className="code" style={{ marginTop: 10 }}>node bin/serve.mjs ops/foreman/config.json</pre>
+          <pre className="code" style={{ marginTop: 10 }}>node bin/serve.mjs ops/caretaker/config.json</pre>
           <p className="ft">It prints a sign-in address once. Open it; the token becomes a cookie and leaves your address bar. Ctrl-C stops the server.</p>
         </div>
         <div className="card">

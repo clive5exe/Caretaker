@@ -7,7 +7,7 @@ updated: 2026-09-29
 ## The question
 
 Run detail should show which hosts a run reached and which it was refused
-(`specs/foreman-web/PRODUCT.md`). Before this, nothing could: the harness never
+(`specs/caretaker-web/PRODUCT.md`). Before this, nothing could: the harness never
 started a proxy, `netns.proxyRunArgs` started one long-lived proxy per network
 shared by every run on it, and the proxy's records carry no run and no client
 address.

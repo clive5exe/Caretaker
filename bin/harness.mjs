@@ -724,7 +724,7 @@ async function cliAdapter({ workspace, prompt, policy, paths, warnings }) {
   ];
   const env = { ...(preset.env ?? {}), ...policy.env };
 
-  const containerName = `foreman-${policy.runId}`;
+  const containerName = `caretaker-${policy.runId}`;
   let file;
   let args;
   let container = null;
@@ -863,7 +863,7 @@ export const adapterNames = () => Object.keys(ADAPTERS);
 function ensureLogDir(policy, workspace) {
   const dir = policy.logDir
     ? resolve(policy.logDir)
-    : join(tmpdir(), "foreman-runs", policy.runId);
+    : join(tmpdir(), "caretaker-runs", policy.runId);
   const rel = relative(workspace, dir);
   const inside = rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
   if ((inside || dir === workspace) && !policy.allowLogDirInWorkspace) {

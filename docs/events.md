@@ -15,7 +15,7 @@ interface.
 
 ```
 tail -F "$(node bin/events.mjs path)"                       watch today live
-cd ops/foreman/events
+cd ops/caretaker/events
 jq -cR 'fromjson? | select(.task=="T-001")'   events-*.jsonl   one task
 jq -cR 'fromjson? | select(.run=="r_8f2c")'   events-*.jsonl   one run
 jq -cR 'fromjson? | select(.verdict=="fail")' events-*.jsonl   only what broke
@@ -90,7 +90,7 @@ matter more than the current state did.
 ## Writing it
 
 `bin/events.mjs` is the one writer and the one reader. Everything goes to
-`ops/foreman/events/events-YYYY-MM-DD.jsonl` unless told otherwise, and that
+`ops/caretaker/events/events-YYYY-MM-DD.jsonl` unless told otherwise, and that
 directory is gitignored.
 
 - `append(dir, events)` checks each line against the table above and refuses a
@@ -115,5 +115,5 @@ The drift gate writes through the same `append`.
 
 ## What already does this
 
-`ops/foreman/runs.jsonl` and `ops/foreman/history.jsonl` are this shape already.
+`ops/caretaker/runs.jsonl` and `ops/caretaker/history.jsonl` are this shape already.
 This generalises what is there rather than replacing it.

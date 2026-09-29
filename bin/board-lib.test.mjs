@@ -72,8 +72,8 @@ const BOARD = {
 };
 
 function fixture(boardFile) {
-  const root = mkdtempSync(join(tmpdir(), "foreman-boardlib-"));
-  const ops = join(root, "ops", "foreman");
+  const root = mkdtempSync(join(tmpdir(), "caretaker-boardlib-"));
+  const ops = join(root, "ops", "caretaker");
   mkdirSync(ops, { recursive: true });
   mkdirSync(join(root, "docs"), { recursive: true });
   copyFileSync(boardFile, join(ops, "board.mjs"));

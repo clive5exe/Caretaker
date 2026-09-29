@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * `foreman serve` — the optional local web client's server. W-1, W-3, W-4.
+ * `caretaker serve` — the optional local web client's server. W-1, W-3, W-4.
  *
- *     node bin/serve.mjs path/to/ops/foreman/config.json [--port 7420]
+ *     node bin/serve.mjs path/to/ops/caretaker/config.json [--port 7420]
  *
  * It holds NO RULES. It authenticates, routes, streams and serves files. Reads
  * go through readmodel.mjs; every mutation is core's own `command`, under
@@ -17,12 +17,12 @@
  *     to reach it remotely. Plain HTTP on a LAN would carry the token in clear.
  *   - a 256-bit token made in-process, never read from argv or env (where it
  *     would show in `ps`), printed once as a bootstrap URL.
- *   - GET /auth?t= compares it in constant time, sets foreman_<port> (HttpOnly,
+ *   - GET /auth?t= compares it in constant time, sets caretaker_<port> (HttpOnly,
  *     SameSite=Strict; named by port because cookies are not port-scoped) and
  *     redirects to / so the token leaves the address bar and history.
  *   - every request: Host must be 127.0.0.1:<port> or localhost:<port> exactly,
  *     which defeats DNS rebinding. /api and the stream need the cookie.
- *   - every POST: exact Origin, application/json, and X-Foreman: 1. A form or
+ *   - every POST: exact Origin, application/json, and X-Caretaker: 1. A form or
  *     a cross-site fetch cannot set all three. No CORS headers, ever.
  *   - a strict CSP on every response; board.html is served sandboxed.
  *   - run files: fixed id shape, fixed filenames, realpath under the archive.
@@ -114,7 +114,7 @@ export async function startServer({ cfgPath, dist = DIST, port = 7420, host = "1
   const token = fixedToken ?? randomBytes(32).toString("hex");
   const tokenBuf = Buffer.from(token);
   let actualPort = port;
-  const cookieName = () => `foreman_${actualPort}`;
+  const cookieName = () => `caretaker_${actualPort}`;
   const hostsOk = () => new Set([`127.0.0.1:${actualPort}`, `localhost:${actualPort}`]);
 
   const clients = new Set();
@@ -374,7 +374,7 @@ export async function startServer({ cfgPath, dist = DIST, port = 7420, host = "1
         const origin = req.headers.origin;
         if (!origin || !hostsOk().has(origin.replace(/^http:\/\//, "")) || !origin.startsWith("http://")) return send(res, 403, { error: "cross-origin write refused" });
         if (!/^application\/json\b/.test(req.headers["content-type"] ?? "")) return send(res, 415, { error: "writes are application/json" });
-        if (req.headers["x-foreman"] !== "1") return send(res, 403, { error: "missing X-Foreman header" });
+        if (req.headers["x-caretaker"] !== "1") return send(res, 403, { error: "missing X-Caretaker header" });
       } else if (req.method !== "GET" && req.method !== "HEAD") {
         return send(res, 405, { error: "method not allowed" });
       }
@@ -382,7 +382,7 @@ export async function startServer({ cfgPath, dist = DIST, port = 7420, host = "1
       if (req.method !== "GET" && req.method !== "HEAD") return send(res, 405, { error: "method not allowed" });
       if (url.pathname === "/board.html") {
         const p = rm.settings().paths.page;
-        if (!p || !existsSync(p)) return send(res, 404, "not recorded: docs/board.html has not been generated (node ops/foreman/dashboard.mjs)", { "Content-Type": "text/plain; charset=utf-8" });
+        if (!p || !existsSync(p)) return send(res, 404, "not recorded: docs/board.html has not been generated (node ops/caretaker/dashboard.mjs)", { "Content-Type": "text/plain; charset=utf-8" });
         // Generated outside this server and full of agent-written text: no script runs in it.
         return send(res, 200, readFileSync(p), { "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": "sandbox" });
       }
@@ -439,7 +439,7 @@ if (isEntry) {
   };
   const cfgPath = argv.find((a, i) => !a.startsWith("--") && !["--port", "--host", "--state-dir"].includes(argv[i - 1]));
   if (!cfgPath) {
-    console.error("usage: node bin/serve.mjs path/to/ops/foreman/config.json [--port 7420]");
+    console.error("usage: node bin/serve.mjs path/to/ops/caretaker/config.json [--port 7420]");
     process.exit(2);
   }
   try {
