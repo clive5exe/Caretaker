@@ -89,6 +89,25 @@ const cli2 = spawnSync("node", [join(HERE, "freshness.mjs"), "--repo", R], { enc
 ok("the CLI exits 1 and names the lying doc", cli2.status === 1 && /LYING\s+docs\/honest\.md/.test(cli2.stdout), cli2.stdout);
 ok("an unknown flag exits 2", spawnSync("node", [join(HERE, "freshness.mjs"), "--nope"], { encoding: "utf8" }).status === 2);
 
+{
+  // The reviewer's case: a governed file DELETED after the spec's date.
+  writeFileSync(join(R, "specs", "tax.md"), spec("2026-04-02", "src/tax/**"));
+  commit("2026-04-02", "tax claim", "specs/tax.md");
+  spawnSync("git", ["-C", R, "rm", "-q", "src/tax/t.js"]);
+  const env = { ...process.env, GIT_AUTHOR_DATE: "2026-05-01T12:00:00Z", GIT_COMMITTER_DATE: "2026-05-01T12:00:00Z" };
+  spawnSync("git", ["-C", R, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "drop tax"], { env });
+  const d = freshness({ repo: R });
+  ok("deleting a governed file makes its spec stale", d.stale.some((x) => x.spec === "specs/tax.md" && x.lastGoverned?.subject === "drop tax"), JSON.stringify(d.stale));
+}
+{
+  // "Every spec is checked for a lying date, wherever it lives": one outside --docs.
+  mkdirSync(join(R, "design"), { recursive: true });
+  writeFileSync(join(R, "design", "api.md"), spec("2026-01-01", "src/api/**"));
+  commit("2026-06-01", "design spec", "design/api.md");
+  const d = freshness({ repo: R, specsDir: "design", docDirs: ["docs"] });
+  ok("a spec outside the doc dirs is still checked for a lying date", d.lying.some((x) => x.doc === "design/api.md"), JSON.stringify(d.lying));
+}
+
 rmSync(TMP, { recursive: true, force: true });
 console.log(failures ? `\n[freshness] ${failures} FAILED` : "\n[freshness] all checks passed");
 process.exit(failures ? 1 : 0);

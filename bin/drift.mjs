@@ -518,7 +518,7 @@ export function writeEvents(dir, lines) {
 /* --------------------------------------------------------------------- git */
 
 const git = (repo, args) =>
-  execFileSync("git", ["-C", resolve(repo), ...args], { encoding: "utf8" })
+  execFileSync("git", ["-C", resolve(repo), ...args], { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 })
     .split("\n")
     .map(norm)
     .filter(Boolean);

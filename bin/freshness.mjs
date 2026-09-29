@@ -44,7 +44,7 @@ export function claimedUpdated(text) {
   return u ? u[1] : null;
 }
 
-const gitOut = (repo, args) => execFileSync("git", ["-C", repo, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+const gitOut = (repo, args) => execFileSync("git", ["-C", repo, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 256 * 1024 * 1024 });
 
 /** The last commit touching any of `paths`: { day, sha, subject }, or null if none. */
 export function lastCommit(repo, paths) {
@@ -56,8 +56,20 @@ export function lastCommit(repo, paths) {
 }
 
 /**
+ * The last commit touching anything a spec's GLOBS govern, asked of git with
+ * glob pathspecs rather than the files that exist now: a governed file that
+ * was DELETED is a change the spec should know about, and listing today's
+ * files could not see it (independent review). Also one argument per glob,
+ * not per file.
+ */
+export function lastCommitForGlobs(repo, globs) {
+  if (!globs.length) return null;
+  return lastCommit(repo, globs.map((g) => `:(glob)${g}`));
+}
+
+/**
  * Everything, computed. `docDirs` are the directories whose markdown is checked
- * for lying dates; specs are always included.
+ * for lying dates; every spec is checked too, wherever it lives.
  */
 export function freshness({ repo = ".", specsDir = "specs", docDirs = ["docs", "specs"] } = {}) {
   const root = resolve(repo);
@@ -73,16 +85,17 @@ export function freshness({ repo = ".", specsDir = "specs", docDirs = ["docs", "
     const paths = tree.filter((p) => resolver.matches(p).some((m) => m.spec === s.id));
     const text = readFileSync(resolve(root, s.id), "utf8");
     const updated = claimedUpdated(text);
-    const last = lastCommit(root, paths);
+    const last = lastCommitForGlobs(root, s.governs);
     const row = { spec: s.id, updated, lastGoverned: last, governedPaths: paths.length };
     governed.push(row);
     if (updated && last && last.day > updated) stale.push(row);
   }
 
   const inDocs = (p) => /\.mdx?$/.test(p) && docDirs.some((d) => p === norm(d) || p.startsWith(`${norm(d)}/`));
+  const specFiles = new Set(specs.map((x) => x.id));
   const lying = [];
   const undated = [];
-  for (const p of tree.filter(inDocs)) {
+  for (const p of tree.filter((x) => inDocs(x) || specFiles.has(x))) {
     const updated = claimedUpdated(readFileSync(resolve(root, p), "utf8"));
     if (!updated) {
       undated.push(p);
