@@ -579,7 +579,9 @@ The browser displays; core decides.
 - **Every button comes from `commands`,** the list `lifecycle.commandsFor`
   returns. If core would refuse a command, core does not offer it.
 - **Every click round-trips to core, which checks again.** "Close" only ever
-  calls `done`, and `done` re-runs `missingGates`. The board can change between
+  calls `done`, and `done` re-runs `missingGates` and refuses while the drift
+  gate's latest verdict for the task is a fail (`board.driftGateFailing`, which
+  the read model passes in, as the CLI does). The board can change between
   render and click, so a stale page can offer a command. That is harmless,
   because the refusal comes back verbatim.
 

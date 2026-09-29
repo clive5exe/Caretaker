@@ -267,5 +267,23 @@ async function race(boardFile, n) {
   ok("whole words only: author, tokens and escapement are not auth, secrets or escape", !needs("Author list", "estimate in tokens; escapement"));
 }
 
+{
+  // H-4: done refuses while the drift gate's latest verdict for the task is a
+  // fail. T-005 has every gate passed; only the drift gate stands in the way.
+  const f = fixture(join(HERE, "board.mjs"));
+  const ev = join(f.root, "ops", "caretaker", "events");
+  mkdirSync(ev, { recursive: true });
+  const line = (t, verdict, extra = {}) => `${JSON.stringify({ t, kind: "gate", level: verdict === "fail" ? "error" : "info", stage: "review", task: "T-005", verdict, detail: `drift ${verdict}`, ...extra })}\n`;
+  writeFileSync(join(ev, "events-2026-09-29.jsonl"), line("2026-09-29T10:00:00Z", "fail"));
+  const cli = (...a) => spawnSync("node", [join(f.ops, "board.mjs"), ...a], { cwd: f.root, encoding: "utf8" });
+  const refused = cli("done", "T-005");
+  ok("H-4: done is REFUSED while the drift gate is failing for the task", refused.status === 1 && /Missing: drift gate/.test(refused.stderr) && /drift\.mjs check --task T-005/.test(refused.stderr), refused.stderr);
+  // A refutation is a qa verdict, not the drift gate, and does not count here.
+  writeFileSync(join(ev, "events-2026-09-29.jsonl"), line("2026-09-29T10:00:00Z", "pass") + line("2026-09-29T11:00:00Z", "fail", { source: "refute" }));
+  const passed = cli("done", "T-005");
+  ok("…and allowed once its latest verdict passes (a refutation is not the drift gate)", passed.status === 0, passed.stderr);
+  rmSync(f.root, { recursive: true, force: true });
+}
+
 console.log(failures ? `\n[board-lib] ${failures} FAILED` : "\n[board-lib] all checks passed");
 process.exit(failures ? 1 : 0);

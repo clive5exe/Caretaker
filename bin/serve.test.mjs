@@ -264,6 +264,15 @@ const post = (path, obj, headers = WRITE()) => req("POST", path, { headers, body
   const t1 = board.find(JSON.parse(before), "T-1").t;
   let r = await post("/api/v1/work/T-1/commands", { cmd: "done" });
   ok("done with a gate missing is 409", r.status === 409, r.text);
+  {
+    // H-4 through the web: T-3 has every gate passed; a failing drift gate
+    // for it must still refuse done, as on the CLI.
+    const f = join(evDir, "events-2026-01-01.jsonl");
+    writeFileSync(f, `${JSON.stringify({ t: "2026-01-01T00:00:00Z", kind: "gate", level: "error", stage: "review", task: "T-3", verdict: "fail", detail: "drift 1" })}\n`);
+    const d = await post("/api/v1/work/T-3/commands", { cmd: "done" });
+    rmSync(f);
+    ok("done is 409 through the web while the drift gate fails", d.status === 409 && /drift gate/.test(d.text), d.text);
+  }
   ok("the refusal is core's missingGates, verbatim", JSON.stringify(r.json?.refused) === JSON.stringify(board.missingGates(t1)), r.text);
   ok("and the board is byte-identical", readFileSync(boardFile, "utf8") === before);
   r = await post("/api/v1/work/T-9/commands", { cmd: "note", args: { text: "x" } });

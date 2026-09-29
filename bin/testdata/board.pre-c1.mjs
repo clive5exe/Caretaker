@@ -432,14 +432,30 @@ if (!cmd || cmd === "status") {
       if (g.reviewer?.verdict !== "pass") missing.push("reviewer");
       if (!docsOnly && g.qa?.verdict !== "pass") missing.push("qa");
       if (!docsOnly && needsSecurity && g.security?.verdict !== "pass") missing.push("security (money/auth/isolation)");
-  // A FAIL blocks whether or not the gate was required: a refutation recorded
-  // on a docs-only task is still a failing check (independent review).
-  if (docsOnly && g.qa?.verdict === "fail") missing.push("qa");
+      // A FAIL blocks whether or not the gate was required: a refutation recorded
+      // on a docs-only task is still a failing check (independent review).
+      if (docsOnly && g.qa?.verdict === "fail") missing.push("qa");
+      // H-4: the drift gate's latest verdict for this task, from the event log.
+      let drift = null;
+      try {
+        const dir = path.join(ROOT, CFG.events ?? "ops/caretaker/events");
+        for (const f of fs.readdirSync(dir).filter((x) => /^events-\d{4}-\d{2}-\d{2}\.jsonl$/.test(x)).sort()) {
+          for (const line of fs.readFileSync(path.join(dir, f), "utf8").split("\n")) {
+            let e;
+            try { e = JSON.parse(line); } catch { continue; }
+            if (e?.kind === "gate" && e.task === t.id && e.verdict && e.source === undefined && (!drift || String(e.t) >= String(drift.t))) drift = e;
+          }
+        }
+      } catch { /* no event log */ }
+      if (drift?.verdict === "fail") missing.push("drift gate");
       if (missing.length) {
         console.error(`\n  REFUSED — ${t.id} has not passed the gate${docsOnly ? " (docs-only: reviewer required)" : ""}.\n`);
         console.error(`  Missing: ${missing.join(", ")}\n`);
         console.error(`  Record verdicts first:`);
-        for (const m of missing) console.error(`    node ops/caretaker/board.mjs ${m.split(" ")[0]} ${t.id} pass`);
+        for (const m of missing) {
+          if (m === "drift gate") console.error(`    node bin/drift.mjs check --task ${t.id}   (the drift gate is failing: ${drift.detail ?? "the drift gate failed"}; change the spec, reconcile, or dismiss with a reason)`);
+          else console.error(`    node ops/caretaker/board.mjs ${m.split(" ")[0]} ${t.id} pass`);
+        }
         console.error(`\n  This is enforced. Builder-says-done is a status report, not a completion.\n`);
         process.exit(1);
       }

@@ -529,7 +529,37 @@ const noTask = (id) => ({ ok: false, error: `no such task: ${id}` });
  * Returns { ok, task } or { ok:false, refused:{ missing, docsOnly } } when the
  * gate refuses `done`, or { ok:false, error } for a bad id. It never exits.
  */
-export function transition(d, id, cmd, text = "") {
+/**
+ * H-4: is the drift gate failing for this task? Its latest gate event in the
+ * project's event log (refutations aside, which are qa verdicts) is read here,
+ * where `done` can refuse on it, because a verdict nobody consults is a
+ * comment: the drift gate failed, and `done` closed the task anyway
+ * (independent review). Returns the failing event's detail, or null.
+ */
+export function driftGateFailing(ctx, id) {
+  const dir = path.join(ctx.root, ctx.cfg.events ?? "ops/caretaker/events");
+  let names = [];
+  try {
+    names = fs.readdirSync(dir).filter((f) => /^events-\d{4}-\d{2}-\d{2}\.jsonl$/.test(f)).sort();
+  } catch {
+    return null;
+  }
+  let last = null;
+  for (const f of names) {
+    for (const line of fs.readFileSync(path.join(dir, f), "utf8").split("\n")) {
+      let e;
+      try {
+        e = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      if (e?.kind === "gate" && e.task === id && e.verdict && e.source === undefined && (!last || String(e.t) >= String(last.t))) last = e;
+    }
+  }
+  return last?.verdict === "fail" ? last.detail ?? "the drift gate failed" : null;
+}
+
+export function transition(d, id, cmd, text = "", opts = {}) {
   if (!TRANSITIONS.includes(cmd)) return { ok: false, error: `unknown command: ${cmd}` };
   const hit = find(d, id);
   if (!hit) return noTask(id);
@@ -540,7 +570,8 @@ export function transition(d, id, cmd, text = "") {
   } else {
     if (cmd === "done") {
       const { missing, docsOnly } = missingGates(t);
-      if (missing.length) return { ok: false, task: t, refused: { missing, docsOnly } };
+      if (opts.driftFailing) missing.push("drift gate");
+      if (missing.length) return { ok: false, task: t, refused: { missing, docsOnly, ...(opts.driftFailing ? { drift: opts.driftFailing } : {}) } };
       t.completed = today();
     }
     if (cmd !== "done") delete t.completed;
@@ -736,7 +767,7 @@ export function command(d, id, cmd, args = {}, opts = {}) {
     case "start":
     case "todo":
     case "done":
-      return transition(d, id, cmd);
+      return transition(d, id, cmd, "", opts);
     case "block":
     case "note":
       return transition(d, id, cmd, String(args.text ?? ""));
@@ -821,14 +852,17 @@ function cli(argv) {
   } else if (TRANSITIONS.includes(cmd)) {
     if (!id) { console.error("need a task id, e.g. T-012"); process.exit(1); }
     const ctx = loadConfig();
-    const res = mutate(ctx, (d) => transition(d, id, cmd, text));
+    const res = mutate(ctx, (d) => transition(d, id, cmd, text, cmd === "done" ? { driftFailing: driftGateFailing(ctx, id) } : {}));
     if (res.refused) {
       const { missing, docsOnly } = res.refused;
       const t = res.task;
       console.error(`\n  REFUSED — ${t.id} has not passed the gate${docsOnly ? " (docs-only: reviewer required)" : ""}.\n`);
       console.error(`  Missing: ${missing.join(", ")}\n`);
       console.error(`  Record verdicts first:`);
-      for (const m of missing) console.error(`    node ops/caretaker/board.mjs ${m.split(" ")[0]} ${t.id} pass`);
+      for (const m of missing) {
+        if (m === "drift gate") console.error(`    node bin/drift.mjs check --task ${t.id}   (the drift gate is failing: ${res.refused.drift}; change the spec, reconcile, or dismiss with a reason)`);
+        else console.error(`    node ops/caretaker/board.mjs ${m.split(" ")[0]} ${t.id} pass`);
+      }
       console.error(`\n  This is enforced. Builder-says-done is a status report, not a completion.\n`);
       process.exit(1);
     }

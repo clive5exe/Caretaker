@@ -742,6 +742,9 @@ export function createReadModel({ cfgPath, board, dash, now = () => new Date(), 
       const hit = board.find(d, id);
       if (!hit) return { ok: false, notFound: true, error: `no such task: ${id}` };
       if (cmd.startsWith("spec-")) opts.spec = board.specInfo(root, hit.t);
+      // H-4: done refuses while the drift gate fails, on the web as on the CLI.
+      // An installed board.mjs older than the rule has no such export.
+      if (cmd === "done") opts.driftFailing = board.driftGateFailing?.(ctx, id) ?? null;
       return board.command(d, id, cmd, args, opts);
     });
     if (res.notFound) return { status: 404, body: { error: res.error } };
