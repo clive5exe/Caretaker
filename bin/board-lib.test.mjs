@@ -203,7 +203,7 @@ const SCRIPT = [
   }
   ok(
     "missingGates: an auth task needs reviewer, qa and security",
-    JSON.stringify(o.missing) === JSON.stringify({ missing: ["reviewer", "qa", "security (money/auth/tenant)"], docsOnly: false }),
+    JSON.stringify(o.missing) === JSON.stringify({ missing: ["reviewer", "qa", "security (money/auth/isolation)"], docsOnly: false }),
     JSON.stringify(o.missing),
   );
   ok("missingGates: a docs-only task needs reviewer only", JSON.stringify(o.docs) === JSON.stringify({ missing: ["reviewer"], docsOnly: true }));
@@ -250,6 +250,18 @@ async function race(boardFile, n) {
   ok("a lock held by a dead pid is taken over", r.status === 0 && Date.now() - t0 < 4000, r.stderr);
   ok("and released afterwards", !existsSync(join(f.root, "docs", "board.json.lock")));
   rmSync(f.root, { recursive: true, force: true });
+}
+
+{
+  // CLAUDE.md: money, auth and ISOLATION need security. The old list was the
+  // ticketing project's and had no word for this repo's isolation work.
+  const { missingGates } = await import("./board.mjs");
+  const needs = (title, note = "") => missingGates({ id: "X", title, note, owner: "backend" }).missing.some((m) => m.startsWith("security"));
+  ok("isolation work needs security", needs("Prove the sandbox by attacking it") && needs("Egress allowlist proxy") && needs("Secrets reach the harness"));
+  ok("auth and money still do", needs("serve: token exchanged for a cookie", "auth on every route") && needs("Billing export"));
+  ok("the ticketing project's words no longer decide it", !needs("Stripe fee refund for a tenant"));
+  ok("web auth and redaction work does, and so does a task whose note says it needs security", needs("serve: cookie, host/origin checks, CSP") && needs("archive with redacted transcripts") && needs("command endpoint", "Needs security: it is a write path."));
+  ok("whole words only: author, tokens and escapement are not auth, secrets or escape", !needs("Author list", "estimate in tokens; escapement"));
 }
 
 console.log(failures ? `\n[board-lib] ${failures} FAILED` : "\n[board-lib] all checks passed");

@@ -419,8 +419,9 @@ if (!cmd || cmd === "status") {
       // THE LOOP IS NOT OPTIONAL. A task is done when the gate passed, not when
       // the builder says so. Money/auth/tenant tasks additionally need security.
       const g = t.gate || {};
-      const needsSecurity = /fee|refund|stripe|payment|auth|tenant|plan gat|domain|entitle|money|sign in|oauth|consent|webhook/i
-        .test(`${t.title} ${t.note || ""}`);
+      const needsSecurity =
+    /\b(money|payments?|billing|auth|oauth|sign[- ]?in|login|credentials?|secrets?|api[- ]key|bearer|sandbox(ed|ing)?|isolation|egress|allowlist|escape|container socket|permission mode|cookies?|csrf|csp|cors|redact(ed|ion)?|needs security)\b/i
+      .test(`${t.title} ${t.note || ""}`);
       // Docs-only work has no executable surface — reviewer is the whole gate.
       // Roles that never write code, on tasks that name no code path.
       const DOC_ROLES = ["product-architect", "legal", "marketing", "product-manager"];
@@ -430,7 +431,7 @@ if (!cmd || cmd === "status") {
       const missing = [];
       if (g.reviewer?.verdict !== "pass") missing.push("reviewer");
       if (!docsOnly && g.qa?.verdict !== "pass") missing.push("qa");
-      if (!docsOnly && needsSecurity && g.security?.verdict !== "pass") missing.push("security (money/auth/tenant)");
+      if (!docsOnly && needsSecurity && g.security?.verdict !== "pass") missing.push("security (money/auth/isolation)");
       if (missing.length) {
         console.error(`\n  REFUSED — ${t.id} has not passed the gate${docsOnly ? " (docs-only: reviewer required)" : ""}.\n`);
         console.error(`  Missing: ${missing.join(", ")}\n`);

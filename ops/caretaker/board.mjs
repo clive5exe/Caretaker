@@ -499,8 +499,13 @@ export function missingGates(t) {
   // THE LOOP IS NOT OPTIONAL. A task is done when the gate passed, not when
   // the builder says so. Money/auth/tenant tasks additionally need security.
   const g = t.gate || {};
-  const needsSecurity = /fee|refund|stripe|payment|auth|tenant|plan gat|domain|entitle|money|sign in|oauth|consent|webhook/i
-    .test(`${t.title} ${t.note || ""}`);
+  // CLAUDE.md: money, auth and ISOLATION changes need security. The list was
+  // the ticketing project's (stripe, refund, fee, tenant…), which had no word
+  // for sandbox, egress or secrets, so this repo's isolation work could close
+  // without a security verdict (independent review). Whole words only.
+  const needsSecurity =
+    /\b(money|payments?|billing|auth|oauth|sign[- ]?in|login|credentials?|secrets?|api[- ]key|bearer|sandbox(ed|ing)?|isolation|egress|allowlist|escape|container socket|permission mode|cookies?|csrf|csp|cors|redact(ed|ion)?|needs security)\b/i
+      .test(`${t.title} ${t.note || ""}`);
   // Docs-only work has no executable surface — reviewer is the whole gate.
   // Roles that never write code, on tasks that name no code path.
   const DOC_ROLES = ["product-architect", "legal", "marketing", "product-manager"];
@@ -510,7 +515,7 @@ export function missingGates(t) {
   const missing = [];
   if (g.reviewer?.verdict !== "pass") missing.push("reviewer");
   if (!docsOnly && g.qa?.verdict !== "pass") missing.push("qa");
-  if (!docsOnly && needsSecurity && g.security?.verdict !== "pass") missing.push("security (money/auth/tenant)");
+  if (!docsOnly && needsSecurity && g.security?.verdict !== "pass") missing.push("security (money/auth/isolation)");
   return { missing, docsOnly };
 }
 
