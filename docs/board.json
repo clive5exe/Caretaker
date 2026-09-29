@@ -22,6 +22,11 @@
               "verdict": "pass",
               "at": "2026-08-30",
               "note": "spec.mjs parses, derives an egress allowlist and resource limits from a real devcontainer.json, and answers ownership for a path. 34 tests pass, most of them negative."
+            },
+            "reviewer": {
+              "verdict": "fail",
+              "at": "2026-09-29",
+              "note": "Independent review (fresh agent, not the builder): spec.mjs:146-171 toEgress runs unanchored regexes over the image AND the free-text devcontainer name, so image javascript-node opens repo1.maven.org (/java/ matches javascript), name 'Let us go' opens the golang proxies and 'trustworthy' opens crates.io, all reproduced; this contradicts the comment at :159-161 that an unrecognised toolchain must never open an undeclared host. Also parseSpec accepts any hosts value unvalidated (*, .com, $(...))."
             }
           }
         },
@@ -39,6 +44,11 @@
               "verdict": "pass",
               "at": "2026-08-30",
               "note": "appended verdicts proven: a fail then a pass records both, the terminal reports 'attempt 2; previous: fail', and the dashboard computes first-pass and rework from the history"
+            },
+            "reviewer": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "note": "Independent review (fresh agent, not the builder): recordVerdict (board.mjs:560) appends the previous verdict to history, oldest first, and keeps .verdict as the latest; gateStats and quality in dashboard.mjs count every attempt and treat any past fail as rework; bin and ops copies are identical, tests pass."
             }
           }
         },
@@ -65,6 +75,11 @@
                   "note": "governs is parsed and matched; globToRegExp handles ** and refuses to let a single star cross a directory boundary"
                 }
               ]
+            },
+            "reviewer": {
+              "verdict": "fail",
+              "at": "2026-09-29",
+              "note": "Independent review (fresh agent, not the builder): spec.mjs:192-198 globToRegExp turns **/ into .*/? rather than (?:.*/)?, so a/**/b matches a/xb and src/**/foo.ts claims src/xfoo.ts (reproduced); drift.mjs and freshness.mjs both use it, so 'which spec governs this file' answers wrongly for any **/ glob with a suffix."
             }
           }
         },
@@ -79,7 +94,19 @@
           ],
           "spec": "docs/memory.md",
           "ac": "decisions are immutable and superseded rather than edited, specs carry current state only, and the log is append-only; a tool can answer 'why is this like this' from the decisions without reading the log",
-          "note": "They rot at completely different speeds and want opposite treatment. A spec that accumulates a changelog becomes unreadable, unreadable specs are not consulted, and unconsulted specs drift. An ADR that gets edited stops being a record of what was decided. — Built the tool half: bin/graduate.mjs why <path> answers from the decisions without reading the log (governing specs, ADRs they cite, ADRs naming the spec, path or bare file name, each labelled with how it was found). decisions checks status vocabulary, dangling supersedes, superseded-by agreement, and immutability: a decided ADR whose text (other than status/updated) changed in a later commit, or in the working tree, is a named problem with the commit. Run on this repo it reports ADR-0001 (cfbf4fe7) and ADR-0002 (2b38c586, d823eb59) as edited after acceptance: real, left for the owner to supersede or accept. Checked by bin/graduate.test.mjs; mutations M8-M12 fail it by name. Gate verdicts not recorded."
+          "note": "They rot at completely different speeds and want opposite treatment. A spec that accumulates a changelog becomes unreadable, unreadable specs are not consulted, and unconsulted specs drift. An ADR that gets edited stops being a record of what was decided. — Built the tool half: bin/graduate.mjs why <path> answers from the decisions without reading the log (governing specs, ADRs they cite, ADRs naming the spec, path or bare file name, each labelled with how it was found). decisions checks status vocabulary, dangling supersedes, superseded-by agreement, and immutability: a decided ADR whose text (other than status/updated) changed in a later commit, or in the working tree, is a named problem with the commit. Run on this repo it reports ADR-0001 (cfbf4fe7) and ADR-0002 (2b38c586, d823eb59) as edited after acceptance: real, left for the owner to supersede or accept. Checked by bin/graduate.test.mjs; mutations M8-M12 fail it by name. Gate verdicts not recorded.",
+          "gate": {
+            "qa": {
+              "verdict": "fail",
+              "at": "2026-09-29",
+              "note": "Independent QA (fresh agent, not the builder): immutability check misses real edits: in a scratch repo, renaming an accepted ADR while rewriting its body (git mv 0001-x.md 0001-x-renamed.md, 'podman'->'docker'), deleting an accepted ADR, and editing a body line starting 'updated:' all give 'node bin/graduate.mjs decisions --repo <scratch>' exit 0 with no problem (git log without --follow; decidedText strips status/updated lines anywhere); nothing checks 'specs carry current state only'; and on this repo the check exits 1 (ADR-0001, ADR-0002 edited after acceptance) and is not in CI, so decisions here are not in fact immutable."
+            },
+            "reviewer": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "note": "Independent review (fresh agent, not the builder): graduate.mjs why answers from specs and ADRs only (checked from another cwd with --repo), and decisions flags edits after acceptance with the commit. Nits: STATUSES accepts bare superseded and proposed while its message lists neither; decidedText strips status:/updated: lines anywhere in the body; git log has no --follow, so a rename loses history."
+            }
+          }
         },
         {
           "id": "P-5",
@@ -92,7 +119,19 @@
           ],
           "spec": "docs/memory.md",
           "ac": "a check reports stale (the doc's updated: is older than the last commit touching the paths it GOVERNS), orphaned (governs paths that no longer exist) and unowned (code no spec claims), with no manual freshness flag anywhere",
-          "note": "A manual 'is this current?' flag stops being updated the first time someone is in a hurry, and then there is no way to tell a current doc from an abandoned one. Comparing against the governed paths rather than the doc's own last commit is the stronger check: a doc can be true and untouched while the code under it moves. — Built in bin/freshness.mjs, checked by bin/freshness.test.mjs and mutation-checked: stale compares a spec's updated: against the last commit touching the paths it GOVERNS; orphaned and unowned come from the drift ownership map. No freshness flag exists anywhere. Gate verdicts not recorded."
+          "note": "A manual 'is this current?' flag stops being updated the first time someone is in a hurry, and then there is no way to tell a current doc from an abandoned one. Comparing against the governed paths rather than the doc's own last commit is the stronger check: a doc can be true and untouched while the code under it moves. — Built in bin/freshness.mjs, checked by bin/freshness.test.mjs and mutation-checked: stale compares a spec's updated: against the last commit touching the paths it GOVERNS; orphaned and unowned come from the drift ownership map. No freshness flag exists anywhere. Gate verdicts not recorded.",
+          "gate": {
+            "qa": {
+              "verdict": "fail",
+              "at": "2026-09-29",
+              "note": "Independent QA (fresh agent, not the builder): stale misses a governed file being deleted: scratch repo with spec updated: 2026-01-10 governing src/fees/**, then 'git rm src/fees/b.js' committed 2026-02-01, and 'node bin/freshness.mjs --repo <scratch>' reports 0 stale, exit 0, because lastCommit is asked only about paths still in git ls-files rather than the governs globs; the tests (19 PASS) and my mutation (stale measured against the spec's own commit, fails 2 checks by name) cover only modified files; orphaned/unowned and no-manual-flag hold."
+            },
+            "reviewer": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "note": "Independent review (fresh agent, not the builder): stale compares updated: against the last commit on the governed paths, and orphaned/unowned come from the drift map; there is no flag. Notes: it inherits the P-3 **/ over-match; a spec with no updated: is only listed as undated and never stale, so deleting the date silences it; lastCommit passes every governed path as argv."
+            }
+          }
         }
       ]
     },
@@ -114,6 +153,11 @@
               "verdict": "pass",
               "at": "2026-08-30",
               "note": "detect reports podman 5.8.2 rootless; docker is never chosen implicitly; install hints are printed and never run"
+            },
+            "reviewer": {
+              "verdict": "fail",
+              "at": "2026-09-29",
+              "note": "Independent review (fresh agent, not the builder): sandbox.mjs:227-236 'run --runtime docker' prints nothing about the weaker isolation (reproduced with a stub docker: silent, exit 0), which the ac requires. The install command is never run on confirmation, only printed; run proceeds on rootful podman without a word; and :74 is a no-op line that reads as a check."
             }
           }
         },
@@ -134,6 +178,11 @@
               "verdict": "pass",
               "at": "2026-08-30",
               "note": "22 checks pass, 5 of them by booting a real container and reading the limits from inside it: memory.max is exactly 2147483648, pids.max is 512, a write to / is refused, there is no route off the box, and a file written as root inside is owned by uid 1000 on the host"
+            },
+            "reviewer": {
+              "verdict": "fail",
+              "at": "2026-09-29",
+              "note": "Independent review (fresh agent, not the builder): sandbox.mjs:201 parses flags by stepping two at a time, the bug egress.mjs:142-148 documents: with 'run --allow-missing-limits --workdir R', R is silently dropped and the cwd is bind-mounted read-write with :Z instead (reproduced). No live test proves --cpus binds (only memory.max and pids.max are read), and the warning at :251-253 still says no egress allowlist exists."
             }
           }
         },
@@ -155,6 +204,11 @@
               "verdict": "pass",
               "at": "2026-08-30",
               "note": "18 checks pass. The matcher refuses the three bypasses that look correct: evil-stripe.com does not match .stripe.com, api.anthropic.com.evil.example does not match api.anthropic.com, and a bare entry does not open its subdomains. Refusals return 403 with a reason rather than dropping. An allowed host on a disallowed port is still refused. Every refusal is logged."
+            },
+            "reviewer": {
+              "verdict": "fail",
+              "at": "2026-09-29",
+              "note": "Independent review (fresh agent, not the builder): egress.mjs:88-103: Node removes the server's socket error handler on CONNECT, and the deny path adds none, so a client that resets during a refusal throws an uncaught ECONNRESET and kills the CLI proxy (reproduced with one reset CONNECT); bail is only wired on the allow path. No test proves the ac's 'repo cannot be POSTed anywhere'."
             }
           }
         },
@@ -174,6 +228,11 @@
               "verdict": "pass",
               "at": "2026-08-30",
               "note": "All five attacks run against a real container on an --internal network, with real output. Bypassing the proxy and dialling a raw IP returns Network unreachable rather than a DNS failure dressed up as one. A sibling container is unreachable. The host is unreachable via host.containers.internal, PROVEN AS A CONTROL by showing the same address succeeds from a normally-networked container."
+            },
+            "reviewer": {
+              "verdict": "fail",
+              "at": "2026-09-29",
+              "note": "Independent review (fresh agent, not the builder): ac attacks (b) exhaust memory and (d) reach the container socket are never attempted: there is only a read of memory.max and argv string checks for '.sock'. Attack 3 (netns.mjs:384-388) dials a hostname and passes on 'Could not resolve host', which proves DNS is off, not that there is no route; the raw-IP proof is in a comment only, and no output is recorded beyond stdout."
             }
           }
         },
@@ -201,7 +260,19 @@
           ],
           "spec": "docs/environments.md",
           "ac": "a run gets a container built from the spec and destroyed after, and a package installed by hand inside one is gone on the next run; nothing persists between runs except the repo",
-          "note": "THE ANSWER TO 'ENVIRONMENTS CHANGE' AT THIS LAYER IS THAT THEY DO NOT. Immutable rebuild makes drift structurally impossible rather than detectable: if something is needed, the spec changes and the image is rebuilt. Terraform and Ansible are the wrong shape here - a state file for a thing created fifty times an hour is overhead and a lock contention point, and convergence assumes a host that persists. — Built: bin/environment.mjs resolves a run's image in one place (--image, else devcontainer image, else build.dockerfile BUILT every run, podman's layer cache deciding staleness, so a change to a COPY'd file is seen). Both adapters use it; each run records the image id. Fixed on the way: toLimits handed a Dockerfile path to podman as an image name. Devcontainer features are named in a warning, not installed. Nothing persists: --rm, read-only root, tmpfs. Checked by bin/environment.test.mjs; the persistence and rebuild proofs are live checks that run in CI (podman), skipped here. Mutations V1, V2, V12 fail by name. Gate verdicts not recorded."
+          "note": "THE ANSWER TO 'ENVIRONMENTS CHANGE' AT THIS LAYER IS THAT THEY DO NOT. Immutable rebuild makes drift structurally impossible rather than detectable: if something is needed, the spec changes and the image is rebuilt. Terraform and Ansible are the wrong shape here - a state file for a thing created fifty times an hour is overhead and a lock contention point, and convergence assumes a host that persists. — Built: bin/environment.mjs resolves a run's image in one place (--image, else devcontainer image, else build.dockerfile BUILT every run, podman's layer cache deciding staleness, so a change to a COPY'd file is seen). Both adapters use it; each run records the image id. Fixed on the way: toLimits handed a Dockerfile path to podman as an image name. Devcontainer features are named in a warning, not installed. Nothing persists: --rm, read-only root, tmpfs. Checked by bin/environment.test.mjs; the persistence and rebuild proofs are live checks that run in CI (podman), skipped here. Mutations V1, V2, V12 fail by name. Gate verdicts not recorded.",
+          "gate": {
+            "qa": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "note": "Independent QA (fresh agent, not the builder): node bin/environment.test.mjs passes locally with live checks skipped (no podman); I relied on CI run 36620548711 for this exact commit 46927f2, whose log shows 'live: nothing written in one run survives into the next; the repo does' and 'live: a Dockerfile is rebuilt every run, a COPY'd file change included' PASS; mutations I made (build skipped on the second run; --rm removed from sandbox.buildArgs) each fail by name, and both adapters resolve the image through imageFor and use --rm/--read-only/tmpfs. Caveats outside the AC wording: devcontainer features are warned about, not installed, and writes to the workspace .git are persisted and unmeasured (see report)."
+            },
+            "reviewer": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "note": "Independent review (fresh agent, not the builder): resolveImage prefers --image, then image, then builds build.dockerfile every run, never handing podman a Dockerfile path; both adapters record imageId; nothing but /work is writable. Note: the id is read from the tag before podman run, and the run uses the tag, not the id, so a concurrent rebuild of the same devcontainer can make the recorded id wrong; running by id closes that."
+            }
+          }
         },
         {
           "id": "E-6",
@@ -214,7 +285,19 @@
           ],
           "spec": "docs/environments.md",
           "ac": "a check compares the running environment's real package versions, service versions and reachable hosts against what the spec declared, and names every difference",
-          "note": "EASIER THAN DOC DRIFT AND WORTH DOING FIRST BECAUSE OF IT. A document's meaning is ambiguous; a container's contents are not. You can ask it what it has and diff that against the declaration with no interpretation involved. Same machinery as the doc drift gate, pointed at a target that cannot argue. — Built: environment.mjs check probes inside the run's own sandbox (and per-run egress proxy with --egress) and names every difference: declared toolchain missing or at another version, undeclared toolchain present, declared service not started, unknown feature unchecked, declared host unreachable, undeclared canary host REACHABLE (egress open). net none is one stated line, not a flood. Checked by bin/environment.test.mjs with a fake toolchain on PATH, plus a live check against node:22-alpine in CI. Mutations V3-V11 fail by name. specs/sandbox.md now governs bin/environment.mjs and says all this. Gate verdicts not recorded."
+          "note": "EASIER THAN DOC DRIFT AND WORTH DOING FIRST BECAUSE OF IT. A document's meaning is ambiguous; a container's contents are not. You can ask it what it has and diff that against the declaration with no interpretation involved. Same machinery as the doc drift gate, pointed at a target that cannot argue. — Built: environment.mjs check probes inside the run's own sandbox (and per-run egress proxy with --egress) and names every difference: declared toolchain missing or at another version, undeclared toolchain present, declared service not started, unknown feature unchecked, declared host unreachable, undeclared canary host REACHABLE (egress open). net none is one stated line, not a flood. Checked by bin/environment.test.mjs with a fake toolchain on PATH, plus a live check against node:22-alpine in CI. Mutations V3-V11 fail by name. specs/sandbox.md now governs bin/environment.mjs and says all this. Gate verdicts not recorded.",
+          "gate": {
+            "qa": {
+              "verdict": "fail",
+              "at": "2026-09-29",
+              "note": "Independent QA (fresh agent, not the builder): service versions are never compared: with a compose devcontainer (db: postgres:16, runServices [app, db]) 'node bin/environment.mjs check --sandbox none --devcontainer .devcontainer/devcontainer.json' only prints 'service db is declared ... nothing checked it', the compose file is never read (so no declared version exists to compare), and the dev container 'app' itself is misreported as an unstarted service; toolchain versions and host reachability (curl through a real egress.mjs proxy: allowed host yes, canary refused) do hold."
+            },
+            "reviewer": {
+              "verdict": "fail",
+              "at": "2026-09-29",
+              "note": "Independent review (fresh agent, not the builder): environment.mjs:152-159 interpolates spec hosts unquoted into echo \"host ${h} $r\", and with --sandbox none the script runs via sh -c on the HOST, so a spec with hosts: $(touch${IFS}/path) ran that command on the host (reproduced). Also the canary is probed only through HTTPS_PROXY, so a network that routes around the proxy reads as closed, and check() skips the cgroup preflight, so --cpus kills the probe where cpu is not delegated."
+            }
+          }
         }
       ]
     },
