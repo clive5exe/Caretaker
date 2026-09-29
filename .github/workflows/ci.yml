@@ -13,17 +13,24 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
 
+      # The runner ships rootless podman. Pulling the images the live checks
+      # use means the sandbox, egress and secrets controls are attacked for
+      # real on every push, rather than skipped for want of an image.
+      - name: pull live-test images
+        run: |
+          podman --version
+          podman pull -q docker.io/library/nginx:alpine
+          podman pull -q docker.io/library/node:22-alpine
+
       # Every bin/*.test.mjs, each run on its own so one failure does not hide
-      # the rest. The live podman checks in harness, netns, sandbox and secrets
-      # skip with a printed reason when podman or the test image is missing;
-      # the skip lines stay in the log so a green run with nothing live is
-      # visible as exactly that.
+      # the rest. A live check that still cannot run skips with a printed
+      # reason, and the skip line stays in the log.
       - name: tests
         run: |
           status=0
