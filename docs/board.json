@@ -194,27 +194,27 @@
           "title": "The sandbox is rebuilt from the spec every run",
           "owner": "backend",
           "est": "4h",
-          "status": "todo",
+          "status": "doing",
           "deps": [
             "E-1",
             "P-1"
           ],
           "spec": "docs/environments.md",
           "ac": "a run gets a container built from the spec and destroyed after, and a package installed by hand inside one is gone on the next run; nothing persists between runs except the repo",
-          "note": "THE ANSWER TO 'ENVIRONMENTS CHANGE' AT THIS LAYER IS THAT THEY DO NOT. Immutable rebuild makes drift structurally impossible rather than detectable: if something is needed, the spec changes and the image is rebuilt. Terraform and Ansible are the wrong shape here - a state file for a thing created fifty times an hour is overhead and a lock contention point, and convergence assumes a host that persists."
+          "note": "THE ANSWER TO 'ENVIRONMENTS CHANGE' AT THIS LAYER IS THAT THEY DO NOT. Immutable rebuild makes drift structurally impossible rather than detectable: if something is needed, the spec changes and the image is rebuilt. Terraform and Ansible are the wrong shape here - a state file for a thing created fifty times an hour is overhead and a lock contention point, and convergence assumes a host that persists. — Built: bin/environment.mjs resolves a run's image in one place (--image, else devcontainer image, else build.dockerfile BUILT every run, podman's layer cache deciding staleness, so a change to a COPY'd file is seen). Both adapters use it; each run records the image id. Fixed on the way: toLimits handed a Dockerfile path to podman as an image name. Devcontainer features are named in a warning, not installed. Nothing persists: --rm, read-only root, tmpfs. Checked by bin/environment.test.mjs; the persistence and rebuild proofs are live checks that run in CI (podman), skipped here. Mutations V1, V2, V12 fail by name. Gate verdicts not recorded."
         },
         {
           "id": "E-6",
           "title": "Environment drift: ask the container what it actually has",
           "owner": "devops",
           "est": "1d",
-          "status": "todo",
+          "status": "doing",
           "deps": [
             "E-5"
           ],
           "spec": "docs/environments.md",
           "ac": "a check compares the running environment's real package versions, service versions and reachable hosts against what the spec declared, and names every difference",
-          "note": "EASIER THAN DOC DRIFT AND WORTH DOING FIRST BECAUSE OF IT. A document's meaning is ambiguous; a container's contents are not. You can ask it what it has and diff that against the declaration with no interpretation involved. Same machinery as the doc drift gate, pointed at a target that cannot argue."
+          "note": "EASIER THAN DOC DRIFT AND WORTH DOING FIRST BECAUSE OF IT. A document's meaning is ambiguous; a container's contents are not. You can ask it what it has and diff that against the declaration with no interpretation involved. Same machinery as the doc drift gate, pointed at a target that cannot argue. — Built: environment.mjs check probes inside the run's own sandbox (and per-run egress proxy with --egress) and names every difference: declared toolchain missing or at another version, undeclared toolchain present, declared service not started, unknown feature unchecked, declared host unreachable, undeclared canary host REACHABLE (egress open). net none is one stated line, not a flood. Checked by bin/environment.test.mjs with a fake toolchain on PATH, plus a live check against node:22-alpine in CI. Mutations V3-V11 fail by name. specs/sandbox.md now governs bin/environment.mjs and says all this. Gate verdicts not recorded."
         }
       ]
     },

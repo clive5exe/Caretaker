@@ -70,6 +70,7 @@ import { DEFAULT_DIR as DEFAULT_EVENTS_DIR, STAGES, append as appendEvents } fro
 import { buildArgs, checkLimits, delegatedControllers } from "./sandbox.mjs";
 import { readDevcontainer, toLimits } from "./spec.mjs";
 import { openaiCompatibleAdapter } from "./openai-compatible.mjs";
+import { EnvironmentError, imageId, resolveImage } from "./environment.mjs";
 
 /**
  * The seam, as data. Exported so a test can assert the shape rather than trust
@@ -138,6 +139,22 @@ const DEFAULTS = {
  */
 export const cliLabel = (cli) =>
   cli === undefined ? DEFAULTS.cli : typeof cli === "string" ? cli : cli?.name ? `custom:${cli.name}` : "custom";
+
+/**
+ * The image a containerised run uses (E-5): policy.image, else devcontainer
+ * `image`, else its `build.dockerfile` built now. Returns the id it resolved
+ * to as well, so the run records the environment it actually ran in.
+ */
+export function imageFor(policy, dev, warnings, { exec } = {}) {
+  try {
+    const r = resolveImage({ image: policy.image ?? null, dev, devcontainerPath: policy.devcontainer, runtime: policy.sandbox, exec });
+    warnings.push(...r.warnings);
+    return { image: r.image, built: r.built, imageId: imageId(r.image, { runtime: policy.sandbox, exec }) };
+  } catch (e) {
+    if (e instanceof EnvironmentError) throw new HarnessError(e.message, { code: e.code });
+    throw e;
+  }
+}
 
 const newRunId = () => `r_${randomBytes(4).toString("hex")}`;
 
@@ -788,12 +805,7 @@ async function cliAdapter({ workspace, prompt, policy, paths, warnings }) {
   } else {
     const dev = readDevcontainer(policy.devcontainer);
     const limits = toLimits(dev);
-    const image = policy.image ?? limits.image;
-    if (!image) {
-      throw new HarnessError(
-        `no image: set policy.image, or an "image" in ${policy.devcontainer}`,
-      );
-    }
+    const { image, imageId, built } = imageFor(policy, dev, warnings);
     if (policy.net === "none") {
       warnings.push(
         "net:none — the container has no route off the host, so a real agent CLI cannot " +
@@ -837,7 +849,7 @@ async function cliAdapter({ workspace, prompt, policy, paths, warnings }) {
       extraRunFlags: [...policy.extraRunFlags, ...skillsMount(policy, preset, warnings)],
     });
     file = policy.sandbox;
-    container = { runtime: policy.sandbox, name: containerName, image };
+    container = { runtime: policy.sandbox, name: containerName, image, imageId, built };
   }
 
   const exec = await execWithTimeout({
@@ -895,7 +907,7 @@ async function sdkAdapter() {
 export const ADAPTERS = {
   cli: cliAdapter,
   sdk: sdkAdapter,
-  "openai-compatible": (args) => openaiCompatibleAdapter({ ...args, HarnessError }),
+  "openai-compatible": (args) => openaiCompatibleAdapter({ ...args, HarnessError, imageFor }),
 };
 
 /** Which adapters exist, for an error message and for the CLI. */
@@ -1077,7 +1089,7 @@ export async function run(workspace, prompt, policy = {}) {
     cli: p.adapter === "cli" ? cliLabel(p.cli) : null,
     runId: p.runId,
     container: container
-      ? { runtime: container.runtime, name: container.name, image: container.image, cleanup: container.cleanup ?? null }
+      ? { runtime: container.runtime, name: container.name, image: container.image, imageId: container.imageId ?? null, built: container.built ?? false, cleanup: container.cleanup ?? null }
       : null,
     warnings,
     // Only adapters that drive the tool loop themselves can score it; for a

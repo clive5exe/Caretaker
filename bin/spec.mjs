@@ -125,7 +125,9 @@ export function toLimits(dev) {
   return {
     memory: hr.memory ?? "2gb",
     cpus: String(hr.cpus ?? 2),
-    image: dev?.image ?? dev?.build?.dockerfile ?? null,
+    // A `build.dockerfile` is not an image name; it is built by
+    // environment.mjs (E-5), which is the one place that resolves an image.
+    image: dev?.image ?? null,
     features: Object.keys(dev?.features ?? {}),
     readOnlyRoot: true,
     // Never. Mounting the container socket is root on the host, and it is how

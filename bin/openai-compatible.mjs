@@ -235,7 +235,7 @@ const systemPrompt = (containerised, skills) =>
  * file, toolUse }, never throws for an outcome (a failed or killed run is a
  * result), and throws only when nothing could run at all.
  */
-export async function openaiCompatibleAdapter({ workspace, prompt, policy, paths, warnings, HarnessError }) {
+export async function openaiCompatibleAdapter({ workspace, prompt, policy, paths, warnings, HarnessError, imageFor }) {
   if (!policy.endpoint) throw new HarnessError('adapter "openai-compatible" needs policy.endpoint, e.g. http://localhost:11434/v1');
   if (!policy.model) throw new HarnessError('adapter "openai-compatible" needs policy.model; the server serves more than one');
   const url = `${String(policy.endpoint).replace(/\/+$/, "")}/chat/completions`;
@@ -257,8 +257,7 @@ export async function openaiCompatibleAdapter({ workspace, prompt, policy, paths
   } else {
     const dev = readDevcontainer(policy.devcontainer);
     const limits = toLimits(dev);
-    const image = policy.image ?? limits.image;
-    if (!image) throw new HarnessError(`no image: set policy.image, or an "image" in ${policy.devcontainer}`);
+    const { image, imageId, built } = imageFor(policy, dev, warnings);
     for (const m of checkLimits(["memory", "cpus", "pids"], delegatedControllers().controllers)) {
       limits[m.limit] = null;
       warnings.push(`not limiting ${m.limit} — no "${m.controller}" cgroup controller is delegated, so the flag is omitted. This run is NOT bounded on ${m.limit}.`);
@@ -277,7 +276,7 @@ export async function openaiCompatibleAdapter({ workspace, prompt, policy, paths
         file: policy.sandbox,
       };
     }
-    container = { runtime: policy.sandbox, name, image };
+    container = { runtime: policy.sandbox, name, image, imageId, built };
     ex = containerExecutor(container);
   }
 

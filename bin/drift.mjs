@@ -161,7 +161,7 @@ export function loadSpecs(specsDir, { repo = "." } = {}) {
     // The globs are used even when the parse failed: a spec with one bad line
     // still tells us what it claims, and dropping its claims would turn its
     // paths into false "unowned" rows on top of the error already reported.
-    specs.push({ id, governs: (spec?.governs ?? []).map(norm), errors: ok ? [] : errors });
+    specs.push({ id, governs: (spec?.governs ?? []).map(norm), hosts: spec?.hosts ?? [], errors: ok ? [] : errors });
   }
   return { specs, skipped };
 }

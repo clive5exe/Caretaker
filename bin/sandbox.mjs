@@ -238,7 +238,11 @@ if (isEntry) {
     const limits = toLimits(dev);
     const image = flags.image ?? limits.image;
     if (!image) {
-      console.error("no image: give --image or set `image` in devcontainer.json");
+      console.error(
+        dev?.build?.dockerfile
+          ? "no image: devcontainer.json builds one; run `node bin/environment.mjs image` and pass the tag it prints as --image"
+          : "no image: give --image or set `image` in devcontainer.json",
+      );
       process.exit(2);
     }
     const workdir = resolve(flags.workdir ?? process.cwd());

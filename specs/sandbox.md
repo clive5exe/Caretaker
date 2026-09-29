@@ -6,7 +6,7 @@ updated: 2026-09-29
 
 ```spec
 hosts:   api.anthropic.com
-governs: bin/sandbox.mjs, bin/egress.mjs, bin/netns.mjs
+governs: bin/sandbox.mjs, bin/egress.mjs, bin/netns.mjs, bin/environment.mjs
 ```
 
 # The sandbox
@@ -33,6 +33,35 @@ sandbox is usually sold against. Hosts come from the `hosts:` field above, plus
 the registries implied by the toolchains `devcontainer.json` declares. Everything
 else is refused with a 403 and a reason, and logged — a silent drop is
 indistinguishable from a broken network and gets debugged as one.
+
+## The image, every run
+
+Nothing persists between runs except the repo. The container is `--rm`, its
+root is read-only and its writable places are tmpfs, so a package an agent
+installs by hand is gone when the run ends. If something is needed, the
+declaration changes and the image is rebuilt; drift at this layer is made
+impossible rather than detected.
+
+The image comes from `devcontainer.json`, resolved in one place
+(`environment.mjs`): an explicit `--image`, else its `image`, else its
+`build.dockerfile`, **built on every run**. podman's layer cache makes an
+unchanged build cheap, and unlike a tag keyed on a hash of the Dockerfile it
+also sees a change to a file the Dockerfile copies. A build-only devcontainer is
+never handed to podman as if its Dockerfile path were an image name. Each run
+records the image id it ran in, because a tag moves.
+
+Devcontainer `features` are not installed by this runner; that is the
+devcontainer CLI's job. They are named in a warning rather than skipped.
+
+## Asking the environment what it has
+
+`environment.mjs check` runs a probe inside the same sandbox a run gets, behind
+the same per-run proxy when asked for egress, and names every difference from
+the declaration: a declared toolchain missing or at another version, one present
+that nobody declared, a declared service this runner does not start, a declared
+host that cannot be reached, and an undeclared host that can. That last one
+means egress is open. On `--network none` no host can be reached, and that is
+stated once rather than reported as every host being down.
 
 ## Egress belongs to one run
 
