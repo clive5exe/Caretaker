@@ -165,6 +165,18 @@ ok("a missing devcontainer.json is null, not a throw", readDevcontainer(join(wor
 }
 
 {
+  // The reviewer's cases: a toolchain name inside another word, or in the
+  // devcontainer's free-text name, opened hosts nobody declared.
+  const { spec } = parseSpec(block("governs: src/**"));
+  const allow = (dev) => toEgress(spec, dev).allow;
+  ok("an image named javascript-node does not imply java's registry", !allow({ image: "mcr.microsoft.com/devcontainers/javascript-node:1" }).includes("repo1.maven.org"));
+  ok("the devcontainer's free-text name implies nothing", allow({ name: "Let us go, trustworthy rust" }).length === 0, JSON.stringify(allow({ name: "Let us go, trustworthy rust" })));
+  ok("a feature whose name only CONTAINS a toolchain implies nothing", allow({ features: { "ghcr.io/acme/trustworthy:1": {}, "ghcr.io/acme/golden:2": {} } }).length === 0);
+  ok("an image that IS a toolchain implies its registry", allow({ image: "docker.io/library/node:22-alpine" }).join() === "registry.npmjs.org");
+  ok("a prototype key is not a toolchain", allow({ features: { "x/constructor:1": {}, "x/__proto__:1": {} } }).length === 0);
+}
+
+{
   const { spec } = parseSpec(block("governs: src/**"));
   ok("no devcontainer at all still yields an empty, closed allowlist",
     toEgress(spec, null).allow.length === 0 && toEgress(spec, null).denyByDefault === true);

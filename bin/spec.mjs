@@ -157,33 +157,45 @@ export function toLimits(dev) {
  * devcontainer FEATURES rather than a hand-written runtime field, because the
  * features are already declared and already say which toolchain is present.
  */
-const FEATURE_REGISTRY = [
-  [/node|javascript|typescript/i, ["registry.npmjs.org"]],
-  [/python/i, ["pypi.org", "files.pythonhosted.org"]],
-  [/\bgo\b|golang/i, ["proxy.golang.org", "sum.golang.org"]],
-  [/rust/i, ["static.crates.io", "index.crates.io"]],
-  [/ruby/i, ["rubygems.org"]],
-  [/java|maven|gradle/i, ["repo1.maven.org"]],
-];
+const REGISTRIES = {
+  node: ["registry.npmjs.org"],
+  python: ["pypi.org", "files.pythonhosted.org"],
+  go: ["proxy.golang.org", "sum.golang.org"],
+  golang: ["proxy.golang.org", "sum.golang.org"],
+  rust: ["static.crates.io", "index.crates.io"],
+  ruby: ["rubygems.org"],
+  java: ["repo1.maven.org"],
+  maven: ["repo1.maven.org"],
+  gradle: ["repo1.maven.org"],
+};
+
+/**
+ * The toolchain a feature id or image names: the last path segment, before
+ * its tag, exactly. `ghcr.io/devcontainers/features/node:1` and `node:22` are
+ * node; `javascript-node`, `java-17` and "Let us go" are nothing. Matching part
+ * of a word opened undeclared hosts: `java` inside "javascript" allowed
+ * maven, and a devcontainer NAME containing "go" allowed the Go proxy
+ * (independent review, reproduced). The devcontainer's free-text `name` is
+ * not read at all.
+ */
+export const toolchainOf = (ref) => {
+  const last = String(ref ?? "").split("@")[0].split("/").pop() ?? "";
+  return last.split(":")[0].toLowerCase();
+};
 
 /**
  * The allowlist: the hosts the spec declared, plus the registries the declared
  * toolchains need.
  *
- * AN UNRECOGNISED FEATURE IMPLIES NOTHING. Guessing a registry for a toolchain
- * we do not know would open a host nobody declared, which is the one direction
- * this must never fail in.
+ * AN UNRECOGNISED TOOLCHAIN IMPLIES NOTHING. Guessing a registry for a
+ * toolchain we do not know would open a host nobody declared, which is the one
+ * direction this must never fail in; a project that needs one says so in
+ * `hosts:`.
  */
 export function toEgress(spec, dev) {
   const declared = spec.hosts ?? [];
-  const names = [
-    ...Object.keys(dev?.features ?? {}),
-    dev?.image ?? "",
-    dev?.name ?? "",
-  ].join(" ");
-  const implicit = [
-    ...new Set(FEATURE_REGISTRY.filter(([re]) => re.test(names)).flatMap(([, hosts]) => hosts)),
-  ];
+  const names = [...Object.keys(dev?.features ?? {}), dev?.image ?? ""].map(toolchainOf);
+  const implicit = [...new Set(names.flatMap((n) => (Object.hasOwn(REGISTRIES, n) ? REGISTRIES[n] : [])))];
   return {
     allow: [...new Set([...implicit, ...declared])].sort(),
     // Stated rather than implied: a proxy that silently drops is
