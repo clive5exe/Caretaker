@@ -257,13 +257,13 @@
           "title": "CLI adapter by default, SDK adapter alongside it",
           "owner": "backend",
           "est": "2d",
-          "status": "todo",
+          "status": "doing",
           "deps": [
             "H-1"
           ],
           "spec": "docs/vendors.md",
           "ac": "the default adapter shells out to an agent CLI running INSIDE the dev environment, so a subscription login works and tools execute sandboxed; an SDK adapter exists for API-key use with the model call above the environment; both satisfy the same seam, and the tool-use fixture scores any candidate on well-formed calls, stopping when done, and not inventing a tool",
-          "note": "CLI IS THE DEFAULT BECAUSE THAT IS WHERE SUBSCRIPTION AUTH LIVES. The SDKs are API-key only; `claude login` against a Pro or Max plan, and the ChatGPT equivalent, exist only in the CLIs. Defaulting to the SDK would quietly mean paying API rates on top of a subscription somebody already has.\n\nRUNNING THE CLI INSIDE THE DEV ENVIRONMENT KEEPS THE SANDBOX. The CLI needs the model API, which is exactly what the egress allowlist is for - one declared host - and its tools then execute inside the container, which is where they were wanted anyway. What is lost is clean layering: the CLI spans harness and dev environment. What is kept is the seam, which accommodates both hook points, and that is the point of putting it there.\n\nThe adapter is per-API rather than per-model: everything self-hosted speaks an OpenAI-compatible endpoint, so DeepSeek or Qwen behind vLLM is a config line. The discriminator is tool-use reliability, not benchmark score - a model that codes well and emits malformed tool calls burns the loop and produces nothing."
+          "note": "CLI IS THE DEFAULT BECAUSE THAT IS WHERE SUBSCRIPTION AUTH LIVES. The SDKs are API-key only; `claude login` against a Pro or Max plan, and the ChatGPT equivalent, exist only in the CLIs. Defaulting to the SDK would quietly mean paying API rates on top of a subscription somebody already has.\n\nRUNNING THE CLI INSIDE THE DEV ENVIRONMENT KEEPS THE SANDBOX. The CLI needs the model API, which is exactly what the egress allowlist is for - one declared host - and its tools then execute inside the container, which is where they were wanted anyway. What is lost is clean layering: the CLI spans harness and dev environment. What is kept is the seam, which accommodates both hook points, and that is the point of putting it there.\n\nThe adapter is per-API rather than per-model: everything self-hosted speaks an OpenAI-compatible endpoint, so DeepSeek or Qwen behind vLLM is a config line. The discriminator is tool-use reliability, not benchmark score - a model that codes well and emits malformed tool calls burns the loop and produces nothing. — SDK half built: the openai-compatible adapter makes the model call in the harness process and executes tools inside the run's container via podman exec, so net:none works. bin/tool-fixture.mjs scores a candidate on well-formed calls, stopping, not inventing tools, and doing the task. The cli adapter stays the default. Gate verdicts not recorded."
         },
         {
           "id": "H-1",
@@ -289,13 +289,13 @@
           "title": "Second vendor, and it should be a LOCAL model",
           "owner": "backend",
           "est": "1d",
-          "status": "todo",
+          "status": "doing",
           "deps": [
             "H-1"
           ],
           "ac": "a second agent CLI runs behind the same interface with no change above it; if the interface had to change, that change is recorded as what the first vendor had baked in",
           "spec": "docs/vendors.md",
-          "note": "A second frontier API would agree with the first about almost everything and prove almost nothing. An OpenAI-compatible local model stresses the seam properly: different tool-call quirks, NO PROMPT CACHING so the cost model changes completely, smaller context so selection has to actually work, and GPU contention instead of hosted rate limits."
+          "note": "A second frontier API would agree with the first about almost everything and prove almost nothing. An OpenAI-compatible local model stresses the seam properly: different tool-call quirks, NO PROMPT CACHING so the cost model changes completely, smaller context so selection has to actually work, and GPU contention instead of hosted rate limits. — Built: bin/openai-compatible.mjs, a second adapter behind the unchanged seam, for Ollama/vLLM/llama.cpp and anything OpenAI-compatible. Checked by bin/openai-compatible.test.mjs against a scripted server and mutation-checked; its live container half runs in CI. What the interface had to change is recorded in docs/vendors.md 'What the second vendor showed'. NOT yet run against a real local model: that needs a GPU box and one run of bin/tool-fixture.mjs. Gate verdicts not recorded."
         },
         {
           "id": "H-3",

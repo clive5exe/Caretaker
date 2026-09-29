@@ -55,6 +55,9 @@
  * Usage:
  *   node bin/harness.mjs run --workspace DIR --prompt-file F [--adapter cli]
  *                            [--cli claude|codex] [--timeout MS] [--json]
+ *   node bin/harness.mjs run --workspace DIR --prompt-file F --adapter openai-compatible
+ *                            --endpoint http://localhost:11434/v1 --model M
+ *                            [--api-key-env VAR] [--max-turns N]
  *   node bin/harness.mjs adapters
  */
 import { spawn, spawnSync } from "node:child_process";
@@ -66,6 +69,7 @@ import { pathToFileURL } from "node:url";
 import { DEFAULT_DIR as DEFAULT_EVENTS_DIR, STAGES, append as appendEvents } from "./events.mjs";
 import { buildArgs, checkLimits, delegatedControllers } from "./sandbox.mjs";
 import { readDevcontainer, toLimits } from "./spec.mjs";
+import { openaiCompatibleAdapter } from "./openai-compatible.mjs";
 
 /**
  * The seam, as data. Exported so a test can assert the shape rather than trust
@@ -116,6 +120,12 @@ const DEFAULTS = {
   events: null,
   task: null,
   stage: "build",
+  // The openai-compatible adapter (H-2): the server's base URL, the NAME of an
+  // environment variable holding a key (never the key), and a turn ceiling
+  // so a model that never stops is a failed run, not a hung one.
+  endpoint: null,
+  apiKeyEnv: null,
+  maxTurns: 50,
 };
 
 const newRunId = () => `r_${randomBytes(4).toString("hex")}`;
@@ -853,6 +863,7 @@ async function sdkAdapter() {
 export const ADAPTERS = {
   cli: cliAdapter,
   sdk: sdkAdapter,
+  "openai-compatible": (args) => openaiCompatibleAdapter({ ...args, HarnessError }),
 };
 
 /** Which adapters exist, for an error message and for the CLI. */
@@ -1029,21 +1040,26 @@ export async function run(workspace, prompt, policy = {}) {
     startedAt,
     endedAt: new Date().toISOString(),
     adapter: p.adapter,
-    cli: typeof p.cli === "string" ? p.cli : "custom",
+    // Only the cli adapter runs a CLI. Naming the default ("claude") on a run
+    // that went through another adapter would record a vendor that never ran.
+    cli: p.adapter === "cli" ? (typeof p.cli === "string" ? p.cli : "custom") : null,
     runId: p.runId,
     container: container
       ? { runtime: container.runtime, name: container.name, image: container.image, cleanup: container.cleanup ?? null }
       : null,
     warnings,
+    // Only adapters that drive the tool loop themselves can score it; for a
+    // CLI the loop is inside the vendor's binary and this stays absent.
+    ...(result.toolUse ? { toolUse: result.toolUse } : {}),
   };
 
   const cost = parseUsage(stdoutText, {
     billing: p.billing,
-    source: `${verdict.cli}-json`,
+    source: verdict.cli ? `${verdict.cli}-json` : `${p.adapter}-usage`,
   });
   if (!cost.reported) {
     cost.note =
-      `${verdict.cli} reported no usage in its output; null means unknown, not zero. ` +
+      `${verdict.cli ?? p.adapter} reported no usage in its output; null means unknown, not zero. ` +
       "The run still spent tokens as effort.";
   }
 
@@ -1113,6 +1129,9 @@ if (isEntry) {
       ...(flags.devcontainer ? { devcontainer: flags.devcontainer } : {}),
       ...(flags["log-dir"] ? { logDir: flags["log-dir"] } : {}),
       ...(flags.billing ? { billing: flags.billing } : {}),
+      ...(flags.endpoint ? { endpoint: flags.endpoint } : {}),
+      ...(flags["api-key-env"] ? { apiKeyEnv: flags["api-key-env"] } : {}),
+      ...(flags["max-turns"] ? { maxTurns: Number(flags["max-turns"]) } : {}),
     };
     try {
       const out = await run(workspace, prompt, policy);

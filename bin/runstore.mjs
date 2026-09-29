@@ -278,6 +278,7 @@ if (isEntry) {
   const KNOWN = new Set([
     "workspace", "prompt-file", "prompt", "config", "state-dir", "task", "parent", "secret",
     "adapter", "cli", "model", "sandbox", "net", "timeout", "image", "egress", "egress-network",
+    "endpoint", "api-key-env", "max-turns",
   ]);
   const flags = { secret: [] };
   for (let i = 0; i < argv.length; i++) {
@@ -318,6 +319,9 @@ if (isEntry) {
       ...(flags.sandbox ? { sandbox: flags.sandbox } : {}),
       ...(flags.net ? { net: flags.net } : {}),
       ...(flags.image ? { image: flags.image } : {}),
+      ...(flags.endpoint ? { endpoint: flags.endpoint } : {}),
+      ...(flags["api-key-env"] ? { apiKeyEnv: flags["api-key-env"] } : {}),
+      ...(flags["max-turns"] ? { maxTurns: Number(flags["max-turns"]) } : {}),
       ...(flags.timeout ? { timeoutMs: Number(flags.timeout) } : {}),
     };
     try {
