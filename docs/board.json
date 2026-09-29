@@ -992,7 +992,14 @@
             "C-1"
           ],
           "ac": "serve binds loopback only, exchanges a one-time token for an HttpOnly SameSite=Strict cookie, checks Host and Origin exactly, sends a strict CSP, and serves only allowlisted run files; each control is attacked in a test",
-          "note": "Spec: specs/caretaker-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built in PR #9, which also carries C-1, C-2, C-3, C-6 and U-2. Gate verdicts not recorded: nobody closes their own work. Needs security."
+          "note": "Spec: specs/caretaker-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built in PR #9, which also carries C-1, C-2, C-3, C-6 and U-2. Gate verdicts not recorded: nobody closes their own work. Needs security.",
+          "gate": {
+            "reviewer": {
+              "verdict": "fail",
+              "at": "2026-09-29",
+              "note": "Independent review (fresh agent, not the builder): the controls themselves are right (loopback-only bind, 256-bit in-process token, timingSafeEqual on /auth and cookie, HttpOnly SameSite=Strict port-named cookie, 302 to /, exact Host on every request, exact Origin + application/json + X-Caretaker on POST, no CORS, CSP, run-id regex, fixed names, realpath under the archive), and mutating host, X-Caretaker, content-type, cookie compare, realpath and sandbox CSP each turns serve.test red. But the static-traversal attack is decorative: serve.test.mjs:252 requests /..%2f..%2fdocs%2fboard.json, which from dist=<root>/dist resolves to the fixture's PARENT, so it can never hit board.json. Deleting the prefix check at serve.mjs:170 leaves the suite green, and with it deleted /..%2fdocs%2fboard.json returns the board (reproduced in a copy). The AC says each control is attacked in a test; this one is not. Fix: one level of ../ and assert 404."
+            }
+          }
         },
         {
           "id": "W-2",
@@ -1006,7 +1013,14 @@
             "C-3"
           ],
           "ac": "every read route goes through readmodel.mjs and carries sources, so absent data renders as not recorded",
-          "note": "Spec: specs/caretaker-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built in PR #9, which also carries C-1, C-2, C-3, C-6 and U-2. Gate verdicts not recorded: nobody closes their own work."
+          "note": "Spec: specs/caretaker-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built in PR #9, which also carries C-1, C-2, C-3, C-6 and U-2. Gate verdicts not recorded: nobody closes their own work.",
+          "gate": {
+            "reviewer": {
+              "verdict": "fail",
+              "at": "2026-09-29",
+              "note": "Independent review (fresh agent, not the builder): routes do go through readmodel and carry sources, and the numbers are dashboard.metrics'/kpis.mjs's. But the event log is served unredacted over REST while the same records are redacted on the stream: readmodel.mjs:128 eventLog() feeds /events (:700), /snapshot (:641), /work/:id (:331), /runs/:id (:477) and /specs (:590) raw, whereas serve.mjs:81 runs redactShapes on every streamed line. Reproduced: an event with detail 'leaked sk-ant-…' came back verbatim from /events, /snapshot, /work/W-2 and /inbox, and serve.test's 'a key in a streamed event is redacted' passes over the same record. Events are written unredacted on disk (TECH Findings 4), so the second pass is the only one; apply redactShapes to event records on the REST path too, and test it there."
+            }
+          }
         },
         {
           "id": "W-3",
@@ -1018,7 +1032,14 @@
             "W-1"
           ],
           "ac": "the stream tails append-only files from a byte offset, holds a partial line, and resumes from Last-Event-ID with no gap or duplicate",
-          "note": "Spec: specs/caretaker-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built in PR #9, which also carries C-1, C-2, C-3, C-6 and U-2. Gate verdicts not recorded: nobody closes their own work."
+          "note": "Spec: specs/caretaker-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built in PR #9, which also carries C-1, C-2, C-3, C-6 and U-2. Gate verdicts not recorded: nobody closes their own work.",
+          "gate": {
+            "reviewer": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "note": "Independent review (fresh agent, not the builder): tailFile reads from a byte offset, holds a partial final line, skips and counts unparseable lines; ids carry every file's offset so a Last-Event-ID reconnect resumes each file with no gap or duplicate, files that appear later are read from 0; invalidate on board rewrite and archive listing change; fs.watch plus a stat poll; heartbeat. serve.test's half-line, one-event and resume checks are green. Nits: the hello event carries no id, so a client that saw no log line reconnects without Last-Event-ID and skips events appended while it was away (REST refetch covers the page, not the live feed); a single line longer than the 8 MiB read window stalls the tail at that offset forever (serve.mjs:63-90); the per-run stream has no heartbeat."
+            }
+          }
         },
         {
           "id": "W-4",
@@ -1031,7 +1052,14 @@
             "C-6"
           ],
           "ac": "POST commands dispatch only to board.mjs exports; a core refusal returns 409 with core's own words",
-          "note": "Spec: specs/caretaker-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built in PR #9, which also carries C-1, C-2, C-3, C-6 and U-2. Gate verdicts not recorded: nobody closes their own work. Needs security."
+          "note": "Spec: specs/caretaker-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built in PR #9, which also carries C-1, C-2, C-3, C-6 and U-2. Gate verdicts not recorded: nobody closes their own work. Needs security.",
+          "gate": {
+            "reviewer": {
+              "verdict": "fail",
+              "at": "2026-09-29",
+              "note": "Independent review (fresh agent, not the builder): dispatch is right: 12 allowlisted commands to board.command under board.mutate's lock, verdicts 400, core refusal 409 verbatim, unknown task 404. But TECH §1 Identity says a web mutation records by=operator with via:web so browser and CLI actions can be told apart, and 5 of the 12 do not: start, block, todo, note and done go through transition() (board.mjs:524), which takes no opts, so readmodel.mjs:735-740 builds {by, via} and it is dropped. Reproduced in a copy: a web note and a web block left no by/via on the task, and a web 'done' would be indistinguishable from a CLI close. The UI then says the opposite: ui.tsx:282 prints 'Recorded by the operator, via web.' under every command form (including note and block) and Settings.tsx:119 says 'recorded as by on every command, with via web'. Record by/via for transitions in core, or stop claiming it."
+            }
+          }
         },
         {
           "id": "W-5",
@@ -1043,7 +1071,14 @@
             "W-2"
           ],
           "ac": "web/ builds, and bin/web-boundary.test.mjs fails if web/src imports bin/, a vendor SDK, innerHTML, or names a gate or stage outside the label map",
-          "note": "Spec: specs/caretaker-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built in PR #9, which also carries C-1, C-2, C-3, C-6 and U-2. Gate verdicts not recorded: nobody closes their own work."
+          "note": "Spec: specs/caretaker-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built in PR #9, which also carries C-1, C-2, C-3, C-6 and U-2. Gate verdicts not recorded: nobody closes their own work.",
+          "gate": {
+            "reviewer": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "note": "Independent review (fresh agent, not the builder): web/ builds (tsc --noEmit + vite build, in a copy); api/client.ts is the one typed client, same-origin, writes send application/json and X-Caretaker; store.ts is one resource-keyed cache refetched on invalidate and one EventSource. web-boundary.test plants each banned pattern and sees it caught by rule name before scanning the tree (24 files clean); gate names are read from core's missingGates and stages from lifecycle.STAGES rather than retyped; the vendor list matches harness.test's. Nits: 'ready' and 'dropped' are not in STAGES, so a literal of either outside labels.ts is not caught; the scan covers web/src only, not web/index.html or vite.config.ts."
+            }
+          }
         },
         {
           "id": "W-6",
@@ -1055,7 +1090,14 @@
             "W-5"
           ],
           "ac": "each page renders only server-given stage, reasons and commands, and says not recorded where a source is absent",
-          "note": "Spec: specs/caretaker-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built in PR #9, which also carries C-1, C-2, C-3, C-6 and U-2. Gate verdicts not recorded: nobody closes their own work."
+          "note": "Spec: specs/caretaker-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built in PR #9, which also carries C-1, C-2, C-3, C-6 and U-2. Gate verdicts not recorded: nobody closes their own work.",
+          "gate": {
+            "reviewer": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "note": "Independent review (fresh agent, not the builder): Dashboard, Activity, Work item, Inbox, Specs and Settings render the server's lifecycle, reason, missingGates, requiredGates and commands; buttons and the Inbox's actions come only from commands; no verdict buttons; agent text is rendered as text nodes (no innerHTML, PR urls shown as text not links); absent sources say not recorded; read/unread only in localStorage; no Resolve button. Notes: the 'via web' claims in ui.tsx:282 and Settings.tsx:119 are false until W-4 records by/via on transitions; the Dashboard feed dedupes stream and REST events by t|detail, so a record with a key shows twice (redacted and raw) until W-2 is fixed; WorkItem computes open questions client-side (display only)."
+            }
+          }
         },
         {
           "id": "W-7",
@@ -1069,7 +1111,14 @@
             "C-5"
           ],
           "ac": "the run pages show archived runs' identity, diff, transcript, egress and parent/child, and not recorded for anything unarchived",
-          "note": "Spec: specs/caretaker-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Pages built in PR #9. Their data arrives with C-4 and C-5 on this branch."
+          "note": "Spec: specs/caretaker-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Pages built in PR #9. Their data arrives with C-4 and C-5 on this branch.",
+          "gate": {
+            "reviewer": {
+              "verdict": "fail",
+              "at": "2026-09-29",
+              "note": "Independent review (fresh agent, not the builder): Runs, Run detail and Agents read the server's folded runs (legacy apart, reconstructed labelled, no end recorded after staleRunHours) and show not recorded per section. But the Egress tab mislabels every host: egress.mjs records are {t, kind: allowed|refused|error, host, port, reason|why} (egress.mjs:83,91,106,116), while RunDetail.tsx:86 parses decision/allowed, which never exist, so line 367 computes allowed=false for every row and line 378 prints 'refused' in a red chip for hosts the proxy ALLOWED; the refusal reason is never shown. On the one page meant to show what a run reached, allowed traffic reads as blocked. Also stale: RunDetail.tsx:352 says egress waits on C-5, which is built; TECH says 'no proxy was attached to this run'."
+            }
+          }
         },
         {
           "id": "W-14",
