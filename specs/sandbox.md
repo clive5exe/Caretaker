@@ -78,6 +78,11 @@ host that cannot be reached, and an undeclared host that can. That last one
 means egress is open. On `--network none` no host can be reached, and that is
 stated once rather than reported as every host being down.
 
+Hosts reach a shell in that probe, and with `--sandbox none` the shell is the
+host's. So a `hosts:` entry must be a host name (two or more DNS labels, or
+`.example.com` for its subdomains); anything else is refused when the spec is
+parsed, and refused again by the probe itself.
+
 ## Egress belongs to one run
 
 A run started with a proxy gets its own `--internal` network and its own proxy
