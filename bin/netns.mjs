@@ -92,6 +92,7 @@
  *   netns.mjs teardown <name...>
  */
 import { execFileSync, spawnSync } from "node:child_process";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
@@ -309,7 +310,7 @@ function attackerRun({ network, image, cmd, extraArgs = [], timeoutMs = 15000 })
 }
 
 /**
- * E-3, made runnable rather than left as a claim. Five attacks against a LIVE
+ * E-3, made runnable rather than left as a claim. Six attacks against a LIVE
  * network + proxy — this shells out to real `podman run` invocations, same as
  * a human would from the command line, and returns each command alongside its
  * real output so a report can quote it rather than paraphrase it.
@@ -331,6 +332,7 @@ export function runAttackSuite({
   victimNetwork = null,
   victimHost = null, // "ip:port" of a container on victimNetwork, if reachability across networks is being checked
   hostProbe = null, // "host:port" of something bound on the real host, if that check is wanted
+  rawIp = "1.1.1.1", // a public address, dialled by number so no name lookup is involved
   agentImage = "docker.io/library/nginx:alpine", // has curl AND busybox wget; nothing here is agent-specific
 }) {
   if (!internalNetwork) throw new Error("runAttackSuite needs internalNetwork");
@@ -389,6 +391,20 @@ export function runAttackSuite({
     );
   }
 
+  // 3b. The same bypass by NUMBER. Attack 3 dials a name, and on a network
+  // with DNS off it fails at "Could not resolve host", which proves there is
+  // no DNS, not that there is no route (independent review). A raw IP skips
+  // the lookup, so only a missing route can stop it, and a DNS failure here
+  // would mean the test did not test what it says.
+  {
+    const command = `curl -sS https://${rawIp}/ -o /dev/null -w 'HTTP_STATUS=%{http_code}' --max-time 8 2>&1`;
+    record(
+      "bypassing the proxy by raw IP finds no route",
+      (out) => out.status !== 0 && !/Could not resolve/.test(out.stdout) && !/HTTP_STATUS=[1-5]\d\d/.test(out.stdout),
+      { command, out: attack(command) },
+    );
+  }
+
   // 4. Reach another container on the host (a different, non-internal
   // network) — must fail. Optional: needs a victim already running.
   if (victimHost) {
@@ -413,6 +429,16 @@ export function runAttackSuite({
   }
 
   return results;
+}
+
+/**
+ * E-3: the attacks' commands and their real output, written where a person
+ * can read them after the run, not only to a test's stdout. One JSON file.
+ */
+export function writeAttackReport(path, results, meta = {}) {
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, `${JSON.stringify({ at: new Date().toISOString(), ...meta, results }, null, 2)}\n`);
+  return path;
 }
 
 /* --------------------------------------------------------------------- cli */

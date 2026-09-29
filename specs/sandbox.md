@@ -139,3 +139,20 @@ not have is worse than none.
 network the container sits on, because setting a proxy variable is advisory and a
 process that ignores it is not stopped by the proxy. That enforcement is
 `bin/netns.mjs`, and it is worth nothing until something has tried to break it.
+
+## What has tried to break it
+
+Run live in CI, where rootless podman is available. Each attack's command and
+real output are written to a JSON report, and printed whether it passed or not.
+
+- **The network** (`bin/netns.test.mjs`, `runAttackSuite`): an allowed host
+  through the proxy (must work), a refused host through the proxy (403), a
+  bypass by hostname, a bypass by raw IP (no name lookup, so only a missing
+  route can stop it), a container on a sibling network, and a service on the
+  host itself.
+- **The container** (`bin/sandbox.test.mjs`): memory exhausted under a 64 MiB
+  ceiling is killed inside the container (skipped where no ceiling can be
+  enforced, since it would then take the host's memory); no container-runtime
+  socket is reachable, with a control that the same hunt finds one that is
+  mounted; the root filesystem refuses a write; there is no route off a
+  `--network none` container.

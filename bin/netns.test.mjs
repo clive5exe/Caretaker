@@ -20,7 +20,8 @@
  */
 import { spawnSync } from "node:child_process";
 import { createServer } from "node:http";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import {
   agentHostArgs,
@@ -31,6 +32,7 @@ import {
   proxyRunArgs,
   removeNetworkArgs,
   runAttackSuite,
+  writeAttackReport,
 } from "./netns.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -243,12 +245,18 @@ if (podmanAvailable !== "true") {
         hostProbe: `host.containers.internal:${hostServerPort}`,
         agentImage: AGENT_IMAGE,
       });
+      // E-3: every command and its real output, recorded where it can be read
+      // after the run, and printed whether it passed or not (independent
+      // review: only stdout was kept, and only on failure).
+      const report = writeAttackReport(process.env.ATTACK_REPORT ?? join(tmpdir(), `caretaker-netns-attacks-${process.pid}.json`), results, { suite: "netns" });
+      console.log(`[netns] attack report: ${report}`);
       for (const r of results) {
+        console.log(`  $ ${r.command}\n    exit ${r.exitStatus}: ${(r.stdout || r.stderr).split("\n").slice(-2).join(" / ")}`);
         ok(`live attack: ${r.name}`, r.passed, `$ ${r.command}\n       -> ${r.stdout || r.stderr}`);
       }
       ok(
-        "live attack: exactly five attacks were run (the ones this task named)",
-        results.length === 5,
+        "live attack: exactly six attacks were run (the five this task named, and the raw-IP bypass)",
+        results.length === 6,
         `ran ${results.length}: ${results.map((r) => r.name).join(" | ")}`,
       );
 

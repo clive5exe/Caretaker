@@ -125,9 +125,9 @@ if (runtime.chosen !== "podman") {
 } else if (!haveImage) {
   skip("live: the limits actually bind", `image ${IMAGE} not present locally`);
 } else {
-  const inside = (script) => {
+  const inside = (script, over = {}) => {
     const missing = checkLimits(["memory", "cpus", "pids"], delegatedControllers().controllers);
-    const limits = { ...LIMITS };
+    const limits = { ...LIMITS, ...over };
     for (const m of missing) limits[m.limit] = null;
     const a = buildArgs({ image: IMAGE, limits, workdir: process.cwd(), cmd: ["sh", "-c", script] });
     return spawnSync("podman", a, { encoding: "utf8" });
@@ -178,6 +178,58 @@ if (runtime.chosen !== "podman") {
       r.stdout.trim() || "the request SUCCEEDED, so --network none is not in effect",
     );
   }
+
+  // E-3 (independent review): the memory and socket attacks were never
+  // attempted, only a read of memory.max and a string check for ".sock".
+  // Each is now run, and its command and output are recorded in a report.
+  const attacks = [];
+  const attackRun = (name, command, over, passed) => {
+    const r = inside(command, over);
+    const out = { name, command, stdout: String(r.stdout ?? "").trim(), stderr: String(r.stderr ?? "").trim(), exitStatus: r.status };
+    out.passed = passed(out);
+    attacks.push(out);
+    console.log(`  $ ${command}\n    exit ${out.exitStatus}: ${(out.stdout || out.stderr).split("\n").slice(-2).join(" / ")}`);
+    ok(`live attack: ${name}`, out.passed, out.stdout || out.stderr);
+  };
+  if (checkLimits(["memory"], delegatedControllers().controllers).length) {
+    // Without an enforced ceiling this attack would take the HOST's memory.
+    skip("live attack: exhausting memory is stopped by the ceiling", "the memory controller is not delegated here, so there is no ceiling to attack");
+  } else {
+    // A string that doubles until something stops it. Under a 64 MiB ceiling
+    // the kernel kills it (137) inside the container, and the host carries on.
+    attackRun(
+      "exhausting memory is stopped by the ceiling, inside the container",
+      `awk 'BEGIN { s = "x"; while (1) s = s s }'; echo "EXIT=$?"; grep oom_kill /sys/fs/cgroup/memory.events`,
+      { memory: "64m" },
+      (o) => /EXIT=137/.test(o.stdout) || /oom_kill [1-9]/.test(o.stdout),
+    );
+  }
+  const SOCKET_HUNT = `for s in /var/run/docker.sock /run/docker.sock /run/podman/podman.sock /var/run/podman/podman.sock /run/user/*/podman/podman.sock; do [ -S "$s" ] && echo "SOCKET $s"; done; find / \\( -path /proc -o -path /sys \\) -prune -o -type s -print 2>/dev/null | sed 's/^/SOCKET /'; curl -sS --max-time 3 --unix-socket /run/podman/podman.sock http://d/_ping 2>&1 | head -1; echo DONE`;
+  // Every place a container-runtime socket lives, and any socket anywhere in
+  // the container, mounts included (a mounted socket is on another device, so
+  // no -xdev). Driving one is root on the host.
+  attackRun(
+    "no container-runtime socket is reachable from inside",
+    SOCKET_HUNT,
+    {},
+    (o) => /DONE/.test(o.stdout) && !/^SOCKET /m.test(o.stdout) && !/^OK$/m.test(o.stdout),
+  );
+  {
+    // CONTROL for the attack above: the same hunt, in a container that DOES
+    // have a socket mounted, must find it. Otherwise "no socket found" could
+    // just mean the hunt cannot see one.
+    const { createServer } = await import("node:net");
+    const dir = mkdtempSync(join(tmpdir(), "sock-control-"));
+    const sock = join(dir, "s.sock");
+    const srv = createServer();
+    await new Promise((res) => srv.listen(sock, res));
+    const ctl = spawnSync("podman", ["run", "--rm", "-v", `${sock}:/run/podman/podman.sock`, IMAGE, "sh", "-c", SOCKET_HUNT], { encoding: "utf8" });
+    srv.close();
+    rmSync(dir, { recursive: true, force: true });
+    ok("live control: the same hunt finds a socket when one IS mounted", /^SOCKET \/run\/podman\/podman\.sock$/m.test(ctl.stdout ?? ""), `${ctl.stdout}${ctl.stderr}`);
+  }
+  const { writeAttackReport } = await import("./netns.mjs");
+  console.log(`[sandbox] attack report: ${writeAttackReport(process.env.ATTACK_REPORT_SANDBOX ?? join(tmpdir(), `caretaker-sandbox-attacks-${process.pid}.json`), attacks, { suite: "sandbox", image: IMAGE })}`);
 
   {
     const probe = `.uidprobe-${process.pid}`;
