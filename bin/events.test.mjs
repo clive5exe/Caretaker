@@ -206,7 +206,7 @@ ok("extra fields are kept, because the keys are fields", normalise({ ...base, pr
   ok("path prints today's file for tail -F", path.status === 0 && /events-\d{4}-\d{2}-\d{2}\.jsonl$/.test(path.stdout.trim()), path.stdout);
 }
 
-ok("the default directory is the gitignored ops/foreman/events", DEFAULT_DIR.endsWith(join("ops", "foreman", "events")));
+ok("the default directory is the gitignored ops/caretaker/events", DEFAULT_DIR.endsWith(join("ops", "caretaker", "events")));
 {
   const ignored = spawnSync("git", ["check-ignore", "-q", join(DEFAULT_DIR, "events-2026-08-30.jsonl")], { cwd: join(HERE, "..") });
   ok("...and git really does ignore it", ignored.status === 0, `git check-ignore exit ${ignored.status}`);

@@ -66,7 +66,7 @@ export function MetricsPage() {
           <Head title="Tokens by kind, per day" source="run log" range={range} />
           {noLog ? (
             <div style={{ marginTop: 10 }}>
-              <NotRecorded what="No run log (ops/foreman/runs.jsonl)." why="bin/run.mjs writes one row per agent run, with in, cached, write and out when the CLI reports them." />
+              <NotRecorded what="No run log (ops/caretaker/runs.jsonl)." why="bin/run.mjs writes one row per agent run, with in, cached, write and out when the CLI reports them." />
             </div>
           ) : m.tokensPerDay && m.tokensPerDay.some((d) => d.comp) ? (
             <>

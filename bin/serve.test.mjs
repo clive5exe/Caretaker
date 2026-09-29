@@ -35,8 +35,8 @@ const ok = (name, cond, detail = "") => {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /* fixture ----------------------------------------------------------------- */
-const root = mkdtempSync(join(tmpdir(), "foreman-serve-"));
-const ops = join(root, "ops", "foreman");
+const root = mkdtempSync(join(tmpdir(), "caretaker-serve-"));
+const ops = join(root, "ops", "caretaker");
 const state = join(root, "state");
 const evDir = join(ops, "events");
 mkdirSync(evDir, { recursive: true });
@@ -115,7 +115,7 @@ function req(method, path, { headers = {}, body } = {}) {
   });
 }
 const get = (path, headers = {}) => req("GET", path, { headers: { Cookie: cookie, ...headers } });
-const WRITE = () => ({ Cookie: cookie, Origin: ORIGIN, "Content-Type": "application/json", "X-Foreman": "1" });
+const WRITE = () => ({ Cookie: cookie, Origin: ORIGIN, "Content-Type": "application/json", "X-Caretaker": "1" });
 const post = (path, obj, headers = WRITE()) => req("POST", path, { headers, body: typeof obj === "string" ? obj : JSON.stringify(obj) });
 
 /* 1. auth ----------------------------------------------------------------- */
@@ -134,13 +134,13 @@ const post = (path, obj, headers = WRITE()) => req("POST", path, { headers, body
   r = await req("GET", `/auth?t=${s.token}`);
   const sc = String(r.headers["set-cookie"] ?? "");
   ok("the right token redirects to / (out of the address bar)", r.status === 302 && r.headers.location === "/");
-  ok("the cookie is named by port, HttpOnly and SameSite=Strict", sc.startsWith(`foreman_${PORT}=`) && /HttpOnly/.test(sc) && /SameSite=Strict/.test(sc), sc);
+  ok("the cookie is named by port, HttpOnly and SameSite=Strict", sc.startsWith(`caretaker_${PORT}=`) && /HttpOnly/.test(sc) && /SameSite=Strict/.test(sc), sc);
   cookie = sc.split(";")[0];
   r = await get("/api/v1/snapshot");
   ok("with the cookie the API answers", r.status === 200 && r.json?.name === "Fixture");
-  r = await get("/api/v1/snapshot", { Cookie: `foreman_${PORT}=${"f".repeat(64)}` });
+  r = await get("/api/v1/snapshot", { Cookie: `caretaker_${PORT}=${"f".repeat(64)}` });
   ok("the right cookie name with a wrong value is 401", r.status === 401);
-  r = await get("/api/v1/snapshot", { Cookie: `foreman_${PORT + 1}=${s.token}` });
+  r = await get("/api/v1/snapshot", { Cookie: `caretaker_${PORT + 1}=${s.token}` });
   ok("the right token under another port's cookie name is 401", r.status === 401);
   for (const h of ["evil.example:" + PORT, `127.0.0.1:${PORT + 1}`, "127.0.0.1", `attacker.127.0.0.1.nip.io:${PORT}`]) {
     r = await get("/api/v1/snapshot", { Host: h });
@@ -202,7 +202,7 @@ const post = (path, obj, headers = WRITE()) => req("POST", path, { headers, body
     ["a null Origin (sandboxed frame)", { ...W, Origin: "null" }, 403],
     ["a form's content type", { ...W, "Content-Type": "application/x-www-form-urlencoded" }, 415],
     ["text/plain (a no-preflight fetch)", { ...W, "Content-Type": "text/plain" }, 415],
-    ["no X-Foreman", { ...W, "X-Foreman": undefined }, 403],
+    ["no X-Caretaker", { ...W, "X-Caretaker": undefined }, 403],
     ["no cookie", { ...W, Cookie: undefined }, 401],
   ];
   for (const [name, h, want] of cases) {

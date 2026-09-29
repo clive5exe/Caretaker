@@ -65,7 +65,7 @@ export class RunStoreError extends Error {
 export function stateDirFor(root, cfg = {}) {
   return resolve(
     cfg.stateDir ??
-      join(process.env.XDG_STATE_HOME || join(homedir(), ".local", "state"), "foreman", basename(resolve(root))),
+      join(process.env.XDG_STATE_HOME || join(homedir(), ".local", "state"), "caretaker", basename(resolve(root))),
   );
 }
 
@@ -235,7 +235,7 @@ export async function runArchived(workspace, prompt, policy = {}, { stateDir, ta
     throw new RunStoreError("EGRESS_NEEDS_SANDBOX", "egress attribution needs the agent in a container; sandbox:none runs on the host network");
   }
   const redact = redactorFor(secrets);
-  const logDir = policy.logDir ?? join(tmpdir(), "foreman-runs", runId);
+  const logDir = policy.logDir ?? join(tmpdir(), "caretaker-runs", runId);
   const dir = join(stateDir, "runs", runId);
   const mirror = startMirror({ from: join(logDir, "transcript.log"), to: join(dir, "transcript.live.log"), redact });
   const harnessPolicy = { ...policy, runId, logDir, ...(task ? { task } : {}) };
@@ -295,7 +295,7 @@ if (isEntry) {
   }
   const stateDirFromFlags = () => {
     if (flags["state-dir"]) return resolve(flags["state-dir"]);
-    const cfgPath = resolve(flags.config ?? "ops/foreman/config.json");
+    const cfgPath = resolve(flags.config ?? "ops/caretaker/config.json");
     const cfg = existsSync(cfgPath) ? JSON.parse(readFileSync(cfgPath, "utf8")) : {};
     return stateDirFor(resolve(dirname(cfgPath), "..", "..", cfg.repo ?? "."), cfg);
   };

@@ -73,7 +73,7 @@ const row = (l, r) => out.push(`${pad(l, LEFT)} ${faint("│")} ${pad(r, RIGHT)}
 /* ------------------------------------------------------------------ header */
 
 out.push(
-  pad(`${bold("FOREMAN")}  ${dim("Layer 2 — Harness")}`, W - 34) +
+  pad(`${bold("CARETAKER")}  ${dim("Layer 2 — Harness")}`, W - 34) +
     `${lime("28%")} ${faint("▏")} ${dim("ETA 28 Sep")} ${faint("▏")} ${dim("02:14:33")}`,
 );
 out.push(rule());

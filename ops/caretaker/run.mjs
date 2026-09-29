@@ -21,9 +21,9 @@
  * precision. The renderer labels reconstructed rows.
  *
  * Usage:
- *   node ops/foreman/run.mjs start --name qa --task T-277 --note "money gates"
- *   node ops/foreman/run.mjs end   --name qa --task T-277 --tokens 356251 --state done
- *   node ops/foreman/run.mjs end   --name qa --task T-277 --state failed --note "OOM"
+ *   node ops/caretaker/run.mjs start --name qa --task T-277 --note "money gates"
+ *   node ops/caretaker/run.mjs end   --name qa --task T-277 --tokens 356251 --state done
+ *   node ops/caretaker/run.mjs end   --name qa --task T-277 --state failed --note "OOM"
  *
  * Flags: --name (required), --task, --tokens, --state, --note, --src, --at,
  *        --run r_…, --parent r_…, --adapter, --cli,
@@ -108,8 +108,8 @@ for (const k of ["run", "parent"]) {
 const candidates = [
   flags.config,
   join(HERE, "config.json"),
-  join(HERE, "..", "ops", "foreman", "config.json"),
-  join(process.cwd(), "ops", "foreman", "config.json"),
+  join(HERE, "..", "ops", "caretaker", "config.json"),
+  join(process.cwd(), "ops", "caretaker", "config.json"),
 ].filter(Boolean);
 
 let cfg = null;
@@ -130,7 +130,7 @@ if (flags.config && !cfgFrom) {
 const ROOT = cfgFrom
   ? resolve(dirname(cfgFrom), "..", "..", cfg.repo ?? ".")
   : process.cwd();
-const logPath = join(ROOT, cfg?.runs ?? "ops/foreman/runs.jsonl");
+const logPath = join(ROOT, cfg?.runs ?? "ops/caretaker/runs.jsonl");
 
 const nums = {};
 for (const k of NUMERIC) {

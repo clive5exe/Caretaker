@@ -148,7 +148,7 @@ function SignedOut() {
         Open the sign-in address the server printed when it started (it ends in <span className="mono">/auth?t=…</span>). The token lives only in that
         process; restart the server for a new one.
       </p>
-      <pre className="code">node bin/serve.mjs ops/foreman/config.json</pre>
+      <pre className="code">node bin/serve.mjs ops/caretaker/config.json</pre>
     </div>
   );
 }

@@ -35,8 +35,8 @@ const day = (offset) => {
 };
 
 function fixture(dashFile) {
-  const root = mkdtempSync(join(tmpdir(), "foreman-dashlib-"));
-  const ops = join(root, "ops", "foreman");
+  const root = mkdtempSync(join(tmpdir(), "caretaker-dashlib-"));
+  const ops = join(root, "ops", "caretaker");
   mkdirSync(ops, { recursive: true });
   mkdirSync(join(root, "docs"), { recursive: true });
   mkdirSync(join(root, ".claude", "agents"), { recursive: true });
@@ -47,8 +47,8 @@ function fixture(dashFile) {
       name: "Fixture <&>",
       board: "docs/board.json",
       out: "docs/board.html",
-      runs: "ops/foreman/runs.jsonl",
-      history: "ops/foreman/history.jsonl",
+      runs: "ops/caretaker/runs.jsonl",
+      history: "ops/caretaker/history.jsonl",
       agentsDir: ".claude/agents",
       repo: ".",
       activePhase: "Phase 1",

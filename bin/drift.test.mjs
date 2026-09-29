@@ -12,7 +12,7 @@
  * check went red, the source was restored and checked back to its recorded
  * sha256. The mutations and their output are in the H-4 report; they are not
  * claimed here, because a comment asserting a run nobody can see is exactly the
- * defect class `ops/foreman/RULES.md` names.
+ * defect class `ops/caretaker/RULES.md` names.
  *
  * Run: node bin/drift.test.mjs
  */

@@ -1,4 +1,4 @@
-# foreman — build guide
+# caretaker — build guide
 
 An abstraction layer for agentic development: where the agent runs, what it may
 reach, which model does what, whether the work is actually done, and what the
@@ -8,8 +8,8 @@ project looks like when you hand it to someone else.
 and the two design decisions everything else depends on — the harness seam and
 the egress allowlist. Neither is negotiable without redoing the work.
 
-- **Board:** `docs/board.json`, driven by `node ops/foreman/board.mjs`
-- **Dashboard:** `node ops/foreman/dashboard.mjs` → `docs/board.html`
+- **Board:** `docs/board.json`, driven by `node ops/caretaker/board.mjs`
+- **Dashboard:** `node ops/caretaker/dashboard.mjs` → `docs/board.html`
 - **This repo dogfoods itself.** The board tracking this work IS the product.
   If the tool is annoying to use here, that is the bug report.
 
@@ -58,7 +58,7 @@ way this dies: a good shell over a harness that does not work.
   isolation changes need `security` as well as `reviewer` and `qa`.
 
 - **A count in a comment is legitimate only if the line below asserts it, or the
-  comment names the command that produces it.** See `ops/foreman/RULES.md` for
+  comment names the command that produces it.** See `ops/caretaker/RULES.md` for
   the rest, including the one that costs the most: a comment defending a correct
   control with a wrong reason is worse than no comment, because the next reader
   checks it, finds it false, and discards the control with it.

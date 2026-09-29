@@ -3,7 +3,7 @@
  * The terminal view (U-2): the same project as the web client, over SSH, with
  * nothing listening on a port.
  *
- *     node bin/tui.mjs path/to/ops/foreman/config.json
+ *     node bin/tui.mjs path/to/ops/caretaker/config.json
  *     node bin/tui.mjs config.json --once --screen board [--width 120] [--no-color]
  *
  * Four screens, switched with 1 to 4:
@@ -284,7 +284,7 @@ export function renderMetrics(d, st, W, H, p) {
     if (m.reworkSpend) out.push(`  rework spend ${tokens(m.reworkSpend.wasted)} (${m.reworkSpend.pct}%) on ${m.reworkSpend.tasks} tasks`);
     if (t.byAgent.length) out.push(`  by agent  ${t.byAgent.map(([a, v]) => `${a ?? "unnamed"} ${tokens(v.tokens)}`).join(" · ")}`);
     if (t.byModel.length) out.push(`  by model  ${t.byModel.map(([a, v]) => `${a} ${tokens(v.tokens)}`).join(" · ")}`);
-  } else out.push(`${p.bold("Tokens")} ${NR(p, m.sources.runs === "absent" ? "no run log (ops/foreman/runs.jsonl)" : "no tokens logged in range")}`);
+  } else out.push(`${p.bold("Tokens")} ${NR(p, m.sources.runs === "absent" ? "no run log (ops/caretaker/runs.jsonl)" : "no tokens logged in range")}`);
   out.push("");
   out.push(`${p.bold("Cycle")} ${m.medDays != null ? `median ${m.medDays} days against an estimate of ${m.medEst}h over ${m.cycle.length} closed` : p.dim("no closed task with commits naming it")}   ${p.faint("all time · git + board.json")}`);
   out.push(`${p.bold("Commits")} ${m.commitsByDay.join(" ")}   ${p.faint(`per day, last ${m.closedWindow.length} days · git`)}`);
@@ -366,7 +366,7 @@ async function main(argv) {
   };
   const cfgPath = argv.find((a, i) => !a.startsWith("--") && !["--screen", "--width", "--height", "--state-dir", "--days"].includes(argv[i - 1]));
   if (!cfgPath) {
-    console.error("usage: node bin/tui.mjs path/to/ops/foreman/config.json [--once --screen runs|board|inbox|metrics] [--width N] [--no-color]");
+    console.error("usage: node bin/tui.mjs path/to/ops/caretaker/config.json [--once --screen runs|board|inbox|metrics] [--width N] [--no-color]");
     process.exit(2);
   }
   const rm = await openReadModel(cfgPath, { stateDir: flag("--state-dir") });

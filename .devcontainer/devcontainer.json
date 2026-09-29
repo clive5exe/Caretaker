@@ -1,7 +1,7 @@
 {
-  // Standard devcontainer. foreman reads the container half from here rather
+  // Standard devcontainer. caretaker reads the container half from here rather
   // than inventing its own fields.
-  "name": "foreman",
+  "name": "caretaker",
   "image": "mcr.microsoft.com/devcontainers/base:debian",
   "features": {
     "ghcr.io/devcontainers/features/node:1": { "version": "22" }

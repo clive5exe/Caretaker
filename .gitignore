@@ -6,7 +6,7 @@ PAUSED
 
 # Event logs are append-only run records, not source. Named by pattern because
 # they rotate daily — an entry per file would go stale the next morning.
-ops/foreman/events/
+ops/caretaker/events/
 events-*.jsonl
 
 # The web client builds into web/dist; it is never committed.

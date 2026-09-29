@@ -7,7 +7,7 @@ supersedes: "the 'TUI rather than a web UI' position in the U-2 board note (only
 
 ## The question
 
-Should Foreman have a web UI?
+Should Caretaker have a web UI?
 
 The board already answers no. The U-2 note says:
 
@@ -17,8 +17,8 @@ The board already answers no. The U-2 note says:
 
 The project is now being pointed at a software-factory control plane, where
 many runs, their measured evidence, and the few decisions only a human can make
-need to be visible at once. The first project for that is Foreman Web v1
-(`specs/foreman-web/PRODUCT.md`, `specs/foreman-web/TECH.md`).
+need to be visible at once. The first project for that is Caretaker Web v1
+(`specs/caretaker-web/PRODUCT.md`, `specs/caretaker-web/TECH.md`).
 
 Per `docs/memory.md`, a decision is superseded, not edited. This ADR replaces
 **only** the "not a web UI" part of U-2. The TUI stays in scope, and so does
@@ -27,7 +27,7 @@ Per `docs/memory.md`, a decision is superseded, not edited. This ADR replaces
 ## The three objections, answered rather than waved away
 
 **No daemon.**
-- `foreman serve` runs in the foreground and stops on Ctrl-C.
+- `caretaker serve` runs in the foreground and stops on Ctrl-C.
 - It writes no pidfile, installs no service, and stores nothing that cannot be
   rebuilt from the files.
 - Nothing about the core requires it to be running.
@@ -87,7 +87,7 @@ this ADR should make it explicitly.
 
 **Accepted on 2026-09-29.** Caretaker gets an optional, local, foreground web
 client over the core, alongside the TUI and the static page. It is specified by
-`specs/foreman-web/PRODUCT.md` and `specs/foreman-web/TECH.md`, which are
+`specs/caretaker-web/PRODUCT.md` and `specs/caretaker-web/TECH.md`, which are
 accepted with this ADR.
 
 **Who decided.** Five, the project owner. Five asked for the web client,

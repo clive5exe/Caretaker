@@ -84,7 +84,7 @@ function fakeCli(body) {
 }
 
 const logDirFor = (label) => join(TMP, `logs-${label}`);
-/** Every run in this file logs here, never to the repo's own ops/foreman/events. */
+/** Every run in this file logs here, never to the repo's own ops/caretaker/events. */
 const EVENTS_DIR = join(TMP, "events");
 
 const basePolicy = (label, cli, over = {}) => ({
@@ -124,7 +124,7 @@ echo "Done. I refactored committed.txt and added three files."
     workspace: "/w",
     net: "none",
     runtime: "podman",
-    containerName: "foreman-r_dead",
+    containerName: "caretaker-r_dead",
     cliArgv: ["claude", "--print"],
     env: { HOME: "/tmp/agent-home" },
   });
@@ -136,7 +136,7 @@ echo "Done. I refactored committed.txt and added three files."
     "the harness must not fork a second copy of the container flags");
   ok("stdin is attached with -i, or the prompt reaches nothing", argv.includes("-i"),
     "measured: `echo X | podman run --rm IMAGE sh -c cat` prints nothing without -i");
-  ok("the container is named, so a killed run has a handle to remove", has("--name", "foreman-r_dead"),
+  ok("the container is named, so a killed run has a handle to remove", has("--name", "caretaker-r_dead"),
     "measured: SIGKILL on the podman client leaves the container Up despite --rm");
   ok("environment is passed with -e", has("-e", "HOME=/tmp/agent-home"));
   ok("the agent CLI is the container's command", argv.slice(-2).join(" ") === "claude --print", argv.slice(-3).join(" "));
@@ -683,7 +683,7 @@ if (!havePodman) {
   {
     const ws = makeWorkspace("live-kill");
     const runId = `r_live${process.pid.toString(16)}`;
-    const name = `foreman-${runId}`;
+    const name = `caretaker-${runId}`;
     const r = await run(ws, "hang", {
       adapter: "cli",
       cli: { argv: ["sh", "-c", "cat > /dev/null; sleep 300"] },

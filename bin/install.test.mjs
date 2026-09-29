@@ -38,7 +38,7 @@ const target = (name) => {
 /* ------------------------------------------------------------ fresh install */
 const T = target("repo");
 const fresh = install([T, "Fixture"]);
-const DEST = join(T, "ops", "foreman");
+const DEST = join(T, "ops", "caretaker");
 ok("a fresh install succeeds", fresh.status === 0, fresh.stderr + fresh.stdout);
 for (const f of ["board.mjs", "dashboard.mjs", "run.mjs", "loop.sh", "RULES.md", "config.json", "prompt.txt"]) {
   ok(`it installs ${f}`, existsSync(join(DEST, f)));
@@ -54,7 +54,7 @@ writeFileSync(join(DEST, "config.json"), JSON.stringify({ ...cfg, activePhase: "
 const board = JSON.parse(readFileSync(join(T, "docs", "board.json"), "utf8"));
 board.phases[0].tasks.push({ id: "T-002", title: "the owner's real work", status: "doing", owner: "you", est: "1h", ac: "x" });
 writeFileSync(join(T, "docs", "board.json"), JSON.stringify(board, null, 2));
-const owned = ["ops/foreman/config.json", "ops/foreman/prompt.txt", "docs/board.json"];
+const owned = ["ops/caretaker/config.json", "ops/caretaker/prompt.txt", "docs/board.json"];
 const before = Object.fromEntries(owned.map((p) => [p, sha(join(T, p))]));
 const oldBoardSha = sha(join(DEST, "board.mjs"));
 

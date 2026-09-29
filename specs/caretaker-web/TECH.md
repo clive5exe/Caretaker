@@ -1,5 +1,5 @@
 ---
-title: Foreman Web v1 — architecture and technical spec
+title: Caretaker Web v1 — architecture and technical spec
 status: accepted
 updated: 2026-09-29
 ---
@@ -9,7 +9,7 @@ hosts:
 governs: bin/serve.mjs, bin/readmodel.mjs, bin/lifecycle.mjs, web/src/api/**
 ```
 
-# Foreman Web v1 — architecture and technical spec
+# Caretaker Web v1 — architecture and technical spec
 
 Accepted with ADR-0002 on 2026-09-29. **Nothing here is implemented yet.** It
 covers:
@@ -66,7 +66,7 @@ change the design, and it would be wrong without them.
     write, out, turns, model, note, src`, with no run id and no parent.
 - **The harness writes logs but does not keep its result.**
   - `harness.run()` writes `transcript.log`, `stderr.log` and a `shadow/` git
-    directory under its log dir, which defaults to `$TMPDIR/foreman-runs/<id>`
+    directory under its log dir, which defaults to `$TMPDIR/caretaker-runs/<id>`
     (`harness.mjs:842-865`, `:905-914`).
   - It *returns* diff, verdict and cost, and persists none of them.
   - The transcript is raw CLI stdout and is not redacted.
@@ -216,7 +216,7 @@ leaves no archive.
   the reason below. `stateDirFor()` is the single definition, and
   `readmodel.mjs` imports it.
 - **`stateDir` defaults to
-  `${XDG_STATE_HOME:-$HOME/.local/state}/foreman/<repo-slug>`,** and is
+  `${XDG_STATE_HOME:-$HOME/.local/state}/caretaker/<repo-slug>`,** and is
   overridable in config. **The reason is the mount, not the harness refusal.**
   - The workspace is bind-mounted into the next agent's container at `/work`
     (`sandbox.mjs:172`), gitignored files included. Anything archived under
@@ -275,28 +275,28 @@ after they exist and are tested in core.
 | `drop <id> "why"` | `status: "dropped"` plus the reason. `dropped` already exists as a status (`board.mjs:49`), but no command sets it. |
 
 - All fields are optional and additive, so existing readers ignore them.
-- `ops/foreman/prompt.txt` currently says to write a needed decision "into the
+- `ops/caretaker/prompt.txt` currently says to write a needed decision "into the
   task note". It changes to `ask`, so the question becomes a fact the Inbox can
   see.
 
 ---
 
-## 1. `foreman serve`
+## 1. `caretaker serve`
 
 ```
-node bin/serve.mjs path/to/ops/foreman/config.json [--port 7420]
+node bin/serve.mjs path/to/ops/caretaker/config.json [--port 7420]
 ```
 
 - **Built-ins only:** `node:http`, `node:fs`, `node:crypto`. That keeps the
-  repo's "node and git, nothing else" property. There is no `foreman` binary
+  repo's "node and git, nothing else" property. There is no `caretaker` binary
   today, and adding one is out of scope.
 - **It runs in the foreground,** with no daemon and no pidfile. Ctrl-C stops it.
-- **It imports the target repo's own installed `ops/foreman/board.mjs`,** so
+- **It imports the target repo's own installed `ops/caretaker/board.mjs`,** so
   the server always applies exactly the rules that repo's CLI applies. If that
   file does not export `API_VERSION`, the server refuses to start and prints
   how to upgrade.
 - `drift.mjs`, `spec.mjs`, `secrets.mjs`, `lifecycle.mjs` and `readmodel.mjs`
-  are imported from the Foreman checkout `serve.mjs` runs from. None of them is
+  are imported from the Caretaker checkout `serve.mjs` runs from. None of them is
   installed into target repos today.
 - **Install gains an explicit upgrade mode** that replaces the tool files and
   never touches `board.json`, `config.json` or `prompt.txt`. Those are the
@@ -318,7 +318,7 @@ node bin/serve.mjs path/to/ops/foreman/config.json [--port 7420]
 
 **Bootstrap.**
 - `GET /auth?t=<token>` compares the token with a timing-safe comparison.
-- It sets a cookie `foreman_<port>=<token>` with `HttpOnly; SameSite=Strict;
+- It sets a cookie `caretaker_<port>=<token>` with `HttpOnly; SameSite=Strict;
   Path=/`.
 - It then **redirects to `/`**, so the token leaves the address bar and the
   history.
@@ -333,7 +333,7 @@ node bin/serve.mjs path/to/ops/foreman/config.json [--port 7420]
 **Every POST additionally:**
 - Requires an exact `Origin` match.
 - Requires `Content-Type: application/json`.
-- Requires the header `X-Foreman: 1`.
+- Requires the header `X-Caretaker: 1`.
 
 **No CORS headers are sent, ever.**
 
@@ -498,7 +498,7 @@ share numbers (C-2), not styles.
     Consolas, monospace`).
   - The page contains no CDN link, web font URL or analytics call.
 - **Name and logo.**
-  - The UI says **Caretaker**. Paths and commands keep saying `foreman`
+  - The UI says **Caretaker**. Paths and commands keep saying `caretaker`
     wherever the code does, as the README explains.
   - The wordmark in the sidebar and on the Getting started page is text:
     CARETAKER in Anton, a heavy condensed face close to the repo logo's
@@ -671,7 +671,7 @@ To avoid a name collision, the API field is `lifecycle`, not `stage`.
 | `question` | a `questions[]` entry has no `answer` | answered | `answer` |
 | `spec-approval` | rule 8 above holds | approved, or rejected with a reason | `spec-approve` / `spec-reject` |
 | `gate-failure` | the latest `security` verdict is `fail`; **or** the latest drift `gate` event for the task has `verdict:"fail"` and no later pass; **or** some required gate has at least `cfg.inbox.reworkThreshold` fails (default 2) | a later pass, or the task is dropped | open the work item; drift shows the CLI command |
-| `pr-review` | `lifecycle === "human"` and a `pr` is recorded | `done` (nothing records a merge yet) | review outside Foreman, then `done` |
+| `pr-review` | `lifecycle === "human"` and a `pr` is recorded | `done` (nothing records a merge yet) | review outside Caretaker, then `done` |
 
 - **A single qa fail is not an Inbox item.** It sends the task back to build.
 - **Dropped tasks never appear.**
@@ -788,7 +788,7 @@ links in `docs/board.html`.
   - no cookie
   - a wrong `Host` (rebinding)
   - a cross-origin POST
-  - a POST without `X-Foreman`
+  - a POST without `X-Caretaker`
   - `../` in a run id or filename
   - a request for `shadow/`
   - a bind to `0.0.0.0`

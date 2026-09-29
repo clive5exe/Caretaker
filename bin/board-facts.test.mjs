@@ -26,8 +26,8 @@ const ok = (name, cond, detail = "") => {
 };
 
 function fixture(boardFile = join(HERE, "board.mjs")) {
-  const root = mkdtempSync(join(tmpdir(), "foreman-facts-"));
-  const ops = join(root, "ops", "foreman");
+  const root = mkdtempSync(join(tmpdir(), "caretaker-facts-"));
+  const ops = join(root, "ops", "caretaker");
   mkdirSync(ops, { recursive: true });
   mkdirSync(join(root, "docs"), { recursive: true });
   mkdirSync(join(root, "specs"), { recursive: true });

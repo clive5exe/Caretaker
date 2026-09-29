@@ -22,7 +22,7 @@
 #                committed by accident. Skipping a pass costs nothing; a killed
 #                one costs the tree.
 #
-#   token log    Every run appends what it spent to the foreman run log, so the
+#   token log    Every run appends what it spent to the caretaker run log, so the
 #                dashboard can show unattended spend beside interactive spend
 #                rather than the founder discovering it on a bill.
 #
@@ -31,18 +31,18 @@
 # suite. Those are the three irreversible things, and none of them should happen
 # with nobody watching.
 #
-# Install:  crontab -e   ->   */30 * * * * /path/to/<repo>/ops/foreman/loop.sh
-# Disable:  comment that line out, or `touch <repo>/ops/foreman/PAUSED`
+# Install:  crontab -e   ->   */30 * * * * /path/to/<repo>/ops/caretaker/loop.sh
+# Disable:  comment that line out, or `touch <repo>/ops/caretaker/PAUSED`
 
 set -uo pipefail
 
 # PATHS ARE DERIVED, NOT TYPED, so this file works in another repo unchanged.
-# The script sits at <repo>/ops/foreman/loop.sh, so the repo is two levels up.
+# The script sits at <repo>/ops/caretaker/loop.sh, so the repo is two levels up.
 # The lock is namespaced by the repo path for the same reason: two projects
 # looping on one box must not block each other.
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
-LOCK="/tmp/foreman-loop-$(echo "$ROOT" | tr -c 'A-Za-z0-9' '-').lock"
+LOCK="/tmp/caretaker-loop-$(echo "$ROOT" | tr -c 'A-Za-z0-9' '-').lock"
 LOG="$HERE/loop.log"
 PAUSE="$HERE/PAUSED"
 CLAUDE="${CLAUDE_BIN:-$(command -v claude || echo "$HOME/.local/bin/claude")}"
@@ -72,7 +72,7 @@ if [ "${FREE_MB:-0}" -lt "$MIN_FREE_MB" ]; then
 fi
 
 # THE PROMPT LIVES IN A FILE, NOT HERE, because it is the only project-specific
-# thing left in this script. Edit ops/foreman/prompt.txt to point the loop at a
+# thing left in this script. Edit ops/caretaker/prompt.txt to point the loop at a
 # different board, a different publish command, or different limits; the script
 # itself needs no change to work in another repo.
 PROMPT_FILE="$HERE/prompt.txt"
@@ -80,7 +80,7 @@ PROMPT_FILE="$HERE/prompt.txt"
 PROMPT=$(cat "$PROMPT_FILE")
 
 say "start — ${FREE_MB}MB available"
-OUT=$(mktemp /tmp/foreman-loop-out.XXXXXX)
+OUT=$(mktemp /tmp/caretaker-loop-out.XXXXXX)
 cd "$ROOT" || { say "FAIL — cannot cd to $ROOT"; exit 1; }
 
 # --permission-mode auto: unattended means nothing can answer a prompt. The
@@ -112,8 +112,8 @@ if [ -n "$NODE" ]; then
         (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
       process.stdout.write(String(tok || 0));
     } catch { process.stdout.write("0"); }
-  ' "$OUT" > /tmp/foreman-loop-tokens 2>/dev/null
-  TOK=$(cat /tmp/foreman-loop-tokens 2>/dev/null || echo 0)
+  ' "$OUT" > /tmp/caretaker-loop-tokens 2>/dev/null
+  TOK=$(cat /tmp/caretaker-loop-tokens 2>/dev/null || echo 0)
   if [ "${TOK:-0}" -gt 0 ]; then
     "$NODE" "$HERE/run.mjs" end --name cron-loop --tokens "$TOK" \
       --state done --note "unattended pass" >/dev/null 2>&1
@@ -123,4 +123,4 @@ else
   say "done — node not found, token spend not recorded"
 fi
 
-rm -f "$OUT" /tmp/foreman-loop-tokens
+rm -f "$OUT" /tmp/caretaker-loop-tokens

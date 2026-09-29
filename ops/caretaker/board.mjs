@@ -1,29 +1,29 @@
 #!/usr/bin/env node
 // Task board: single source of truth is tasks.json.
 //
-//   node ops/foreman/board.mjs                       show the board
-//   node ops/foreman/board.mjs status                same
-//   node ops/foreman/board.mjs start T-012           mark in progress
-//   node ops/foreman/board.mjs done  T-012           mark done, stamp the date
-//   node ops/foreman/board.mjs block T-012 "reason"  mark blocked
-//   node ops/foreman/board.mjs todo  T-012           reset
-//   node ops/foreman/board.mjs note  T-012 "text"    append a note
-//   node ops/foreman/board.mjs build                 regenerate the HTML page
+//   node ops/caretaker/board.mjs                       show the board
+//   node ops/caretaker/board.mjs status                same
+//   node ops/caretaker/board.mjs start T-012           mark in progress
+//   node ops/caretaker/board.mjs done  T-012           mark done, stamp the date
+//   node ops/caretaker/board.mjs block T-012 "reason"  mark blocked
+//   node ops/caretaker/board.mjs todo  T-012           reset
+//   node ops/caretaker/board.mjs note  T-012 "text"    append a note
+//   node ops/caretaker/board.mjs build                 regenerate the HTML page
 //
-//   node ops/foreman/board.mjs ask T-012 "question"          record a question
-//   node ops/foreman/board.mjs answer T-012 q1 "text"        answer it
-//   node ops/foreman/board.mjs triage T-012 accept|reject "why"
-//   node ops/foreman/board.mjs spec-approve T-012            approve the spec as it is now
-//   node ops/foreman/board.mjs spec-reject T-012 "why"
-//   node ops/foreman/board.mjs pr T-012 https://…            record the PR
-//   node ops/foreman/board.mjs drop T-012 "why"              drop it from scope
+//   node ops/caretaker/board.mjs ask T-012 "question"          record a question
+//   node ops/caretaker/board.mjs answer T-012 q1 "text"        answer it
+//   node ops/caretaker/board.mjs triage T-012 accept|reject "why"
+//   node ops/caretaker/board.mjs spec-approve T-012            approve the spec as it is now
+//   node ops/caretaker/board.mjs spec-reject T-012 "why"
+//   node ops/caretaker/board.mjs pr T-012 https://…            record the PR
+//   node ops/caretaker/board.mjs drop T-012 "why"              drop it from scope
 //
 // Any mutating command rebuilds the page automatically, so the docs site is
 // never stale relative to the data.
 //
 // IT IS ALSO A LIBRARY. The web server imports the target repo's own installed
 // copy of this file, so the rules it applies are exactly the rules the CLI
-// applies (specs/foreman-web/TECH.md, C-1). That is why the exports live here
+// applies (specs/caretaker-web/TECH.md, C-1). That is why the exports live here
 // and not in a second module: install.sh copies four files, and a new import
 // would break every installed copy on upgrade.
 
@@ -48,7 +48,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 export function loadConfig(cfgPath = process.env.FACTORY_CONFIG || path.join(HERE, "config.json"), base = HERE) {
   const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
   // The repo root is two levels above `base`, which is THIS FILE's directory
-  // for the CLI, as it always was: ops/foreman/ sits two levels below the repo
+  // for the CLI, as it always was: ops/caretaker/ sits two levels below the repo
   // it serves. A library caller holding a config path passes its directory,
   // which is the same place for an installed copy and the right one otherwise.
   const root = path.resolve(base, "..", "..", cfg.repo ?? ".");
@@ -431,7 +431,7 @@ ${bar(currentPct, "big")}
     md += `| \`${o}\` | ${ts.length} | ${Math.ceil(rem)}d |\n`;
   }
 
-  md += `\n## Maintaining this\n\nGenerated from \`the board named in ops/foreman/config.json\`. **Never edit the generated page.**\n\n\`\`\`\nnode ops/foreman/board.mjs done T-012        mark complete, stamps today's date\nnode ops/foreman/board.mjs start T-012       mark in progress\nnode ops/foreman/board.mjs block T-012 "why" mark blocked with a reason\nnode ops/foreman/board.mjs note T-012 "text" append a note\nnode ops/foreman/board.mjs                   print the board to the terminal\n\`\`\`\n\nEvery mutating command rebuilds this page and the whole docs site, so it can never drift from the data.\n`;
+  md += `\n## Maintaining this\n\nGenerated from \`the board named in ops/caretaker/config.json\`. **Never edit the generated page.**\n\n\`\`\`\nnode ops/caretaker/board.mjs done T-012        mark complete, stamps today's date\nnode ops/caretaker/board.mjs start T-012       mark in progress\nnode ops/caretaker/board.mjs block T-012 "why" mark blocked with a reason\nnode ops/caretaker/board.mjs note T-012 "text" append a note\nnode ops/caretaker/board.mjs                   print the board to the terminal\n\`\`\`\n\nEvery mutating command rebuilds this page and the whole docs site, so it can never drift from the data.\n`;
 
   fs.writeFileSync(OUT, md);
 
@@ -766,7 +766,7 @@ function cli(argv) {
     // sums every phase this board has ever had, including scope nobody is
     // building, so it reads far lower than the work actually in flight and moves
     // for reasons unrelated to today. The dashboard demoted it to a subline
-    // already; this printed it as THE number, so `ops/foreman/board.mjs status`,
+    // already; this printed it as THE number, so `ops/caretaker/board.mjs status`,
     // the stop hook and the dashboard were quoting three different figures for
     // the same board.
     const cur =
@@ -789,7 +789,7 @@ function cli(argv) {
     const o = build();
     console.log(`board rebuilt — ${o.currentPct}% (${o.currentDone}/${o.currentTotal} ${o.currentName})  ·  all phases ${o.done}/${o.total}`);
   } else if (GATE_CMDS.includes(cmd)) {
-    // record a gate verdict:  node ops/foreman/board.mjs reviewer T-012 pass "notes"
+    // record a gate verdict:  node ops/caretaker/board.mjs reviewer T-012 pass "notes"
     if (!id) { console.error("need a task id"); process.exit(1); }
     const ctx = loadConfig();
     const verdict = (rest[0] || "").toLowerCase();
@@ -799,7 +799,7 @@ function cli(argv) {
       return recordVerdict(d, id, cmd, verdict, rest.slice(1).join(" "));
     });
     if (res.badVerdict) {
-      console.error("verdict must be pass or fail:  node ops/foreman/board.mjs " + cmd + " " + id + " pass");
+      console.error("verdict must be pass or fail:  node ops/caretaker/board.mjs " + cmd + " " + id + " pass");
       process.exit(1);
     }
     if (!res.ok) { console.error(res.error); process.exit(1); }
@@ -820,7 +820,7 @@ function cli(argv) {
       console.error(`\n  REFUSED — ${t.id} has not passed the gate${docsOnly ? " (docs-only: reviewer required)" : ""}.\n`);
       console.error(`  Missing: ${missing.join(", ")}\n`);
       console.error(`  Record verdicts first:`);
-      for (const m of missing) console.error(`    node ops/foreman/board.mjs ${m.split(" ")[0]} ${t.id} pass`);
+      for (const m of missing) console.error(`    node ops/caretaker/board.mjs ${m.split(" ")[0]} ${t.id} pass`);
       console.error(`\n  This is enforced. Builder-says-done is a status report, not a completion.\n`);
       process.exit(1);
     }
@@ -849,15 +849,15 @@ function cli(argv) {
     const what = cmd === "ask" ? `asked ${res.qid}` : cmd === "drop" ? "dropped" : `${cmd} recorded`;
     console.log(`${res.task.id} · ${what}   ${o.currentName} now ${o.currentPct}% (${o.currentDone}/${o.currentTotal})`);
   } else {
-    console.log("usage: node ops/foreman/board.mjs [status|build|start|done|block|todo|note] [T-012] [text]");
-    console.log("       node ops/foreman/board.mjs [reviewer|qa|security] T-012 [pass|fail] [note]");
-    console.log("       node ops/foreman/board.mjs ask T-012 \"question\" | answer T-012 q1 \"text\" | triage T-012 accept|reject [\"why\"]");
-    console.log("       node ops/foreman/board.mjs spec-approve T-012 | spec-reject T-012 \"why\" | pr T-012 <url> | drop T-012 \"why\"");
+    console.log("usage: node ops/caretaker/board.mjs [status|build|start|done|block|todo|note] [T-012] [text]");
+    console.log("       node ops/caretaker/board.mjs [reviewer|qa|security] T-012 [pass|fail] [note]");
+    console.log("       node ops/caretaker/board.mjs ask T-012 \"question\" | answer T-012 q1 \"text\" | triage T-012 accept|reject [\"why\"]");
+    console.log("       node ops/caretaker/board.mjs spec-approve T-012 | spec-reject T-012 \"why\" | pr T-012 <url> | drop T-012 \"why\"");
   }
 }
 
 // Run as a command only when executed, never when imported. realpath on both
-// sides so a symlinked ops/foreman/ still counts as "executed".
+// sides so a symlinked ops/caretaker/ still counts as "executed".
 const isEntry = (() => {
   try {
     return !!process.argv[1] && fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(import.meta.url));

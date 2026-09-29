@@ -308,7 +308,7 @@ export function WorkItemPage() {
         ) : (
           <NotRecorded
             what="No run of this work item has been recorded."
-            why={t.sources.runs === "absent" ? "There is no run log (ops/foreman/runs.jsonl) and no run archive." : "The run log has no row naming this task."}
+            why={t.sources.runs === "absent" ? "There is no run log (ops/caretaker/runs.jsonl) and no run archive." : "The run log has no row naming this task."}
           />
         )
       ) : null}
