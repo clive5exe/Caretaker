@@ -8,3 +8,6 @@ PAUSED
 # they rotate daily — an entry per file would go stale the next morning.
 ops/foreman/events/
 events-*.jsonl
+
+# The web client builds into web/dist; it is never committed.
+web/dist/

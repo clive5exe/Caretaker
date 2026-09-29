@@ -335,7 +335,7 @@ export async function startServer({ cfgPath, dist = DIST, port = 7420, host = "1
       if (path === `${API}/specs`) return send(res, 200, rm.specs());
       if (path === `${API}/metrics`) return send(res, 200, rm.metrics(q.get("days") ?? 14));
       if (path === `${API}/events`) return send(res, 200, rm.events({ limit: Math.min(Number(q.get("limit")) || 100, 1000), level: q.get("level") }));
-      if (path === `${API}/settings`) return send(res, 200, rm.settings({ host, port: actualPort, loopbackOnly: true, rotate: "restart the server; the token lives only in this process" }));
+      if (path === `${API}/settings`) return send(res, 200, rm.settings({ host, port: actualPort, loopbackOnly: true, rotate: "restart the server to rotate it; the token lives only in its process" }));
       if (path === `${API}/stream`) return openStream(req, res);
       return send(res, 404, { error: "no such route" });
     }

@@ -120,7 +120,9 @@ export function createReadModel({ cfgPath, board, dash, now = () => new Date(), 
   }
 
   const loadBoard = () => board.load(ctx);
-  const runRows = () => (sources().runs === "present" ? dash.readRuns(root, cfg) : null);
+  // dashboard.mjs reads cfg.runs with no default; the server applies the one
+  // every other reader here uses, so a config without it still finds the log.
+  const runRows = () => (sources().runs === "present" ? dash.readRuns(root, { ...cfg, runs: cfg.runs ?? "ops/foreman/runs.jsonl" }) : null);
   const eventLog = () => (sources().events === "present" ? events.read(eventsDir).events : null);
 
   /* ------------------------------------------------------------------ runs */
@@ -434,8 +436,8 @@ export function createReadModel({ cfgPath, board, dash, now = () => new Date(), 
     const r = runs.find((x) => x.id === id);
     if (!r) return null;
     const ev = eventLog();
-    const files = {};
-    for (const f of RUN_FILES) files[f] = runFilePath(id, f) ? statSync(runFilePath(id, f)).size : null;
+    const archiveFiles = {};
+    for (const f of RUN_FILES) archiveFiles[f] = runFilePath(id, f) ? statSync(runFilePath(id, f)).size : null;
     const d = loadBoard();
     const hit = r.task ? board.find(d, r.task) : null;
     return {
@@ -447,7 +449,7 @@ export function createReadModel({ cfgPath, board, dash, now = () => new Date(), 
       warnings: r.warnings ?? [],
       breakdown: r.breakdown ?? null,
       diff: r.diff ? { files: r.diff.files ?? null, insertions: r.diff.insertions ?? null, deletions: r.diff.deletions ?? null, truncated: !!r.diff.truncated, ignoredPathsNotMeasured: r.diff.ignoredPathsNotMeasured ?? true } : null,
-      files,
+      archiveFiles,
       events: ev === null ? null : ev.filter((e) => e.run === id),
       // Task-level verdicts, with their dates. Never attributed to this run:
       // a board verdict belongs to the task, and its date carries no time.

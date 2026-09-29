@@ -296,7 +296,7 @@ const post = (path, obj, headers = WRITE()) => req("POST", path, { headers, body
   ok("a work item's commands come from lifecycle.commandsFor", !work.tasks.some((t) => t.commands.some((c) => ["reviewer", "qa", "security"].includes(c.cmd))));
   const run = (await get(`/api/v1/runs/${RUN}`)).json;
   ok("a run folds its archive record", run?.task === "T-1" && run?.status === "ok", JSON.stringify(run));
-  ok("and names the files it has", run?.files?.["transcript.log"] > 0 && run?.files?.["diff.patch"] === null, JSON.stringify(run?.files));
+  ok("and names the files it has", run?.archiveFiles?.["transcript.log"] > 0 && run?.archiveFiles?.["diff.patch"] === null, JSON.stringify(run?.archiveFiles));
   void board;
 }
 
