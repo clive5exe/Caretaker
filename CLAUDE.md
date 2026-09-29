@@ -8,6 +8,12 @@ project looks like when you hand it to someone else.
 and the two design decisions everything else depends on — the harness seam and
 the egress allowlist. Neither is negotiable without redoing the work.
 
+- **The plan:** `docs/plan.md`. It wins over every older plan.
+- **Warp's code is copied, never rewritten.** Warp's cloud factory (MIT) is
+  vendored in `vendor/cloud-factory/` at a pinned commit. A change to it is a
+  patch in `vendor/patches/`, never a hand edit and never a from-scratch
+  equivalent. Caretaker code is written only where Warp has nothing: the
+  sandbox, the harness, the board, and the one shim standing in for Oz.
 - **Board:** `docs/board.json`, driven by `node ops/caretaker/board.mjs`
 - **Dashboard:** `node ops/caretaker/dashboard.mjs` → `docs/board.html`
 - **This repo dogfoods itself.** The board tracking this work IS the product.
