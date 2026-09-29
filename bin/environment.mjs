@@ -35,11 +35,11 @@
  */
 import { spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { existsSync, mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { buildArgs } from "./sandbox.mjs";
+import { buildArgs, checkLimits, delegatedControllers } from "./sandbox.mjs";
 import { HOST, readDevcontainer, toEgress, toLimits } from "./spec.mjs";
 
 export class EnvironmentError extends Error {
@@ -133,10 +133,47 @@ export const TOOLCHAINS = [
   // java prints JAVA_TOOL_OPTIONS, when set, before its version.
   { name: "java", match: /(^|\/)java(:|$)/i, cmd: "java -version 2>&1 | grep -v '^Picked up'" },
 ];
-const ANY_VERSION = /^(latest|lts|os-provided|none|)$/i;
+// "none" is NOT here: a feature at version "none" means "do not install it",
+// so the tool must be absent (independent review: it was read as "any").
+const ANY_VERSION = /^(latest|lts|os-provided|)$/i;
+
+/** The version in an image tag: its last dotted number ("1-22-bookworm" is 22, "3.12-slim" is 3.12), else latest. */
+export const tagVersion = (image) => {
+  const tag = /:([^/:@]+)(@|$)/.exec(String(image ?? ""))?.[1] ?? "";
+  return tag.match(/\d+(?:\.\d+)*/g)?.at(-1) ?? "latest";
+};
+
+/**
+ * The services a compose file declares, and each one's image: the `services:`
+ * map and its `image:` lines, nothing else of compose. No YAML dependency, so
+ * a file this cannot read is reported as unread rather than guessed at.
+ */
+export function composeServices(text) {
+  const out = {};
+  const lines = String(text).split(/\r?\n/);
+  const start = lines.findIndex((l) => /^services:\s*(#.*)?$/.test(l));
+  if (start === -1) return null;
+  let indent = null;
+  let cur = null;
+  for (const l of lines.slice(start + 1)) {
+    if (!l.trim() || /^\s*#/.test(l)) continue;
+    const lead = l.length - l.trimStart().length;
+    if (lead === 0) break;
+    indent ??= lead;
+    const svc = lead === indent && /^\s*["']?([\w.-]+)["']?:\s*(#.*)?$/.exec(l);
+    if (svc) {
+      cur = svc[1];
+      out[cur] = { image: null };
+    } else if (cur && lead > indent) {
+      const img = /^\s*image:\s*["']?([^"'\s#]+)/.exec(l);
+      if (img) out[cur].image = img[1];
+    }
+  }
+  return out;
+}
 
 /** What the spec and devcontainer declare. */
-export function declared({ dev, specs = [] }) {
+export function declared({ dev, specs = [], devcontainerPath = null }) {
   const tools = [];
   const unknownFeatures = [];
   for (const [id, opts] of Object.entries(dev?.features ?? {})) {
@@ -144,7 +181,37 @@ export function declared({ dev, specs = [] }) {
     if (!tc) unknownFeatures.push(id);
     else tools.push({ name: tc.name, version: String(opts?.version ?? "latest"), feature: id });
   }
-  const services = dev?.runServices ?? (dev?.dockerComposeFile && dev?.service ? [dev.service] : []);
+  // An image named for a toolchain declares it too, at its tag's version
+  // (independent review: node:22 declared nothing), unless a feature says.
+  if (dev?.image) {
+    const base = String(dev.image).split("/").at(-1).split(/[:@]/)[0];
+    const tc = TOOLCHAINS.find((t) => t.match.test(base));
+    if (tc && !tools.some((t) => t.name === tc.name)) tools.push({ name: tc.name, version: tagVersion(dev.image), feature: `image ${dev.image}` });
+  }
+  // Services come from the compose file, with the image each one runs
+  // (independent QA: the file was never read, so no version existed to
+  // compare). The dev container's own `service` is the environment itself,
+  // not a service it needs.
+  let compose = null;
+  let composeError = null;
+  const files = [dev?.dockerComposeFile ?? []].flat();
+  if (files.length && devcontainerPath) {
+    compose = {};
+    for (const f of files) {
+      try {
+        const got = composeServices(readFileSync(resolve(dirname(devcontainerPath), f), "utf8"));
+        if (!got) composeError = `${f} has no services: map`;
+        else Object.assign(compose, got);
+      } catch (e) {
+        composeError = `${f} could not be read: ${e.code ?? e.message}`;
+      }
+    }
+  }
+  const names = (dev?.runServices ?? Object.keys(compose ?? {})).filter((n) => n !== dev?.service);
+  const services = names.map((name) => {
+    const image = compose?.[name]?.image ?? null;
+    return { name, image, version: image ? tagVersion(image) : null, ...(image ? {} : { why: composeError ?? (compose ? `no image: line for ${name} in the compose file` : "no compose file declares it") }) };
+  });
   const merged = { hosts: [...new Set(specs.flatMap((s) => s.hosts ?? []))] };
   const egress = toEgress(merged, dev);
   return { image: dev?.image ?? (dev?.build?.dockerfile ? `build: ${dev.build.dockerfile}` : null), tools, unknownFeatures, services, hosts: egress.allow };
@@ -179,19 +246,30 @@ export function probeScript({ hosts, canary }) {
         `else r=noprobe; fi; printf 'host %s %s\\n' ${shq(h)} "$r"`,
     );
   }
+  // The canary again with every proxy variable unset (independent review: a
+  // network that routes AROUND the proxy read as closed, since the probe only
+  // ever asked through it). Reached directly means the route itself is open.
+  const bare = "env -u HTTPS_PROXY -u https_proxy -u HTTP_PROXY -u http_proxy -u ALL_PROXY -u all_proxy";
+  const url = shq(`https://${canary}/`);
+  lines.push(
+    `if command -v curl >/dev/null 2>&1; then if ${bare} curl -s -m 5 -o /dev/null ${url}; then r=yes; else r=no; fi; ` +
+      `elif command -v wget >/dev/null 2>&1; then ${bare} wget -q -T 5 -O /dev/null ${url} >/dev/null 2>&1; c=$?; if [ $c -eq 0 ] || [ $c -eq 8 ]; then r=yes; else r=no; fi; ` +
+      `else r=noprobe; fi; printf 'direct %s %s\\n' ${shq(canary)} "$r"`,
+  );
   return `${lines.join("\n")}\n`;
 }
 
 export function parseProbe(stdout) {
   const tools = {};
   const hosts = {};
+  const direct = {};
   for (const line of String(stdout).split("\n")) {
     const t = /^tool (\S+) (.*)$/.exec(line);
     if (t) tools[t[1]] = t[2].trim() === "-" ? null : t[2].trim();
-    const h = /^host (\S+) (yes|no|noprobe)$/.exec(line);
-    if (h) hosts[h[1]] = h[2] === "yes" ? true : h[2] === "no" ? false : null;
+    const h = /^(host|direct) (\S+) (yes|no|noprobe)$/.exec(line);
+    if (h) (h[1] === "host" ? hosts : direct)[h[2]] = h[3] === "yes" ? true : h[3] === "no" ? false : null;
   }
-  return { tools, hosts };
+  return { tools, hosts, direct };
 }
 
 /** "22" matches "v22.3.0"; "3.12" matches "Python 3.12.1"; "3.1" does not match "3.12.1". */
@@ -207,11 +285,15 @@ export function versionMatches(want, got) {
  * network the probe ran on: with none, reachability was not tested and says so
  * once, rather than as one "unreachable" per host.
  */
-export function compare(decl, obs, { net = "none", canary } = {}) {
+export function compare(decl, obs, { net = "none", canary, running = null } = {}) {
   const diffs = [];
   const add = (kind, message) => diffs.push({ kind, message });
   for (const t of decl.tools) {
     const got = obs.tools[t.name];
+    if (/^none$/i.test(t.version)) {
+      if (got) add("tool-version", `${t.name} is declared "none" (${t.feature}), so not installed, but the environment has ${got}`);
+      continue;
+    }
     if (got === undefined) add("tool-unchecked", `${t.name} is declared (${t.feature}) but the probe did not report it`);
     else if (got === null) add("tool-missing", `${t.name} ${t.version} is declared (${t.feature}) but not in the environment`);
     else if (!versionMatches(t.version, got)) add("tool-version", `${t.name} ${t.version} is declared (${t.feature}) but the environment has ${got}`);
@@ -220,7 +302,13 @@ export function compare(decl, obs, { net = "none", canary } = {}) {
     if (got !== null && !decl.tools.some((t) => t.name === name)) add("tool-undeclared", `${name} is in the environment (${got}) but nothing declares it`);
   }
   for (const f of decl.unknownFeatures) add("feature-unchecked", `feature ${f} is declared, and this check does not know how to ask for it`);
-  for (const s of decl.services) add("service-not-run", `service ${s} is declared, and this runner starts no services; nothing checked it`);
+  for (const s of decl.services) {
+    const name = s.name ?? s;
+    if (!s.image) add("service-unchecked", `service ${name} is declared, but ${s.why ?? "nothing declares its image"}, so there is no version to compare`);
+    else if (!running || !(name in running)) add("service-not-run", `service ${name} (${s.image}) is declared, and this runner starts no services; nothing checked it`);
+    else if (!running[name]) add("service-not-running", `service ${name} (${s.image}) is declared, and no container for it is running`);
+    else if (!versionMatches(s.version, tagVersion(running[name]))) add("service-version", `service ${name} is declared as ${s.image} but ${running[name]} is running`);
+  }
   if (net === "none") {
     if (decl.hosts.length) add("hosts-unchecked", `no network (net none): none of the ${decl.hosts.length} declared host(s) can be reached, so reachability was not checked. Run with --egress`);
   } else {
@@ -229,6 +317,7 @@ export function compare(decl, obs, { net = "none", canary } = {}) {
     } else {
       for (const h of decl.hosts) if (obs.hosts[h] === false) add("host-unreachable", `${h} is declared but cannot be reached from the environment`);
       if (canary && obs.hosts[canary] === true) add("host-undeclared-reachable", `${canary} is NOT declared and WAS reached: egress is open`);
+      else if (canary && obs.direct?.[canary] === true) add("host-undeclared-reachable", `${canary} is NOT declared and WAS reached DIRECTLY, with no proxy: the network routes around the proxy`);
     }
   }
   return diffs;
@@ -243,22 +332,48 @@ export function canaryFor(hosts) {
  * Run the probe in the same sandbox a run gets (or, with sandbox "none", on
  * this host) and compare. `egress` is { allow, egressNetwork } or null.
  */
-export async function check({ devcontainerPath, specs, image = null, sandbox = "podman", egress = null, exec, netns, runtime = "podman" }) {
+/**
+ * The image each declared service is running as, from the compose label the
+ * runtime puts on its container: "" when none runs, absent when the runtime
+ * cannot be asked.
+ */
+export function runningServices(services, run) {
+  const out = {};
+  for (const s of services) {
+    if (!s.image) continue;
+    const r = run(["ps", "--filter", `label=com.docker.compose.service=${s.name}`, "--format", "{{.Image}}"]);
+    if (r.status !== 0) return null;
+    out[s.name] = String(r.stdout ?? "").trim().split("\n")[0] ?? "";
+  }
+  return out;
+}
+
+export async function check({ devcontainerPath, specs, image = null, sandbox = "podman", egress = null, exec, netns, runtime = "podman", controllers = null }) {
   const dev = readDevcontainer(devcontainerPath);
   if (dev?.__error) throw new EnvironmentError("BAD_DEVCONTAINER", `${devcontainerPath} is not readable JSON: ${dev.__error}`);
-  const decl = declared({ dev, specs });
+  const decl = declared({ dev, specs, devcontainerPath });
   const canary = canaryFor(decl.hosts);
   const script = probeScript({ hosts: decl.hosts, canary });
   const run = exec ?? defaultExec(runtime);
+  const running = decl.services.some((s) => s.image) ? runningServices(decl.services, run) : null;
 
   if (sandbox === "none") {
     // On the host, "reachable" is this machine's network, not a sandbox's.
     const r = spawnSync("sh", ["-c", script], { encoding: "utf8" });
     const obs = parseProbe(r.stdout);
-    return { declared: decl, observed: obs, image: null, net: "host", differences: compare(decl, obs, { net: "host", canary }) };
+    return { declared: decl, observed: obs, image: null, net: "host", differences: compare(decl, obs, { net: "host", canary, running }) };
   }
   const { image: img, warnings } = resolveImage({ image, dev, devcontainerPath, runtime, exec: run });
   const limits = toLimits(dev);
+  // The same preflight a run gets (independent review: --cpus killed the
+  // probe where the cpu controller is not delegated). A check is not an
+  // agent run, so a limit the kernel cannot enforce is dropped and said.
+  if (runtime === "podman") {
+    for (const m of checkLimits(["memory", "cpus", "pids"], controllers ?? delegatedControllers().controllers)) {
+      if (limits[m.limit]) warnings.push(`probe not limited on ${m.limit}: no "${m.controller}" cgroup controller is delegated here`);
+      limits[m.limit] = null;
+    }
+  }
   const probeIn = (net, extraRunFlags = [], env = {}) => {
     const args = buildArgs({ image: img, limits, workdir: mkdtempSync(join(tmpdir(), "envcheck-")), net, cmd: ["sh", "-c", script], runtime });
     const envFlags = Object.entries(env).flatMap(([k, v]) => ["-e", `${k}=${v}`]);
@@ -280,7 +395,7 @@ export async function check({ devcontainerPath, specs, image = null, sandbox = "
     });
     obs = out.result;
   } else obs = probeIn("none");
-  return { declared: decl, observed: obs, image: img, imageId: imageId(img, { runtime, exec: run }), net, warnings, differences: compare(decl, obs, { net, canary }) };
+  return { declared: decl, observed: obs, image: img, imageId: imageId(img, { runtime, exec: run }), net, warnings, differences: compare(decl, obs, { net, canary, running }) };
 }
 
 /* -------------------------------------------------------------------- cli */

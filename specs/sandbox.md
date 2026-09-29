@@ -95,6 +95,22 @@ host that cannot be reached, and an undeclared host that can. That last one
 means egress is open. On `--network none` no host can be reached, and that is
 stated once rather than reported as every host being down.
 
+What counts as declared, and how each is asked:
+- **Toolchains** come from features, and from an image named for one at its
+  tag's version (`javascript-node:1-22-bookworm` is node 22). A feature's own
+  version wins. A feature at version `none` means not installed, so the tool
+  must be absent.
+- **Services** come from the compose file: each service's `image:` line, and
+  the version in its tag. The dev container's own `service` is the environment,
+  not a service it needs. A running service is found by its compose label and
+  its image compared. One that is not running, or whose image nothing declares,
+  is named as such.
+- **The canary** (a host nobody declared) is asked through the proxy and again
+  with every proxy variable unset. Reached directly means the network routes
+  around the proxy.
+- **Limits** get the same preflight as a run. A limit the kernel cannot enforce
+  is dropped from the probe and said, not left to kill the probe.
+
 Hosts reach a shell in that probe, and with `--sandbox none` the shell is the
 host's. So a `hosts:` entry must be a host name (two or more DNS labels, or
 `.example.com` for its subdomains); anything else is refused when the spec is

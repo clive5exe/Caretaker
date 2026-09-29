@@ -11,12 +11,12 @@
  * Run: node bin/environment.test.mjs
  */
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  EnvironmentError, buildArgv, buildTag, canaryFor, check, compare, declared, parseProbe, probeScript, resolveImage, versionMatches,
+  EnvironmentError, buildArgv, buildTag, canaryFor, check, compare, composeServices, declared, parseProbe, probeScript, resolveImage, runningServices, tagVersion, versionMatches,
 } from "./environment.mjs";
 import { HarnessError, imageFor, run } from "./harness.mjs";
 import { detect } from "./sandbox.mjs";
@@ -121,7 +121,7 @@ const fake = (name, body) => {
   writeFileSync(join(BIN, name), `#!/bin/sh\n${body}\n`);
   chmodSync(join(BIN, name), 0o755);
 };
-for (const t of ["sh", "head", "grep"]) {
+for (const t of ["sh", "head", "grep", "env"]) {
   const p = spawnSync("sh", ["-c", `command -v ${t}`], { encoding: "utf8" }).stdout.trim();
   symlinkSync(p, join(BIN, t));
 }
@@ -147,7 +147,7 @@ const probe = (curlBody, extra = {}) => {
   ok("a matching version is not a difference", !diffs.some((d) => /node/.test(d.message)));
   ok("a declared toolchain the environment lacks is named", kinds("tool-missing").some((m) => /^go latest/.test(m)));
   ok("a toolchain present that nobody declared is named", kinds("tool-undeclared").some((m) => /^ruby/.test(m)) && kinds("tool-undeclared").some((m) => /^java/.test(m)));
-  ok("a declared service this runner does not start is named, not assumed", kinds("service-not-run").some((m) => /service db/.test(m)));
+  ok("a declared service with no compose file to give its image is named as unchecked, with why", kinds("service-unchecked").some((m) => /service db .*no compose file declares it/.test(m)), JSON.stringify(diffs));
   ok("a feature the check cannot ask about is named as unchecked", kinds("feature-unchecked").some((m) => /widget/.test(m)));
   ok("a declared host that cannot be reached is named", JSON.stringify(kinds("host-unreachable")) === JSON.stringify(["cdn.example.test is declared but cannot be reached from the environment"]));
   ok("a refused canary is not a difference", kinds("host-undeclared-reachable").length === 0);
@@ -189,6 +189,51 @@ const probe = (curlBody, extra = {}) => {
   }
   ok("…and the probe refuses a non-host name itself, whoever built the list", refused === "BAD_HOST");
 }
+/* ------------------------------------- E-6: what independent review found */
+{
+  // Services, from the compose file (QA: it was never read, and the dev
+  // container's own service was reported as an unstarted one).
+  const dir = join(TMP, "compose-dev");
+  mkdirSync(dir);
+  writeFileSync(join(dir, "compose.yml"), "# the stack\nservices:\n  app:\n    build: .\n  db:\n    image: \"docker.io/library/postgres:16\"  # pinned\n    ports: [\"5432\"]\n  cache:\n    image: redis:7.2-alpine\nvolumes:\n  data:\n");
+  writeFileSync(join(dir, "devcontainer.json"), JSON.stringify({ dockerComposeFile: "compose.yml", service: "app", runServices: ["app", "db"] }));
+  const d = declared({ dev: JSON.parse(readFileSync(join(dir, "devcontainer.json"), "utf8")), devcontainerPath: join(dir, "devcontainer.json") });
+  ok("the compose file is read: each service's image, and its version from the tag", JSON.stringify(d.services) === '[{"name":"db","image":"docker.io/library/postgres:16","version":"16"}]', JSON.stringify(d.services));
+  ok("…and the dev container's own service is the environment, not a service it needs", !d.services.some((x) => x.name === "app"));
+  const all = declared({ dev: { dockerComposeFile: "compose.yml", service: "app" }, devcontainerPath: join(dir, "devcontainer.json") });
+  ok("with no runServices, every compose service but the dev container's is declared", all.services.map((x) => x.name).join() === "db,cache" && all.services[1].version === "7.2");
+  const k = (running) => compare({ ...d, tools: [], unknownFeatures: [], hosts: [] }, { tools: {}, hosts: {} }, { net: "none", running }).map((x) => x.kind).join();
+  ok("a running service at another version is named", k({ db: "docker.io/library/postgres:15" }) === "service-version");
+  ok("…one at the declared version is not a difference", k({ db: "docker.io/library/postgres:16.2" }) === "");
+  ok("…a declared service with no container running is named", k({ db: "" }) === "service-not-running");
+  ok("…and when the runtime cannot be asked, it says nothing checked it", k(null) === "service-not-run");
+  const asked = [];
+  const got = runningServices(d.services, (a) => (asked.push(a.join(" ")), { status: 0, stdout: "docker.io/library/postgres:15\n" }));
+  ok("running services are found by the compose label on their container", got.db === "docker.io/library/postgres:15" && asked[0] === "ps --filter label=com.docker.compose.service=db --format {{.Image}}", asked.join());
+  ok("a compose file with no services map is unread, not guessed at", composeServices("version: 3\n") === null);
+}
+{
+  // Version "none" means not installed (review: it was read as any version).
+  const d = { tools: [{ name: "python", version: "none", feature: "f" }], unknownFeatures: [], services: [], hosts: [] };
+  ok("a tool declared at version none that IS present is named", compare(d, { tools: { python: "Python 3.12.1" }, hosts: {} }).some((x) => x.kind === "tool-version" && /declared "none"/.test(x.message)));
+  ok("…and one that is absent is not a difference", compare(d, { tools: { python: null }, hosts: {} }).length === 0);
+}
+{
+  // The image tag declares a toolchain (review: node:22 declared nothing).
+  ok("an image named for a toolchain declares it at its tag", JSON.stringify(declared({ dev: { image: "mcr.microsoft.com/devcontainers/javascript-node:1-22-bookworm" } }).tools) === '[{"name":"node","version":"22","feature":"image mcr.microsoft.com/devcontainers/javascript-node:1-22-bookworm"}]');
+  ok("…a feature's own version wins over the tag", declared({ dev: { image: "node:20", features: { "ghcr.io/devcontainers/features/node:1": { version: "22" } } } }).tools.map((t) => t.version).join() === "22");
+  ok("tag versions", tagVersion("python:3.12-slim") === "3.12" && tagVersion("node") === "latest" && tagVersion("reg:5000/node:22@sha256:ab") === "22" && tagVersion("golang:1.23") === "1.23");
+}
+{
+  // The canary, asked directly too (review: a network that routes around the
+  // proxy read as closed, since the probe only asked through it).
+  const { obs, canary } = probe('[ -n "$HTTPS_PROXY" ] && exit 56; exit 0', { HTTPS_PROXY: "http://proxy:8080" });
+  const diffs = compare(decl, obs, { net: "n", canary });
+  ok("an undeclared host reached with no proxy is named: the route is open", obs.direct[canary] === true && obs.hosts[canary] === false && diffs.some((x) => x.kind === "host-undeclared-reachable" && /DIRECTLY/.test(x.message)), JSON.stringify(obs));
+  const closed = probe("exit 7", { HTTPS_PROXY: "http://proxy:8080" });
+  ok("…and a closed route is not a difference", closed.obs.direct[closed.canary] === false && !compare(decl, closed.obs, { net: "n", canary: closed.canary }).some((x) => x.kind === "host-undeclared-reachable"));
+}
+
 ok("a fully matching environment has no differences", compare({ tools: [{ name: "node", version: "22", feature: "f" }], unknownFeatures: [], services: [], hosts: ["a.test"] }, { tools: { node: "v22.1.0", python: null }, hosts: { "a.test": true, "example.com": false } }, { net: "n", canary: "example.com" }).length === 0);
 
 /* ---------------------------------------- E-6: in the run's own sandbox */
@@ -212,6 +257,13 @@ ok("a fully matching environment has no differences", compare({ tools: [{ name: 
   ok("the probe runs with the sandbox a run gets: read-only root, no capabilities, no socket", joined.includes("--read-only") && joined.includes("--cap-drop ALL") && !joined.includes("docker.sock") && !joined.includes("podman.sock"), joined);
   ok("…behind the run's own egress proxy, allowing exactly the declared hosts", joined.includes("--network caretaker-egress-r_1") && joined.includes("-e HTTPS_PROXY=http://proxy:8080") && JSON.stringify(seen.find((a) => a[0] === "egress")?.[1]) === '["registry.npmjs.org"]', joined);
   ok("…and reports the image id it asked", r.imageId === "sha256:feed" && r.differences.length === 0, JSON.stringify(r.differences));
+  // Review: check() skipped the cgroup preflight, so --cpus killed the probe
+  // where the cpu controller is not delegated.
+  seen.length = 0;
+  const pre = await check({ devcontainerPath: DEV, specs: [], exec, netns, egress: { egressNetwork: "podman" }, controllers: ["memory", "pids"] });
+  const pj = (seen.find((a) => a[0] === "run") ?? []).join(" ");
+  ok("the probe gets the preflight a run gets: a limit that cannot bind is dropped", !pj.includes("--cpus") && pj.includes("--memory"), pj);
+  ok("…and said", pre.warnings.some((w) => /not limited on cpus/.test(w)), JSON.stringify(pre.warnings));
 }
 {
   const r = spawnSync(process.execPath, [join(HERE, "environment.mjs"), "check", "--sandbox", "none", "--devcontainer", DEV, "--specs", join(TMP, "no-specs")], { encoding: "utf8", env: { ...process.env, PATH: `${BIN}:${process.env.PATH}` } });
