@@ -1,7 +1,7 @@
 ---
 title: The sandbox
 status: accepted
-updated: 2026-08-30
+updated: 2026-09-29
 ---
 
 ```spec
@@ -30,6 +30,20 @@ sandbox is usually sold against. Hosts come from the `hosts:` field above, plus
 the registries implied by the toolchains `devcontainer.json` declares. Everything
 else is refused with a 403 and a reason, and logged — a silent drop is
 indistinguishable from a broken network and gets debugged as one.
+
+## Egress belongs to one run
+
+A run started with a proxy gets its own `--internal` network and its own proxy
+(`netns.withRunEgress`). The proxy's log is bind-mounted into that run's archive
+directory, so every allowed and refused host is attributed to exactly the run
+that asked for it, by where the log lives. The proxy is never told which run it
+serves, and so cannot tell a wrong story about it. Both are torn down when the
+run ends, however it ends.
+
+A log the proxy cannot write does not stop the proxy. The failure is reported
+once, and every refusal still goes to stderr. A proxy that died on its first
+event refused every connection, allowed or not, and that reads as a broken
+network rather than a wrong log path.
 
 ## What is deliberately not done
 

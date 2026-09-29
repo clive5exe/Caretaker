@@ -36,7 +36,7 @@ Today it is two things:
 - [The sandbox and egress](#the-sandbox-and-egress)
 - [Specs and the drift gate](#specs-and-the-drift-gate)
 - [How the pieces are meant to connect](#how-the-pieces-are-meant-to-connect)
-- [The web client (planned)](#the-web-client-planned)
+- [The web client](#the-web-client)
 - [The board format](#the-board-format)
 - [Configuration](#configuration)
 - [Tests](#tests)
@@ -57,6 +57,12 @@ node ops/foreman/dashboard.mjs          # rebuild docs/board.html
 `install.sh` refuses to run if `ops/foreman/` already exists in the target.
 Copying over a live board is the one mistake here that loses work, so there is no
 `--force`.
+
+To bring an existing install up to date, use `bash install.sh --upgrade
+/path/to/repo`. It replaces the tool files only, and never touches
+`config.json`, `prompt.txt` or the board. It keeps what it replaced in
+`ops/foreman/.upgrade-backup-<time>/`, and puts the old files back if the new
+board cannot read yours.
 
 ## The idea
 
@@ -92,7 +98,7 @@ flowchart BT
   L2["2 · harness<br/>plug in your AI<br/><i>bin/harness.mjs</i>"]
   L3["3 · skills<br/>consume the existing standard<br/><i>not started</i>"]
   L4["4 · board<br/>tasks, gates, tracking, cost<br/><i>built, installable</i>"]
-  L5["5 · UI<br/>watch a run, steer it<br/><i>TUI mockup; web client planned</i>"]
+  L5["5 · UI<br/>watch a run, steer it<br/><i>web client and TUI screens</i>"]
   L6["6 · graduate<br/>CI and docs from what happened<br/><i>not started</i>"]
   L1 --> L2 --> L3 --> L4 --> L5 --> L6
 
@@ -202,7 +208,7 @@ flowchart LR
 ## The task lifecycle
 
 A task has one of five statuses. Every move goes through `board.mjs`, except
-`dropped`, which you set by editing `board.json`.
+`dropped`, which `drop` sets with a reason.
 
 ```mermaid
 stateDiagram-v2
@@ -219,8 +225,8 @@ stateDiagram-v2
   blocked --> done: done, only if gates pass
   done --> todo: todo reopens it
   done --> doing: start reopens it
-  todo --> dropped: edit board.json
-  doing --> dropped: edit board.json
+  todo --> dropped: drop "why"
+  doing --> dropped: drop "why"
   done --> [*]
   dropped --> [*]
 ```
@@ -234,6 +240,23 @@ node ops/foreman/board.mjs note  T-012 "text"     append to the note
 node ops/foreman/board.mjs status                 show the board
 node ops/foreman/board.mjs build                  rebuild docs/board.md
 ```
+
+Seven more commands record facts a human acts on. Each appends a record with
+`by` (the config's `operator`, or your OS user) and a full ISO `at`:
+
+```
+node ops/foreman/board.mjs ask    T-012 "question"          questions[]; the Inbox shows it until answered
+node ops/foreman/board.mjs answer T-012 q1 "text"           the answer, on that question
+node ops/foreman/board.mjs triage T-012 accept|reject "why" triage[]
+node ops/foreman/board.mjs spec-approve T-012               specReview[], keyed on the spec's git blob
+node ops/foreman/board.mjs spec-reject  T-012 "why"
+node ops/foreman/board.mjs pr     T-012 https://…           the PR link
+node ops/foreman/board.mjs drop   T-012 "why"               -> dropped, with the reason
+```
+
+Spec approval is tied to the spec's content: edit the spec and the approval no
+longer matches it. Only a spec with a ```` ```spec ```` block governs anything,
+so only those can be approved.
 
 A few details matter:
 
@@ -609,16 +632,34 @@ flowchart TD
 
 `docs/board.json` in this repo tracks each of these steps as its own task.
 
-## The web client (planned)
+## The web client
 
-Nothing here is built. The decision record,
-`docs/decisions/0002-an-optional-web-client.md`, is merged, but its status line
-still reads draft. The product and technical specs are in `specs/foreman-web/`.
+A local page for the person at the machine: what is running, what is stuck, what
+it cost, and an Inbox of the decisions only a human can make. It is a client of
+the core, never a peer. If it and the CLI ever disagree, the web client is the
+one that is wrong. The decision record is
+`docs/decisions/0002-an-optional-web-client.md`; the product and technical specs
+are in `specs/foreman-web/`.
 
-What is planned is a local page for the person at the machine: runs, what is
-stuck, what it cost, and an Inbox of the decisions only a human can make. It is a
-client of the core, never a peer. If it and the CLI ever disagree, the web
-client is the one that is wrong.
+```
+npm --prefix web ci && npm --prefix web run build   # once; optional
+node bin/serve.mjs ops/foreman/config.json          # prints a sign-in URL once
+```
+
+Open the printed URL. From another machine, tunnel: `ssh -L 7420:127.0.0.1:7420
+you@box`. Without the build, the server still answers the API under `/api/v1`
+and links `docs/board.html`.
+
+The same project in a terminal, over SSH, with nothing listening on a port:
+`node bin/tui.mjs ops/foreman/config.json`. Four screens (1 Runs, 2 Board,
+3 Inbox, 4 Metrics), read from the same read model, and `:` for the commands
+core offers on the selected work item.
+
+The pages are Dashboard, Activity (the work board, by lifecycle stage or by
+status), each work item, Inbox, Runs and Run detail, Agents, Specs & drift,
+Metrics, Settings and Getting started. Ctrl-K opens a command menu that lists
+pages, work items, runs and, on a work item, the commands core offers for it
+right now.
 
 ```mermaid
 flowchart LR
@@ -636,7 +677,7 @@ flowchart LR
   DM --> HTML[docs/board.html<br/>unchanged, zero dependencies]
 
   classDef planned stroke-dasharray: 5 5
-  class BR,SV,RM,LC,RN planned
+  class RN planned
 ```
 
 It keeps the three reasons the terminal UI was preferred, rather than waving
@@ -672,13 +713,23 @@ What it does not change:
 - **`docs/board.html` stays** zero-dependency and offline, built from the same
   metric functions the server uses, so the two cannot disagree.
 - **The install stays dependency-free.** The optional React client in `web/`
-  would hold the only npm dependencies in the repo, and nothing in `bin/` or
-  `ops/foreman/` would import it.
+  holds the only npm dependencies in the repo, and nothing in `bin/` or
+  `ops/foreman/` imports it. `bin/web-boundary.test.mjs` fails if `web/src`
+  imports from `bin/`, names a gate or stage outside its one label module,
+  uses `innerHTML`, makes an external request or holds a color outside
+  `web/src/theme.css`.
 - **The terminal UI is not replaced.** Over SSH, with nothing listening, it is
   still the right tool.
 
-Pages over board data could start now. Anything that shows runs waits on the
-harness passing qa and on every run appending to the event log.
+Pages over board data are complete today. Run pages fill in as runs are
+recorded: until the harness archives runs (C-4) and attributes egress per run
+(C-5), those sections say *not recorded* and name what would record them,
+rather than showing an empty chart or a zero.
+
+`bin/serve.test.mjs` attacks each control: no cookie, a wrong token, a wrong
+`Host`, cross-origin and form-shaped writes, traversal in run ids and file
+names, a symlink out of the archive, a `<script>` in a transcript and a planted
+key. Each control was removed in turn and the suite went red.
 
 ## The board format
 
@@ -705,6 +756,9 @@ more.
   than silently weighing zero.
 - `gate.<name>` is always the latest verdict, and earlier attempts sit in its
   `history`, oldest first.
+- `questions`, `triage`, `specReview`, `pr` and `dropped` are written by the
+  commands above. They are optional and additive: an older `board.mjs` reads a
+  board that carries them and keeps them when it writes.
 
 ## Configuration
 
@@ -731,6 +785,8 @@ more.
   read it yet; see [Gates and verdicts](#gates-and-verdicts) for what `done`
   actually demands.
 - `agentsDir` is optional. Point it anywhere, or leave it out.
+- `operator` is optional: the name recorded as `by` on questions, answers and
+  reviews. It defaults to your OS user.
 - `FACTORY_CONFIG` in the environment points `board.mjs` at a different config
   file.
 

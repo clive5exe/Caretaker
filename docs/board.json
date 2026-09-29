@@ -588,6 +588,230 @@
           "note": "Terraform and Ansible are right for LONG-LIVED infrastructure and wrong for an ephemeral sandbox, so they belong here rather than in Layer 1. Emitting them at graduate beats emitting them at init for the same reason CI does: at init a scaffolder knows nothing about the project. EMITTER, NOT DEPENDENCY - some teams use Pulumi, some use plain bash, some use Nix, and making one of them a hard requirement contradicts the whole thesis."
         }
       ]
+    },
+    {
+      "name": "Layer 5 — Web client",
+      "goal": "An optional local web client over the core. Specified in specs/foreman-web/, accepted in ADR-0002.",
+      "tasks": [
+        {
+          "id": "W-0",
+          "title": "ADR-0002 accepted or rejected",
+          "owner": "founder",
+          "est": "30m",
+          "status": "doing",
+          "deps": [],
+          "ac": "docs/decisions/0002-an-optional-web-client.md says accepted or rejected, and records whether any W-task may start before H-1 passes qa",
+          "note": "Spec: specs/foreman-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Accepted 2026-09-29 by Five. It records that no W-task starts before H-1's qa gate passes. PR #9 carries W-tasks while H-1's latest qa verdict is still fail. Resolving that is a decision, not a build step."
+        },
+        {
+          "id": "C-1",
+          "title": "board.mjs importable; golden CLI test; lock",
+          "owner": "backend",
+          "est": "1d",
+          "status": "doing",
+          "deps": [],
+          "ac": "board.mjs exports its domain functions behind an entry guard, a golden test proves the CLI's output and exit codes unchanged, and the read-modify-write is locked",
+          "note": "Spec: specs/foreman-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built in PR #9, which also carries C-1, C-2, C-3, C-6 and U-2. Gate verdicts not recorded: nobody closes their own work."
+        },
+        {
+          "id": "C-2",
+          "title": "dashboard metrics exported; identical page",
+          "owner": "backend",
+          "est": "1d",
+          "status": "doing",
+          "deps": [],
+          "ac": "dashboard.mjs exports pure metric functions, and a back-to-back test proves docs/board.html is unchanged",
+          "note": "Spec: specs/foreman-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built in PR #9, which also carries C-1, C-2, C-3, C-6 and U-2. Gate verdicts not recorded: nobody closes their own work."
+        },
+        {
+          "id": "C-3",
+          "title": "lifecycle.mjs: stageOf, commandsFor",
+          "owner": "backend",
+          "est": "1d",
+          "status": "doing",
+          "deps": [
+            "C-1"
+          ],
+          "ac": "a pure stageOf and commandsFor derive a work item's stage and allowed commands, with missingGates imported from board.mjs as the only gate definition",
+          "note": "Spec: specs/foreman-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built in PR #9, which also carries C-1, C-2, C-3, C-6 and U-2. Gate verdicts not recorded: nobody closes their own work."
+        },
+        {
+          "id": "C-4",
+          "title": "run id, parent, archive, redacted transcripts",
+          "owner": "backend",
+          "est": "1d",
+          "status": "doing",
+          "deps": [
+            "H-1",
+            "H-0"
+          ],
+          "ac": "a run started through the runner is archived under stateDir with run.json, diff.patch and redacted transcripts, a live redacted mirror while it runs, and a refusal when stateDir is inside the workspace",
+          "note": "Spec: specs/foreman-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built on this branch in bin/runstore.mjs, checked by bin/runstore.test.mjs and mutation-checked. Needs security as well as reviewer and qa. Gate verdicts not recorded."
+        },
+        {
+          "id": "C-5",
+          "title": "egress attributable to a run (ADR first)",
+          "owner": "security",
+          "est": "2d",
+          "status": "doing",
+          "deps": [
+            "E-2",
+            "C-4"
+          ],
+          "ac": "a run started with a proxy gets its own network and proxy, and its allowed and refused hosts land in that run's archive, redacted; the live check runs in CI",
+          "note": "Spec: specs/foreman-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built on this branch, opt-in: netns.withRunEgress and runstore --egress, checked by bin/egress-attribution.test.mjs (live half in CI). ADR-0003 is a draft. Also fixed: the proxy died on its first event when --log was unwritable. Needs security. Gate verdicts not recorded."
+        },
+        {
+          "id": "C-6",
+          "title": "ask/answer, triage, spec review, pr, drop",
+          "owner": "backend",
+          "est": "1d",
+          "status": "doing",
+          "deps": [
+            "C-1"
+          ],
+          "ac": "ask, answer, triage, spec-approve, spec-reject, pr and drop are append-only board commands carrying by and at",
+          "note": "Spec: specs/foreman-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built in PR #9, which also carries C-1, C-2, C-3, C-6 and U-2. Gate verdicts not recorded: nobody closes their own work."
+        },
+        {
+          "id": "W-1",
+          "title": "serve: binding, token, host/origin checks, CSP, files",
+          "owner": "security",
+          "est": "1d",
+          "status": "doing",
+          "deps": [
+            "C-1"
+          ],
+          "ac": "serve binds loopback only, exchanges a one-time token for an HttpOnly SameSite=Strict cookie, checks Host and Origin exactly, sends a strict CSP, and serves only allowlisted run files; each control is attacked in a test",
+          "note": "Spec: specs/foreman-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built in PR #9, which also carries C-1, C-2, C-3, C-6 and U-2. Gate verdicts not recorded: nobody closes their own work. Needs security."
+        },
+        {
+          "id": "W-2",
+          "title": "read API over readmodel, sources everywhere",
+          "owner": "backend",
+          "est": "1d",
+          "status": "doing",
+          "deps": [
+            "W-1",
+            "C-2",
+            "C-3"
+          ],
+          "ac": "every read route goes through readmodel.mjs and carries sources, so absent data renders as not recorded",
+          "note": "Spec: specs/foreman-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built in PR #9, which also carries C-1, C-2, C-3, C-6 and U-2. Gate verdicts not recorded: nobody closes their own work."
+        },
+        {
+          "id": "W-3",
+          "title": "SSE stream with offset resume",
+          "owner": "backend",
+          "est": "4h",
+          "status": "doing",
+          "deps": [
+            "W-1"
+          ],
+          "ac": "the stream tails append-only files from a byte offset, holds a partial line, and resumes from Last-Event-ID with no gap or duplicate",
+          "note": "Spec: specs/foreman-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built in PR #9, which also carries C-1, C-2, C-3, C-6 and U-2. Gate verdicts not recorded: nobody closes their own work."
+        },
+        {
+          "id": "W-4",
+          "title": "command endpoint over core only",
+          "owner": "security",
+          "est": "4h",
+          "status": "doing",
+          "deps": [
+            "W-1",
+            "C-6"
+          ],
+          "ac": "POST commands dispatch only to board.mjs exports; a core refusal returns 409 with core's own words",
+          "note": "Spec: specs/foreman-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built in PR #9, which also carries C-1, C-2, C-3, C-6 and U-2. Gate verdicts not recorded: nobody closes their own work. Needs security."
+        },
+        {
+          "id": "W-5",
+          "title": "client shell, api module, boundary test",
+          "owner": "frontend",
+          "est": "1d",
+          "status": "doing",
+          "deps": [
+            "W-2"
+          ],
+          "ac": "web/ builds, and bin/web-boundary.test.mjs fails if web/src imports bin/, a vendor SDK, innerHTML, or names a gate or stage outside the label map",
+          "note": "Spec: specs/foreman-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built in PR #9, which also carries C-1, C-2, C-3, C-6 and U-2. Gate verdicts not recorded: nobody closes their own work."
+        },
+        {
+          "id": "W-6",
+          "title": "pages over the board: Dashboard, Work item, Inbox, Specs, Settings",
+          "owner": "frontend",
+          "est": "2d",
+          "status": "doing",
+          "deps": [
+            "W-5"
+          ],
+          "ac": "each page renders only server-given stage, reasons and commands, and says not recorded where a source is absent",
+          "note": "Spec: specs/foreman-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built in PR #9, which also carries C-1, C-2, C-3, C-6 and U-2. Gate verdicts not recorded: nobody closes their own work."
+        },
+        {
+          "id": "W-7",
+          "title": "pages over runs: Runs, Run detail, Agents",
+          "owner": "frontend",
+          "est": "2d",
+          "status": "doing",
+          "deps": [
+            "W-5",
+            "C-4",
+            "C-5"
+          ],
+          "ac": "the run pages show archived runs' identity, diff, transcript, egress and parent/child, and not recorded for anything unarchived",
+          "note": "Spec: specs/foreman-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Pages built in PR #9. Their data arrives with C-4 and C-5 on this branch."
+        },
+        {
+          "id": "W-14",
+          "title": "install upgrade mode; backward-compat end to end",
+          "owner": "backend",
+          "est": "4h",
+          "status": "doing",
+          "deps": [
+            "C-1"
+          ],
+          "ac": "install.sh --upgrade replaces the tool files only, keeps backups, and rolls back if the new board cannot read the repo's; an old install becomes one the server opens",
+          "note": "Spec: specs/foreman-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built on this branch, checked by bin/install.test.mjs and mutation-checked. Gate verdicts not recorded."
+        },
+        {
+          "id": "W-15",
+          "title": "Metrics page",
+          "owner": "frontend",
+          "est": "1d",
+          "status": "doing",
+          "deps": [
+            "W-5",
+            "C-2"
+          ],
+          "ac": "the Metrics page shows the same numbers docs/board.html does, from the same functions",
+          "note": "Spec: specs/foreman-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built in PR #9, which also carries C-1, C-2, C-3, C-6 and U-2. Gate verdicts not recorded: nobody closes their own work."
+        },
+        {
+          "id": "W-16",
+          "title": "command menu over commandsFor, and the Getting started page",
+          "owner": "frontend",
+          "est": "1d",
+          "status": "doing",
+          "deps": [
+            "W-5"
+          ],
+          "ac": "the command menu offers exactly what commandsFor returns, and Getting started walks a new repo to its first closed task",
+          "note": "Spec: specs/foreman-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built in PR #9, which also carries C-1, C-2, C-3, C-6 and U-2. Gate verdicts not recorded: nobody closes their own work."
+        },
+        {
+          "id": "W-17",
+          "title": "theme tokens, bundled fonts, wordmark; boundary test covers URLs and colors",
+          "owner": "frontend",
+          "est": "4h",
+          "status": "doing",
+          "deps": [
+            "W-5"
+          ],
+          "ac": "the client makes no external request and uses no color outside theme.css, enforced by the boundary test",
+          "note": "Spec: specs/foreman-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built in PR #9, which also carries C-1, C-2, C-3, C-6 and U-2. Gate verdicts not recorded: nobody closes their own work."
+        }
+      ]
     }
   ]
 }

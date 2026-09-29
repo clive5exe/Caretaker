@@ -138,9 +138,11 @@ export function proxyRunArgs({
   devcontainer = null,
   port = 8080,
   logFile = null,
+  logDir = null,
   detach = true,
 }) {
   if (!internalNetwork) throw new Error("proxyRunArgs needs internalNetwork");
+  if (logFile && logDir) throw new Error("proxyRunArgs takes logFile (a path inside the container) or logDir (a host dir), not both");
   if (!egressNetwork) throw new Error("proxyRunArgs needs egressNetwork");
   if (!allow && !spec) throw new Error("proxyRunArgs needs allow or spec — no default allowlist");
 
@@ -164,6 +166,10 @@ export function proxyRunArgs({
     "no-new-privileges",
     "-v",
     `${binDir}:/egress-bin:Z,ro`,
+    // The only writable mount, and only when asked for: a host directory the
+    // log lands in. Without it a --log path resolves inside this --rm
+    // container and is gone with it.
+    ...(logDir ? ["-v", `${logDir}:/egress-log:Z`] : []),
     "-w",
     "/egress-bin",
     image,
@@ -176,6 +182,7 @@ export function proxyRunArgs({
   if (devcontainer) args.push("--devcontainer", devcontainer);
   args.push("--port", String(port));
   if (logFile) args.push("--log", logFile);
+  if (logDir) args.push("--log", "/egress-log/egress.jsonl");
   return args;
 }
 
@@ -204,6 +211,85 @@ export function agentHostArgs(proxyIp, alias = "proxy") {
  */
 export function agentNetFlag(internalNetwork) {
   return internalNetwork;
+}
+
+/* ---------------------------------------------------------- one run's egress */
+
+/**
+ * C-5: EGRESS ATTRIBUTABLE TO A RUN, by giving each run its own internal
+ * network and its own proxy, with the proxy's log bind-mounted into that run's
+ * archive directory. The run is identified by WHERE its log lives, not by a
+ * field the proxy would have to be told: a proxy serving one run cannot
+ * misattribute another's traffic. The proxy's allow/deny logic is untouched.
+ *
+ * The cost, stated: two containers' worth of podman create and destroy per run
+ * (a network and a proxy) on top of the agent's own. Sustained podman churn is
+ * the suspected cause of the netns DNS symptom recorded in H-1's note, so this
+ * is measured under load before it becomes the default.
+ */
+export function perRunNames(runId) {
+  if (!/^r_[0-9a-f]{8}$/.test(String(runId))) throw new Error(`perRunNames needs a run id like r_0a1b2c3d, got ${JSON.stringify(runId)}`);
+  return { internalNetwork: `fm-int-${runId}`, proxyName: `fm-egress-${runId}` };
+}
+
+const defaultExec = (runtime) => (args) => {
+  const r = spawnSync(runtime, args, { encoding: "utf8", timeout: 60_000 });
+  return { status: r.status, stdout: r.stdout ?? "", stderr: (r.stderr ?? "") || (r.error?.message ?? "") };
+};
+
+/**
+ * Stand up a run's network and proxy, call `fn` with what the harness policy
+ * needs to use them, and tear both down whatever `fn` does.
+ *
+ * `fn` receives { net, extraRunFlags, env }: pass `net` as policy.net, append
+ * `extraRunFlags` (the static /etc/hosts entry, since the network has DNS
+ * off), and merge `env` (the proxy variables). Setting the variables is
+ * advisory, as sandbox.md says; the network is what enforces.
+ *
+ * Returns { result, cleanup }. A failed teardown is reported, not thrown: the
+ * run already happened, and losing its result over a stuck network would be
+ * the worse outcome. `exec` is injectable so the sequencing is testable
+ * without podman.
+ */
+export async function withRunEgress(
+  { runId, allow, logDir, egressNetwork = "podman", image, port = 8080, alias = "proxy", runtime = "podman", binDir, exec },
+  fn,
+) {
+  if (!Array.isArray(allow)) throw new Error("withRunEgress needs allow: an array of hosts (empty denies everything)");
+  if (!logDir) throw new Error("withRunEgress needs logDir: the host directory the run's egress.jsonl lands in");
+  const run = exec ?? defaultExec(runtime);
+  const { internalNetwork, proxyName } = perRunNames(runId);
+  const must = (args, what) => {
+    const r = run(args);
+    if (r.status !== 0) throw new Error(`${what} failed (exit ${r.status}): ${String(r.stderr).trim()}`);
+    return r;
+  };
+  const cleanup = [];
+  const teardown = () => {
+    for (const [what, args] of [["remove proxy", ["rm", "-f", "-t", "2", proxyName]], ["remove network", removeNetworkArgs(internalNetwork)]]) {
+      const r = run(args);
+      cleanup.push({ step: what, ok: r.status === 0, detail: r.status === 0 ? null : String(r.stderr).trim() });
+    }
+  };
+  // An EMPTY allowlist is a real answer — deny everything — and must reach the
+  // proxy as one. `--allow ""` reads as a missing flag there and exits 2; a
+  // lone comma splits to no hosts, which is the deny-all it means.
+  const allowArg = allow.length ? allow : ",";
+  must(internalNetworkArgs(internalNetwork), "create the run's internal network");
+  try {
+    must(
+      proxyRunArgs({ name: proxyName, internalNetwork, egressNetwork, allow: allowArg, logDir, port, ...(image ? { image } : {}), ...(binDir ? { binDir } : {}) }),
+      "start the run's egress proxy",
+    );
+    const ip = must(proxyAddressArgs(proxyName, internalNetwork), "read the proxy's address").stdout.trim();
+    const extraRunFlags = agentHostArgs(ip, alias); // throws on anything that is not an address
+    const url = `http://${alias}:${port}`;
+    const env = { HTTPS_PROXY: url, HTTP_PROXY: url, https_proxy: url, http_proxy: url };
+    const result = await fn({ net: agentNetFlag(internalNetwork), extraRunFlags, env });
+    return { result, cleanup };
+  } finally {
+    teardown();
+  }
 }
 
 /* ------------------------------------------------------------- the attack */

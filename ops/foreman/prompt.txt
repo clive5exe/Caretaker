@@ -12,8 +12,9 @@ You are running UNATTENDED from cron. Nobody is watching, so:
 - Stage explicit paths, never `git add -A`. Other agents may have half-written
   files on disk.
 - If the next task needs a decision, a credential, or database access you do not
-  have, write what is needed into the task note and move to the next unblocked
-  one rather than guessing.
+  have, ask for it with `node ops/foreman/board.mjs ask <id> "question"` and
+  move to the next unblocked one rather than guessing. A question recorded that
+  way reaches a human's Inbox; one written into a note does not.
 
 Report at the end in two or three sentences: what you did, and anything a human
 needs to decide.

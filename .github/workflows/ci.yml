@@ -41,6 +41,13 @@ jobs:
           done
           exit $status
 
+      # The web client is optional and nothing in bin/ imports it, so it is
+      # built on its own: typecheck and bundle from the committed lockfile.
+      - name: web client builds
+        run: |
+          npm --prefix web ci
+          npm --prefix web run build
+
       # ops/foreman/ is this repo's installed copy of bin/ and RULES.md.
       # install.sh copies these files verbatim, so any difference is drift.
       - name: installed copy matches its source

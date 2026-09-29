@@ -192,6 +192,7 @@ if (isEntry) {
   const logFile = flags.log ?? null;
   const port = Number(flags.port ?? 8080);
   const counts = { allowed: 0, refused: 0, error: 0 };
+  let logBroken = false;
 
   const onEvent = (e) => {
     counts[e.kind] = (counts[e.kind] ?? 0) + 1;
@@ -199,7 +200,23 @@ if (isEntry) {
     // EVERY REFUSAL IS LOGGED. A block that leaves no trace is the same
     // experience as a broken network, and the person debugging it has no way to
     // tell which without this line.
-    if (logFile) appendFileSync(logFile, line + "\n");
+    //
+    // A LOG THAT CANNOT BE WRITTEN MUST NOT TAKE THE PROXY DOWN. This runs
+    // inside the CONNECT handler, so a throw here was an uncaught exception
+    // and the proxy died on its first event — the agent then saw a refused
+    // connection for every host, allowed or not, which reads as "the network
+    // is broken" rather than "the log path is wrong". The decision is already
+    // made and answered by the time this runs; the failure is reported on
+    // stderr, once, and the event itself still goes there.
+    if (logFile) {
+      try {
+        appendFileSync(logFile, line + "\n");
+      } catch (err) {
+        if (!logBroken) console.error(`[egress] cannot write --log ${logFile}: ${err.message}; events go to stderr only`);
+        logBroken = true;
+        if (e.kind === "allowed") console.error(line);
+      }
+    }
     if (e.kind !== "allowed") console.error(line);
   };
 
