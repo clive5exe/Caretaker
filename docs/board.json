@@ -381,8 +381,15 @@
           "gate": {
             "qa": {
               "verdict": "fail",
-              "at": "2026-08-30",
-              "note": "The suite is GREEN in 30 consecutive runs but the flake is UNEXPLAINED, so this is not a pass. It failed 2 runs in 5 while four agents were running podman-heavy work on this box: once as 'returns near the ceiling rather than the sleep — 60112ms for an 800ms ceiling', and twice as assertions returning undefined, which means something threw before them rather than the assertion being false.\n\nNOT REPRODUCED SINCE, under any condition tried: 10 runs idle, 5 under six spinning CPU hogs at load 3.5 on 4 cores, 6 more with the candidate fix REVERTED under that same load, and 4 during 40 podman container create/destroy cycles. Thirty runs, zero failures, with and without the change.\n\nSO THE CHANGE IS HARDENING, NOT A PROVEN FIX, and is labelled that way in the code. It is defensible on its own:  fires only when the child has exited AND its stdio pipes are closed, and a backgrounded grandchild inherits those pipes, so if the group kill misses it the promise waits for the grandchild's full sleep. That is a real hazard whether or not it caused this. The result now settles on its own bounded timer after SIGKILL, reporting the exit code as unknown and the verdict as killed, because waiting for certainty about a process already SIGKILLed reintroduces the hang the feature exists to prevent.\n\nTHE LEADING HYPOTHESIS IS PODMAN UNDER CHURN rather than CPU. The netns agent independently reported a matching symptom: a DNS alias that resolved instantly after startup returned empty 5 of 5 times late in a run of ~20 podman cycles, reproducible in its full suite and not in isolation. Same shape - fine alone, wrong under sustained runtime churn.\n\nHeld rather than passed on purpose. A suite that fails 2 in 5 and then passes 30 times without anyone understanding why is not a suite anyone should trust, and marking it green would teach exactly the habit of re-running until it works."
+              "at": "2026-09-29",
+              "note": "Independent QA (fresh agent, not the builder): on 46927f2 the one vendor preset (claude --print --output-format json, no --permission-mode) has its Edits denied while exiting 0, so a real run returns verdict completed with an empty diff; that was measured on a real claude run and is fixed only in open, unmerged PR #13 (3ec029a, not an ancestor of this branch), and every in-repo seam check uses a shell-script fake. The vendor-import check holds, and the old flake is explained: I ran pre-d502820 harness.mjs on an 800ms ceiling and it took 60047ms; the current one took 850ms.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-08-30",
+                  "note": "The suite is GREEN in 30 consecutive runs but the flake is UNEXPLAINED, so this is not a pass. It failed 2 runs in 5 while four agents were running podman-heavy work on this box: once as 'returns near the ceiling rather than the sleep — 60112ms for an 800ms ceiling', and twice as assertions returning undefined, which means something threw before them rather than the assertion being false.\n\nNOT REPRODUCED SINCE, under any condition tried: 10 runs idle, 5 under six spinning CPU hogs at load 3.5 on 4 cores, 6 more with the candidate fix REVERTED under that same load, and 4 during 40 podman container create/destroy cycles. Thirty runs, zero failures, with and without the change.\n\nSO THE CHANGE IS HARDENING, NOT A PROVEN FIX, and is labelled that way in the code. It is defensible on its own:  fires only when the child has exited AND its stdio pipes are closed, and a backgrounded grandchild inherits those pipes, so if the group kill misses it the promise waits for the grandchild's full sleep. That is a real hazard whether or not it caused this. The result now settles on its own bounded timer after SIGKILL, reporting the exit code as unknown and the verdict as killed, because waiting for certainty about a process already SIGKILLed reintroduces the hang the feature exists to prevent.\n\nTHE LEADING HYPOTHESIS IS PODMAN UNDER CHURN rather than CPU. The netns agent independently reported a matching symptom: a DNS alias that resolved instantly after startup returned empty 5 of 5 times late in a run of ~20 podman cycles, reproducible in its full suite and not in isolation. Same shape - fine alone, wrong under sustained runtime churn.\n\nHeld rather than passed on purpose. A suite that fails 2 in 5 and then passes 30 times without anyone understanding why is not a suite anyone should trust, and marking it green would teach exactly the habit of re-running until it works."
+                }
+              ]
             },
             "reviewer": {
               "verdict": "pass",
@@ -1063,6 +1070,11 @@
               "verdict": "pass",
               "at": "2026-09-29",
               "note": "Independent review (fresh agent, not the builder): tailFile reads from a byte offset, holds a partial final line, skips and counts unparseable lines; ids carry every file's offset so a Last-Event-ID reconnect resumes each file with no gap or duplicate, files that appear later are read from 0; invalidate on board rewrite and archive listing change; fs.watch plus a stat poll; heartbeat. serve.test's half-line, one-event and resume checks are green. Nits: the hello event carries no id, so a client that saw no log line reconnects without Last-Event-ID and skips events appended while it was away (REST refetch covers the page, not the live feed); a single line longer than the 8 MiB read window stalls the tail at that offset forever (serve.mjs:63-90); the per-run stream has no heartbeat."
+            },
+            "qa": {
+              "verdict": "fail",
+              "at": "2026-09-29",
+              "note": "Independent QA (fresh agent, not the builder): the Last-Event-ID resume holds (serve.test.mjs green, and multi-file cursors carry each file's offset), but the stream does not hold a partial line for a client that connects while one is half-written. openStream starts a fresh client at statSync(path).size, which can be mid-line; when the line completes, tailFile reads only its tail, JSON.parse fails, and the line is skipped and counted, never emitted. Reproduced against node bin/serve.mjs on a copy of the repo with /tmp/qa-w-sse.mjs: wrote event 0, appended the first 25 bytes of event 1, connected a fresh client, completed event 1, then appended event 2. The client received only [qa event 2], so event 1 is a gap. The REST fetch before connecting cannot have included it, because it was incomplete. Starting a fresh client at the last newline would fix it. The test only half-writes after the client connects."
             }
           }
         },
@@ -1083,6 +1095,11 @@
               "verdict": "fail",
               "at": "2026-09-29",
               "note": "Independent review (fresh agent, not the builder): dispatch is right: 12 allowlisted commands to board.command under board.mutate's lock, verdicts 400, core refusal 409 verbatim, unknown task 404. But TECH §1 Identity says a web mutation records by=operator with via:web so browser and CLI actions can be told apart, and 5 of the 12 do not: start, block, todo, note and done go through transition() (board.mjs:524), which takes no opts, so readmodel.mjs:735-740 builds {by, via} and it is dropped. Reproduced in a copy: a web note and a web block left no by/via on the task, and a web 'done' would be indistinguishable from a CLI close. The UI then says the opposite: ui.tsx:282 prints 'Recorded by the operator, via web.' under every command form (including note and block) and Settings.tsx:119 says 'recorded as by on every command, with via web'. Record by/via for transitions in core, or stop claiming it."
+            },
+            "qa": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "note": "Independent QA (fresh agent, not the builder): readmodel.command only accepts the fixed COMMANDS list and calls board.mutate, board.command, board.specInfo and board.build, all board.mjs exports. Against a copy of the repo over HTTP: qa, recordVerdict, build, __proto__, constructor and an array cmd all return 400 and leave board.json byte-identical (same md5 before and after). done on W-1 returns 409 {refused:{missing:[reviewer,qa],docsOnly:false}}, the same list the CLI refusal prints. An empty ask returns 409 with core's a question is required. An unknown task is 404. serve.test.mjs checks the refusal equals missingGates verbatim and that an accepted ask records by the operator via web. Outside this AC: core stringifies a non-string arg (args.text:{a:1} was stored as [object Object]), and start/done/note/block/todo from the web go through transition() with no by/via, so TECH.md section 1's via: web holds only for the C-6 commands."
             }
           }
         },
@@ -1102,6 +1119,11 @@
               "verdict": "pass",
               "at": "2026-09-29",
               "note": "Independent review (fresh agent, not the builder): web/ builds (tsc --noEmit + vite build, in a copy); api/client.ts is the one typed client, same-origin, writes send application/json and X-Caretaker; store.ts is one resource-keyed cache refetched on invalidate and one EventSource. web-boundary.test plants each banned pattern and sees it caught by rule name before scanning the tree (24 files clean); gate names are read from core's missingGates and stages from lifecycle.STAGES rather than retyped; the vendor list matches harness.test's. Nits: 'ready' and 'dropped' are not in STAGES, so a literal of either outside labels.ts is not caught; the scan covers web/src only, not web/index.html or vite.config.ts."
+            },
+            "qa": {
+              "verdict": "fail",
+              "at": "2026-09-29",
+              "note": "Independent QA (fresh agent, not the builder): web/ builds (npm run build in a copy, tsc plus vite, clean) and the boundary test catches bin/ imports, vendor SDK imports including a side-effect import, and innerHTML/dangerouslySetInnerHTML. It does not fail when web/src names a gate or stage outside labels.ts, except as a quoted string literal. Planted one at a time in a copy's web/src/pages/QaPlant.tsx, node bin/web-boundary.test.mjs stayed green for: t.gates.security?.verdict (property access), { reviewer: true, qa: true } (object keys), <span>human</span> (JSX text), and a template literal needing security. The first two are the natural way to hardcode a gate rule in the client, which is what the check exists to stop. The current tree has none of these (grep), so this is a gap in the enforcement, not a present violation."
             }
           }
         },
@@ -1121,6 +1143,11 @@
               "verdict": "pass",
               "at": "2026-09-29",
               "note": "Independent review (fresh agent, not the builder): Dashboard, Activity, Work item, Inbox, Specs and Settings render the server's lifecycle, reason, missingGates, requiredGates and commands; buttons and the Inbox's actions come only from commands; no verdict buttons; agent text is rendered as text nodes (no innerHTML, PR urls shown as text not links); absent sources say not recorded; read/unread only in localStorage; no Resolve button. Notes: the 'via web' claims in ui.tsx:282 and Settings.tsx:119 are false until W-4 records by/via on transitions; the Dashboard feed dedupes stream and REST events by t|detail, so a record with a key shows twice (redacted and raw) until W-2 is fixed; WorkItem computes open questions client-side (display only)."
+            },
+            "qa": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "note": "Independent QA (fresh agent, not the builder): read Dashboard, WorkItem, Inbox, Specs, Settings (and Activity). Stage, reason, missing gates, offered commands and Inbox actions all come from the API: buttons map t.commands and item.actions, and labels.ts only maps names to words and colors. Loaded each page in Chromium against a copy of this repo with runs.jsonl, the archive and agentsDir absent. Dashboard says tokens per closed task is not recorded (no run log), and Closed vs started is Not recorded. The work item's Runs tab says not recorded and names the run log. Settings lists each source present or absent with its path. Specs shows Not recorded branches for no git and no event log. No verdict button anywhere. Actions on W-2 matched /api/v1/work/W-2 commands exactly. No page errors and no external requests."
             }
           }
         },
@@ -1142,6 +1169,11 @@
               "verdict": "fail",
               "at": "2026-09-29",
               "note": "Independent review (fresh agent, not the builder): Runs, Run detail and Agents read the server's folded runs (legacy apart, reconstructed labelled, no end recorded after staleRunHours) and show not recorded per section. But the Egress tab mislabels every host: egress.mjs records are {t, kind: allowed|refused|error, host, port, reason|why} (egress.mjs:83,91,106,116), while RunDetail.tsx:86 parses decision/allowed, which never exist, so line 367 computes allowed=false for every row and line 378 prints 'refused' in a red chip for hosts the proxy ALLOWED; the refusal reason is never shown. On the one page meant to show what a run reached, allowed traffic reads as blocked. Also stale: RunDetail.tsx:352 says egress waits on C-5, which is built; TECH says 'no proxy was attached to this run'."
+            },
+            "qa": {
+              "verdict": "fail",
+              "at": "2026-09-29",
+              "note": "Independent QA (fresh agent, not the builder): identity, diff, transcript, parent/child and not recorded for unarchived files all render (Chromium against runstore.archive() fixtures: r_0a0a0a0a lists child r_0b0b0b0b, the child says child of r_0a0a0a0a, the transcript shows <script> as text, transcript.live.log says not recorded, an unknown run says Not recorded). But the egress tab shows every allowed host as refused. egress.mjs writes {kind:'allowed'|'refused'|'error', host, port, reason}, and RunDetail.tsx reads e.allowed ?? e.decision === 'allowed', neither of which exists. With egress.jsonl holding kind:allowed example.com and kind:refused evil.example, the page rendered: example.com 443 refused | evil.example 443 refused. It also drops the refusal reason. The child run's empty egress text still says egress waits for C-5, which is built."
             }
           }
         },
@@ -1161,6 +1193,11 @@
               "verdict": "pass",
               "at": "2026-09-29",
               "note": "Independent review (fresh agent, not the builder): install.sh --upgrade refuses a repo with no install, replaces only board.mjs, dashboard.mjs, run.mjs, loop.sh and RULES.md, backs each replaced file up under .upgrade-backup-<time>, checks the new board by running status and rolls back on failure, and never writes config.json, prompt.txt or the board. install.test upgrades the real pre-C-1 board into one readmodel.open accepts and sees the owner's task; removing the rollback restore or the status check goes red by name. Nits: the header says upgrade 'never opens' config and board, but the status check reads both (never WRITES is what is true, install.sh:17-18 vs :49-51); a rollback does not delete files the upgrade newly created; set -u without -e means a failed backup copy is not fatal; two upgrades in one second share a backup dir."
+            },
+            "qa": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "note": "Independent QA (fresh agent, not the builder): node bin/install.test.mjs green. Independently: installed into /tmp/qa-w-inst with bash install.sh, swapped in bin/testdata/board.pre-c1.mjs and deleted run.mjs. serve.mjs then refused with predates the web API and exit 1. bash install.sh --upgrade replaced board.mjs and run.mjs, kept the old board.mjs in .upgrade-backup-<time>/, and sha256sum -c confirmed docs/board.json, config.json and prompt.txt unchanged. serve.mjs then started and served the board. A bad checkout whose board.mjs throws on load rolled back with ROLLED BACK and exit 1. Minor, not blocking: rollback restores only files that had a backup, so a tool file the old install lacked stays new. A cp failure mid-loop exits without rolling back. The check runs board.mjs status under the caller's FACTORY_CONFIG, if set. serve's refusal suggests cp rather than install.sh --upgrade."
             }
           }
         },
@@ -1181,6 +1218,11 @@
               "verdict": "pass",
               "at": "2026-09-29",
               "note": "Independent review (fresh agent, not the builder): the Metrics page shows dashboard.mjs's tokenStats, reworkSpend, gateStats and quality over the range, kpis.mjs's delivery and AI figures each null with a reason, the anti-KPIs, and not recorded with no run log. Nits: GateBars computes a pass percentage in the browser (Metrics.tsx:31) while board.html shows a fail percentage, and with rounding the two can sum to 101; a client-side derived figure is what TECH §5 says the UI never does, so ship the rate from the server. The per-day chart draws days with runs but no breakdown as 0 (disclosed in its footnote)."
+            },
+            "qa": {
+              "verdict": "fail",
+              "at": "2026-09-29",
+              "note": "Independent QA (fresh agent, not the builder): the Metrics page's gate figures differ from docs/board.html on this very repo. Generated board.html with node ops/caretaker/dashboard.mjs in a copy: it shows reviewer 1 pass 0 fail, qa 11 pass 1 fail (8%), and 91% first-pass over 11 tasks and 13 attempts. GET /api/v1/metrics?days=7, 14 and 30 all return gateStats of 0/0 for every gate and quality.gated 0. Every verdict is dated 2026-08-30, just outside the widest 30-day range. In Chromium the page at 30d shows Pass rate per gate: No verdict recorded in this range, and First-pass rate: a dash. The API returns allTime.gateStats, but the page never renders it, so board.html's per-gate numbers appear at no range setting. Only a first-pass footnote shows all-time. There is no test comparing /metrics with board.html: serve.test.mjs checks snapshot and kpis only."
             }
           }
         },
