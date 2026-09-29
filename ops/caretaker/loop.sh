@@ -86,20 +86,19 @@ cd "$ROOT" || { say "FAIL — cannot cd to $ROOT"; exit 1; }
 # --permission-mode auto: unattended means nothing can answer a prompt. The
 # limits that matter are in the prompt above and in the repo's own gates, not in
 # a dialog nobody is there to read.
+# stream-json: each event is written as it happens, so a pass that is killed
+# has already written what it decided (B-5, independent re-review: with json
+# nothing was printed until exit). --print needs --verbose to stream.
 "$CLAUDE" -p "$PROMPT" \
   --permission-mode auto \
-  --output-format json \
+  --output-format stream-json --verbose \
   > "$OUT" 2>>"$LOG"
 RC=$?
 
-if [ $RC -ne 0 ]; then
-  say "FAIL — claude exited $RC. Last of its output:"
-  tail -c 2000 "$OUT" >> "$LOG"
-  rm -f "$OUT"
-  exit $RC
-fi
-
-# DECISIONS FIRST, because the output is deleted below. This loop calls the CLI
+# DECISIONS FIRST, and on a FAILED pass too, because the output is deleted
+# below. A killed or failed pass used to exit here, before the harvest, so what
+# it had decided was lost with it, and the raw tail of its output went into
+# loop.log unredacted (independent re-review). This loop calls the CLI
 # directly rather than through runstore, so nothing else would archive what it
 # said: harvest.mjs archives the output as a run (redacted) and puts any
 # DECISION: line no spec or ADR records in the Inbox. harvest.mjs lives in the
@@ -117,6 +116,16 @@ if [ -z "$RUN_ID" ]; then
   grep -o 'DECISION:[^"\\]*' "$OUT" | sed 's/^/  /' >> "$LOG"
 fi
 
+if [ $RC -ne 0 ]; then
+  say "FAIL — claude exited $RC. Its output is ${RUN_ID:+archived, redacted, as run $RUN_ID}${RUN_ID:-not archived: decision lines above}."
+  if [ -n "$NODE" ]; then
+    "$NODE" "$HERE/run.mjs" end --name cron-loop ${RUN_ID:+--run "$RUN_ID"} --state failed \
+      --note "unattended pass, claude exited $RC" >> "$LOG" 2>&1
+  fi
+  rm -f "$OUT"
+  exit $RC
+fi
+
 # Token spend, if the JSON carries it. Best effort on purpose: a shape change in
 # the CLI's output must not fail a pass that already did its work. The
 # breakdown, not only the total: run.mjs derives the total from the parts, and
@@ -125,7 +134,11 @@ if [ -n "$NODE" ]; then
   mapfile -t RUN_FLAGS < <("$NODE" -e '
     const fs = require("node:fs");
     try {
-      const j = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+      // The final result event: the last line that is one, from a streamed
+      // transcript, or the whole file from an older json one.
+      const text = fs.readFileSync(process.argv[1], "utf8");
+      const docs = text.split("\n").flatMap((l) => { try { return [JSON.parse(l)]; } catch { return []; } });
+      const j = docs.filter((d) => d && d.type === "result").at(-1) ?? JSON.parse(text);
       const u = j.usage ?? {};
       const out = [];
       const put = (flag, v) => { if (Number.isFinite(v)) out.push(flag, String(v)); };

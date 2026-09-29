@@ -27,7 +27,16 @@ const TMP = mkdtempSync(join(tmpdir(), "loop-test-"));
 const KEY = "sk-ant-api03-" + "x".repeat(40);
 const OAUTH = "oauth-token-value-0123456789";
 
-function repo(name) {
+// What `claude -p --output-format stream-json --verbose` writes: one event per
+// line as it happens, ending with the result. `killed` stops after the
+// decision, exiting 137, as a pass killed mid-work does.
+const events = (killed) => [
+  { type: "system", subtype: "init" },
+  { type: "assistant", message: { content: [{ type: "text", text: `DECISION: retry the upload twice because the API rate-limits a third\nleaked ${KEY} and ${OAUTH}` }], usage: { input_tokens: 1, output_tokens: 1 } } },
+  ...(killed ? [] : [{ type: "result", result: "Did T-1.", num_turns: 7, usage: { input_tokens: 100, cache_read_input_tokens: 2000, cache_creation_input_tokens: 300, output_tokens: 40 }, modelUsage: { "claude-test-model": {} } }]),
+].map((e) => JSON.stringify(e)).join("\n");
+
+function repo(name, { killed = false } = {}) {
   const root = join(TMP, name);
   const ops = join(root, "ops", "caretaker");
   mkdirSync(ops, { recursive: true });
@@ -37,15 +46,10 @@ function repo(name) {
   writeFileSync(join(ops, "config.json"), JSON.stringify({ runs: "ops/caretaker/runs.jsonl", stateDir: join(root, "state"), repo: "." }));
   writeFileSync(join(ops, "prompt.txt"), "do one task\n");
   const claude = join(root, "fake-claude");
+  // It also records the arguments it was given.
   writeFileSync(
     claude,
-    `#!/bin/sh\ncat <<'JSON'\n${JSON.stringify({
-      type: "result",
-      result: `Did T-1.\nDECISION: retry the upload twice because the API rate-limits a third\nleaked ${KEY} and ${OAUTH}`,
-      num_turns: 7,
-      usage: { input_tokens: 100, cache_read_input_tokens: 2000, cache_creation_input_tokens: 300, output_tokens: 40 },
-      modelUsage: { "claude-test-model": {} },
-    })}\nJSON\n`,
+    `#!/bin/sh\necho "$@" > '${join(root, "claude-args")}'\ncat <<'JSON'\n${events(killed)}\nJSON\n${killed ? "exit 137\n" : ""}`,
   );
   chmodSync(claude, 0o755);
   return { root, ops, claude };
@@ -80,6 +84,19 @@ const rows = (r) => (existsSync(join(r.ops, "runs.jsonl")) ? readFileSync(join(r
   const rec = existsSync(join(dir, "run.json")) ? JSON.parse(readFileSync(join(dir, "run.json"), "utf8")) : null;
   ok("run.json says what was not recorded, rather than leaving it empty", rec?.source === "loop.sh" && /did not go through runstore/.test(rec.notRecorded ?? ""));
   ok("the pass's unredacted output is deleted afterwards", left.length === 0, left.join());
+}
+{
+  // Independent re-review: a killed pass exited before the harvest, lost what
+  // it had decided, and put the raw tail of its output in loop.log.
+  const r = repo("killed", { killed: true });
+  const res = loop(r, { CARETAKER_HARVEST: join(HERE, "harvest.mjs") });
+  const log = readFileSync(join(r.ops, "loop.log"), "utf8");
+  ok("the loop asks claude to stream its events", readFileSync(join(r.root, "claude-args"), "utf8").includes("--output-format stream-json --verbose"));
+  const runs = existsSync(join(r.root, "state", "runs")) ? readdirSync(join(r.root, "state", "runs")) : [];
+  const h = runs[0] ? JSON.parse(readFileSync(join(r.root, "state", "runs", runs[0], "harvest.json"), "utf8")) : null;
+  ok("a killed pass still has what it decided harvested", res.status === 137 && h?.decisions.some((d) => /retry the upload twice/.test(d.text)), `${res.status} ${JSON.stringify(h)}`);
+  ok("…its row says failed, and names the archived run", rows(r).at(-1)?.state === "failed" && rows(r).at(-1)?.run === runs[0], JSON.stringify(rows(r).at(-1)));
+  ok("…and loop.log carries no raw output: no key, no credential", !log.includes(KEY) && !log.includes(OAUTH) && /archived, redacted, as run r_/.test(log), log);
 }
 {
   const r = repo("no-harvest");

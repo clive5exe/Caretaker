@@ -28,6 +28,7 @@ import {
   adapterNames,
   buildContainerArgv,
   emptyCost,
+  finalTextOf,
   normalisePolicy,
   parseUsage,
   run,
@@ -437,6 +438,23 @@ sleep 30
   const partial = parseUsage('{"usage":{"input_tokens":5,"output_tokens":7}}');
   ok("a partly-reported usage keeps the missing fields null", partial.tokens.cached === null && partial.tokens.write === null, JSON.stringify(partial.tokens));
   ok("...and the total sums only what was reported (5+7)", partial.tokens.total === 12, String(partial.tokens.total));
+}
+
+{
+  // B-5: the claude preset STREAMS, so a killed run has already written what
+  // it said. A streamed transcript carries usage per message and the run's
+  // total on its final result event; the total is what is read.
+  const argv = CLI_PRESETS.claude.argv({ model: null });
+  ok("the claude preset streams its events (stream-json, which --print needs --verbose for)", argv.join(" ") === "claude --print --output-format stream-json --verbose", argv.join(" "));
+  const streamed = [
+    { type: "system", subtype: "init" },
+    { type: "assistant", message: { content: [{ type: "text", text: "DECISION: keep it small because it is read often" }], usage: { input_tokens: 3, output_tokens: 4 } } },
+    { type: "assistant", message: { content: [{ type: "text", text: "done" }], usage: { input_tokens: 5, output_tokens: 6 } } },
+    { type: "result", subtype: "success", result: "All done.", num_turns: 2, usage: { input_tokens: 8, cache_read_input_tokens: 100, cache_creation_input_tokens: 0, output_tokens: 10 } },
+  ].map((x) => JSON.stringify(x)).join("\n");
+  const u = parseUsage(streamed);
+  ok("a streamed transcript's usage is the result's total, not the first message's", u.tokens.in === 8 && u.tokens.out === 10 && u.tokens.cached === 100 && u.turns === 2, JSON.stringify(u.tokens));
+  ok("…and its final text is the result's", finalTextOf(streamed) === "All done.");
 }
 
 {

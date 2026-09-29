@@ -19,8 +19,11 @@
  * run's `decisions.live.jsonl` the moment it is written. A run that is killed
  * or a session that is compacted loses nothing it had already decided. (This
  * is as live as the adapter's output: the openai-compatible adapter logs every
- * turn as it happens; a CLI that prints one JSON result at exit is captured at
- * exit.)
+ * turn as it happens, and the claude preset streams its events (stream-json).
+ * A CLI that prints one JSON result at exit is captured at exit.)
+ *
+ * The unattended loop does not go through runstore. It streams too, and
+ * harvests its output with `import` whether the pass ended cleanly or not.
  *
  * After the run, `harvest` checks each decision against every spec and ADR.
  * One whose significant words are all but absent from each document is

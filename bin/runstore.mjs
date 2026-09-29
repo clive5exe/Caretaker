@@ -38,6 +38,7 @@
  *        [--skills yes]                                 stage the config's skills for the run (S-1)
  *   node bin/runstore.mjs where [--config F]      print the state dir
  */
+import { StringDecoder } from "node:string_decoder";
 import {
   closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync, appendFileSync,
 } from "node:fs";
@@ -98,6 +99,10 @@ export function startMirror({ from, to, redact, intervalMs = 200, onLine = null 
   writeFileSync(to, "");
   let offset = 0;
   let pending = "";
+  // A read can end part-way through a multi-byte character; the decoder holds
+  // those bytes until the rest arrive, where toString() made them U+FFFD
+  // (independent re-review).
+  const decoder = new StringDecoder("utf8");
   const pump = () => {
     let size;
     try {
@@ -111,7 +116,7 @@ export function startMirror({ from, to, redact, intervalMs = 200, onLine = null 
       const buf = Buffer.alloc(size - offset);
       const n = readSync(fd, buf, 0, buf.length, offset);
       offset += n;
-      pending += buf.subarray(0, n).toString("utf8");
+      pending += decoder.write(buf.subarray(0, n));
     } finally {
       closeSync(fd);
     }
@@ -131,6 +136,7 @@ export function startMirror({ from, to, redact, intervalMs = 200, onLine = null 
     stop() {
       clearInterval(timer);
       pump();
+      pending += decoder.end();
       if (pending) {
         const last = redact(pending);
         appendFileSync(to, `${last}\n`);

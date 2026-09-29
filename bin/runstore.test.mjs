@@ -12,6 +12,7 @@
  */
 import { spawnSync } from "node:child_process";
 import {
+  appendFileSync,
   chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -202,6 +203,22 @@ ok("archive with a malformed parent is refused", throwsCode(() => archive(out, {
   const got = readFileSync(dst, "utf8");
   ok("once the line completes it is emitted, redacted as a whole", got === "half [redacted:TEST_API_KEY]\n", JSON.stringify(got));
   m.stop();
+}
+{
+  // Independent re-review: a character split across two reads came out U+FFFD.
+  const src = join(TMP, "mirror-utf8-src.log");
+  const dst = join(TMP, "mirror-utf8-dst.log");
+  writeFileSync(src, "");
+  const seenLines = [];
+  const m = startMirror({ from: src, to: dst, redact: (l) => l, intervalMs: 10_000, onLine: (l) => seenLines.push(l) });
+  const bytes = Buffer.from("café ✓ déjà\n", "utf8");
+  const cut = bytes.indexOf(0xe2) + 1; // inside the three bytes of ✓
+  appendFileSync(src, bytes.subarray(0, cut));
+  m.pump();
+  appendFileSync(src, bytes.subarray(cut));
+  m.pump();
+  m.stop();
+  ok("a multi-byte character split across reads arrives whole", readFileSync(dst, "utf8") === "café ✓ déjà\n" && seenLines.join() === "café ✓ déjà", JSON.stringify(readFileSync(dst, "utf8")));
 }
 
 /* -------------------------------------------------------------- run.mjs */

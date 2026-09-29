@@ -211,11 +211,17 @@ export const CLI_PRESETS = {
   claude: {
     bin: "claude",
     /** stdin carries the prompt; `-` is not needed, --print reads stdin. */
+    // stream-json, not json: json prints one result AT EXIT, so a killed run
+    // left nothing for the live mirror or the decision harvest (B-5,
+    // independent re-review). stream-json writes each event as it happens,
+    // and ends with the same `result` event json would have printed alone.
+    // --print needs --verbose to stream.
     argv: ({ model }) => [
       "claude",
       "--print",
       "--output-format",
-      "json",
+      "stream-json",
+      "--verbose",
       ...(model ? ["--model", model] : []),
     ],
     /**
@@ -539,7 +545,11 @@ function findNumber(node, names, depth = 0) {
 
 export function parseUsage(transcriptText, { billing = null, source = "transcript-json" } = {}) {
   const cost = emptyCost(billing);
-  const docs = jsonCandidates(transcriptText ?? "");
+  // A streamed transcript carries usage per message as well as the run's
+  // total on its final `result` event: the result is read first, so a
+  // message's own usage is never taken for the run's.
+  const all = jsonCandidates(transcriptText ?? "");
+  const docs = [...all.filter((d) => d?.type === "result").reverse(), ...all.filter((d) => d?.type !== "result")];
   if (!docs.length) return cost;
 
   let found = false;
