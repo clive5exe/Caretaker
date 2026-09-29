@@ -161,14 +161,6 @@ if (runtime.chosen !== "podman") {
     ok("live: the pids ceiling is real", String(r.stdout).trim() === "512", r.stdout.trim());
   }
 
-  {
-    const r = inside("touch /nope 2>&1 || true");
-    ok(
-      "live: the root filesystem refuses a write",
-      /Read-only/i.test(r.stdout),
-      r.stdout.trim() || "the write SUCCEEDED, so --read-only is not in effect",
-    );
-  }
 
   {
     const r = inside("wget -q -T2 -O- http://example.com 2>&1 || echo BLOCKED");
@@ -191,6 +183,15 @@ if (runtime.chosen !== "podman") {
     console.log(`  $ ${command}\n    exit ${out.exitStatus}: ${(out.stdout || out.stderr).split("\n").slice(-2).join(" / ")}`);
     ok(`live attack: ${name}`, out.passed, out.stdout || out.stderr);
   };
+  // (a) Write outside the repo mount: the root, /etc, a system bin, and a
+  // path that climbs out of /work. Each must be refused (independent review:
+  // this ran as a bare check, so its command and output were not recorded).
+  attackRun(
+    "writing outside the repo mount is refused",
+    `for p in /nope /etc/caretaker-escape /usr/bin/caretaker-escape /work/../caretaker-escape; do touch "$p" 2>&1 && echo "WROTE $p"; done; echo DONE`,
+    {},
+    (o) => /DONE/.test(o.stdout) && !/^WROTE /m.test(o.stdout) && /Read-only/i.test(o.stdout),
+  );
   if (checkLimits(["memory"], delegatedControllers().controllers).length) {
     // Without an enforced ceiling this attack would take the HOST's memory.
     skip("live attack: exhausting memory is stopped by the ceiling", "the memory controller is not delegated here, so there is no ceiling to attack");
@@ -204,7 +205,7 @@ if (runtime.chosen !== "podman") {
       (o) => /EXIT=137/.test(o.stdout) || /oom_kill [1-9]/.test(o.stdout),
     );
   }
-  const SOCKET_HUNT = `for s in /var/run/docker.sock /run/docker.sock /run/podman/podman.sock /var/run/podman/podman.sock /run/user/*/podman/podman.sock; do [ -S "$s" ] && echo "SOCKET $s"; done; find / \\( -path /proc -o -path /sys \\) -prune -o -type s -print 2>/dev/null | sed 's/^/SOCKET /'; curl -sS --max-time 3 --unix-socket /run/podman/podman.sock http://d/_ping 2>&1 | head -1; echo DONE`;
+  const SOCKET_HUNT = `for s in /var/run/docker.sock /run/docker.sock /run/podman/podman.sock /var/run/podman/podman.sock /run/user/*/podman/podman.sock; do [ -S "$s" ] && echo "SOCKET $s"; done; find / \\( -path /proc -o -path /sys \\) -prune -o -type s -print 2>/dev/null | sed 's/^/SOCKET /'; curl -sS --max-time 3 --unix-socket /run/podman/podman.sock http://d/_ping 2>&1 | head -1; echo; echo DONE`;
   // Every place a container-runtime socket lives, and any socket anywhere in
   // the container, mounts included (a mounted socket is on another device, so
   // no -xdev). Driving one is root on the host.
@@ -212,6 +213,7 @@ if (runtime.chosen !== "podman") {
     "no container-runtime socket is reachable from inside",
     SOCKET_HUNT,
     {},
+    // _ping answers "OK" with no newline; the echo before DONE ends that line.
     (o) => /DONE/.test(o.stdout) && !/^SOCKET /m.test(o.stdout) && !/^OK$/m.test(o.stdout),
   );
   {
@@ -274,6 +276,13 @@ if (runtime.chosen !== "podman") {
 }
 
 /* E-1, E-0: the CLI's flags and what it warns about (independent review). */
+{
+  // Review: the header's usage offered --spec, which the parser refuses.
+  const src = readFileSync(join(HERE, "sandbox.mjs"), "utf8");
+  const usage = [...src.slice(0, src.indexOf("*/")).matchAll(/--([a-z][a-z-]*)/g), ...[...src.matchAll(/"usage: sandbox\.mjs run ([^"]*)"/g)].flatMap((m) => [...m[1].matchAll(/--([a-z][a-z-]*)/g)])].map((m) => m[1]).filter((f) => f !== "network");
+  const refused = usage.filter((f) => { try { parseFlags(f === "allow-missing-limits" ? [`--${f}`] : [`--${f}`, f === "runtime" ? "podman" : "v"]); return false; } catch { return true; } });
+  ok("every flag the usage names is one the parser accepts", usage.length >= 6 && refused.length === 0, refused.join());
+}
 {
   const err = (a) => {
     try {

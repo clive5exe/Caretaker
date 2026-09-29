@@ -137,11 +137,26 @@ export const TOOLCHAINS = [
 // so the tool must be absent (independent review: it was read as "any").
 const ANY_VERSION = /^(latest|lts|os-provided|)$/i;
 
-/** The version in an image tag: its last dotted number ("1-22-bookworm" is 22, "3.12-slim" is 3.12), else latest. */
+/**
+ * The version in an image tag: its first dash-separated part that is a whole
+ * number ("3.12-slim" is 3.12, "22-alpine3.20" is 22, not the alpine release;
+ * independent review). The devcontainers images put their own version first,
+ * so "1-22-bookworm" from .../devcontainers/ is 22. No such part: latest.
+ */
 export const tagVersion = (image) => {
-  const tag = /:([^/:@]+)(@|$)/.exec(String(image ?? ""))?.[1] ?? "";
-  return tag.match(/\d+(?:\.\d+)*/g)?.at(-1) ?? "latest";
+  const s = String(image ?? "");
+  const tag = /:([^/:@]+)(@|$)/.exec(s)?.[1] ?? "";
+  const nums = tag.split("-").filter((p) => /^v?\d+(\.\d+)*$/.test(p)).map((p) => p.replace(/^v/, ""));
+  const pick = /\/devcontainers\//.test(s) && nums.length > 1 ? nums[1] : nums[0];
+  return pick ?? "latest";
 };
+
+/** An image's repository, without registry defaults, tag or digest: docker.io/library/postgres:16 is postgres. */
+export const imageRepo = (image) =>
+  String(image ?? "")
+    .replace(/@.*$/, "")
+    .replace(/:[^/:]*$/, "")
+    .replace(/^(docker\.io\/|index\.docker\.io\/)?(library\/)?/, "");
 
 /**
  * The services a compose file declares, and each one's image: the `services:`
@@ -307,6 +322,7 @@ export function compare(decl, obs, { net = "none", canary, running = null } = {}
     if (!s.image) add("service-unchecked", `service ${name} is declared, but ${s.why ?? "nothing declares its image"}, so there is no version to compare`);
     else if (!running || !(name in running)) add("service-not-run", `service ${name} (${s.image}) is declared, and this runner starts no services; nothing checked it`);
     else if (!running[name]) add("service-not-running", `service ${name} (${s.image}) is declared, and no container for it is running`);
+    else if (imageRepo(running[name]) !== imageRepo(s.image)) add("service-image", `service ${name} is declared as ${s.image} but ${running[name]} is running: another image`);
     else if (!versionMatches(s.version, tagVersion(running[name]))) add("service-version", `service ${name} is declared as ${s.image} but ${running[name]} is running`);
   }
   if (net === "none") {

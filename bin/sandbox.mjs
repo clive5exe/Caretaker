@@ -8,15 +8,17 @@
  * supported because someone's machine will only have it, but it has to be asked
  * for and the run says what it costs.
  *
- * WHAT THIS DOES NOT DO YET: egress. `--network none` is the only network
- * setting here, which is safe and also unusable for an agent that needs to reach
- * a model API. E-2 puts an allowlist proxy in that gap. Until then this is
- * honest about being all-or-nothing, and `--net` has to be passed explicitly so
- * nobody opens it by forgetting.
+ * EGRESS IS NOT DECIDED HERE. The default is `--network none`, which is sealed.
+ * An allowlisted route out is an internal network behind the egress proxy, and
+ * that is bin/netns.mjs (a per-run one via runstore). `--net` names a network
+ * and has to be passed explicitly, so nobody opens egress by forgetting, and
+ * anything but none is warned about before the run.
  *
  * Usage:
  *   sandbox.mjs detect
- *   sandbox.mjs run [--spec F] [--devcontainer F] [--workdir D] [--net none|host] -- cmd...
+ *   sandbox.mjs install
+ *   sandbox.mjs run [--devcontainer F] [--image I] [--workdir D] [--net none|NETWORK]
+ *                   [--runtime podman|docker] [--allow-missing-limits] -- cmd...
  *   sandbox.mjs limits [--devcontainer F]
  */
 import { execFileSync, spawnSync } from "node:child_process";

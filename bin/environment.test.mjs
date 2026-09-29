@@ -204,6 +204,9 @@ const probe = (curlBody, extra = {}) => {
   ok("with no runServices, every compose service but the dev container's is declared", all.services.map((x) => x.name).join() === "db,cache" && all.services[1].version === "7.2");
   const k = (running) => compare({ ...d, tools: [], unknownFeatures: [], hosts: [] }, { tools: {}, hosts: {} }, { net: "none", running }).map((x) => x.kind).join();
   ok("a running service at another version is named", k({ db: "docker.io/library/postgres:15" }) === "service-version");
+  // Independent QA: both of these read as no difference.
+  ok("…including when the tags share a base-OS suffix", compare({ ...d, services: [{ name: "db", image: "postgres:16-alpine3.20", version: tagVersion("postgres:16-alpine3.20") }], tools: [], unknownFeatures: [], hosts: [] }, { tools: {}, hosts: {} }, { net: "none", running: { db: "postgres:17-alpine3.20" } }).map((x) => x.kind).join() === "service-version");
+  ok("a service running ANOTHER image at the same version is named", k({ db: "redis:16" }) === "service-image");
   ok("…one at the declared version is not a difference", k({ db: "docker.io/library/postgres:16.2" }) === "");
   ok("…a declared service with no container running is named", k({ db: "" }) === "service-not-running");
   ok("…and when the runtime cannot be asked, it says nothing checked it", k(null) === "service-not-run");
@@ -223,6 +226,8 @@ const probe = (curlBody, extra = {}) => {
   ok("an image named for a toolchain declares it at its tag", JSON.stringify(declared({ dev: { image: "mcr.microsoft.com/devcontainers/javascript-node:1-22-bookworm" } }).tools) === '[{"name":"node","version":"22","feature":"image mcr.microsoft.com/devcontainers/javascript-node:1-22-bookworm"}]');
   ok("…a feature's own version wins over the tag", declared({ dev: { image: "node:20", features: { "ghcr.io/devcontainers/features/node:1": { version: "22" } } } }).tools.map((t) => t.version).join() === "22");
   ok("tag versions", tagVersion("python:3.12-slim") === "3.12" && tagVersion("node") === "latest" && tagVersion("reg:5000/node:22@sha256:ab") === "22" && tagVersion("golang:1.23") === "1.23");
+  // Independent review: the last number was taken, so node:22-alpine3.20 read as node 3.20.
+  ok("the toolchain's number, not the base OS release", tagVersion("node:22-alpine3.20") === "22" && tagVersion("postgres:16-alpine3.20") === "16" && tagVersion("mcr.microsoft.com/devcontainers/python:1-3.12-bookworm") === "3.12" && tagVersion("x:v1.2") === "1.2");
 }
 {
   // The canary, asked directly too (review: a network that routes around the

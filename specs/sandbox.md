@@ -97,13 +97,15 @@ stated once rather than reported as every host being down.
 
 What counts as declared, and how each is asked:
 - **Toolchains** come from features, and from an image named for one at its
-  tag's version (`javascript-node:1-22-bookworm` is node 22). A feature's own
+  tag's version: the first dash-separated part that is a whole number, so
+  `node:22-alpine3.20` is node 22, and a devcontainers image's own leading
+  version is skipped (`javascript-node:1-22-bookworm` is node 22). A feature's own
   version wins. A feature at version `none` means not installed, so the tool
   must be absent.
 - **Services** come from the compose file: each service's `image:` line, and
   the version in its tag. The dev container's own `service` is the environment,
-  not a service it needs. A running service is found by its compose label and
-  its image compared. One that is not running, or whose image nothing declares,
+  not a service it needs. A running service is found by its compose label, and
+  both its image name and its version are compared. One that is not running, or whose image nothing declares,
   is named as such.
 - **The canary** (a host nobody declared) is asked through the proxy and again
   with every proxy variable unset. Reached directly means the network routes
@@ -166,9 +168,9 @@ real output are written to a JSON report, and printed whether it passed or not.
   bypass by hostname, a bypass by raw IP (no name lookup, so only a missing
   route can stop it), a container on a sibling network, and a service on the
   host itself.
-- **The container** (`bin/sandbox.test.mjs`): memory exhausted under a 64 MiB
+- **The container** (`bin/sandbox.test.mjs`): writes to `/`, `/etc`,
+  `/usr/bin` and out of `/work` are refused; memory exhausted under a 64 MiB
   ceiling is killed inside the container (skipped where no ceiling can be
   enforced, since it would then take the host's memory); no container-runtime
   socket is reachable, with a control that the same hunt finds one that is
-  mounted; the root filesystem refuses a write; there is no route off a
-  `--network none` container.
+  mounted; there is no route off a `--network none` container.
