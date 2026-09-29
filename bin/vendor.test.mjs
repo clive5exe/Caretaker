@@ -6,7 +6,7 @@
  *
  * Run: node bin/vendor.test.mjs
  */
-import { appendFileSync, cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { VENDOR, build, check, readSources } from "./vendor.mjs";
@@ -53,6 +53,9 @@ try {
   }
   {
     const v = copy("badpatch");
+    // Created here: git does not keep an empty directory, so a checkout with
+    // no patches yet has no patches/ at all (CI failed on exactly that).
+    mkdirSync(join(v, "patches"), { recursive: true });
     writeFileSync(join(v, "patches", "zz-bad.patch"), "--- a/.github/workflows/nope.yml\n+++ b/.github/workflows/nope.yml\n@@ -1 +1 @@\n-a\n+b\n");
     ok("a patch that no longer applies fails the check, by name", check({ vendor: v }).some((x) => /patch zz-bad\.patch does not apply/.test(x)));
   }
