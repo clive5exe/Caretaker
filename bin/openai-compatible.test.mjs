@@ -120,6 +120,21 @@ const policy = (model, over = {}) => ({ adapter: "openai-compatible", endpoint: 
   ok("…and stderr says why", readFileSync(out.transcript.stderrPath, "utf8").includes("did not stop within 3 turns"));
 }
 
+/* ------------------------------------------------- a tool that throws */
+{
+  const ws = workspace();
+  mkdirSync(join(ws, "adir"));
+  scripts.throws = [
+    say([call("write_file", { path: "adir", content: "x" }), call("write_file", { path: "fine.txt", content: "ok\n" })]),
+    say(null, null, "done"),
+  ];
+  // Caught here so a regression fails THIS check by name instead of crashing the file.
+  const out = await run(ws, "x", policy("throws")).catch((e) => ({ crashed: e }));
+  const replies = lastToolReply("throws");
+  ok("a tool that throws is answered as a failed call, not a crashed run", !out.crashed && out.verdict.state === "completed" && /error: the write_file call failed/.test(replies[0] ?? ""), out.crashed ? out.crashed.message : JSON.stringify(replies));
+  ok("…and the calls after it still run", readFileSync(join(ws, "fine.txt"), "utf8") === "ok\n");
+}
+
 /* ---------------------------------------------------- the path boundary */
 {
   const ws = workspace();

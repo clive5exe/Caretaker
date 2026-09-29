@@ -391,11 +391,12 @@
           "title": "Consume the existing skills standard",
           "owner": "backend",
           "est": "4h",
-          "status": "todo",
+          "status": "doing",
           "deps": [
             "H-1"
           ],
-          "ac": "a project can point at any repo following skills/<category>/<name>/SKILL.md and have those skills available to a run; no second format is invented"
+          "ac": "a project can point at any repo following skills/<category>/<name>/SKILL.md and have those skills available to a run; no second format is invented",
+          "note": "Built in bin/skills.mjs, checked by bin/skills.test.mjs and mutation-checked. It reads skills/<category>/<name>/SKILL.md and the flat <name>/SKILL.md layout as published, with no new fields. config.skills lists paths or owner/repo[@ref]; remote sources are fetched once by `skills.mjs fetch`, never at run time; duplicate names are refused. For a run: mounted read-only at the claude CLI's skills path; the openai-compatible adapter lists them and offers read_skill. Never copied into the workspace. Gate verdicts not recorded."
         },
         {
           "id": "S-2",

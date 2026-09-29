@@ -43,6 +43,7 @@ import { appendFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdir
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { buildArgs, checkLimits, delegatedControllers } from "./sandbox.mjs";
 import { readDevcontainer, toLimits } from "./spec.mjs";
+import { staged } from "./skills.mjs";
 
 const OUTPUT_CAP = 20_000;
 const CMD_TIMEOUT_MS = 120_000;
@@ -69,7 +70,23 @@ export const TOOLS = [
     parameters: { type: "object", properties: { command: { type: "string" } }, required: ["command"] },
   },
 ];
-const TOOL_NAMES = new Set(TOOLS.map((t) => t.name));
+/** Offered only when skills were staged for the run (S-1). */
+export const READ_SKILL = {
+  name: "read_skill",
+  description: "Read one of the skills listed in the instructions: its SKILL.md, or another file inside it.",
+  parameters: { type: "object", properties: { name: { type: "string" }, file: { type: "string", description: "default SKILL.md" } }, required: ["name"] },
+};
+
+/** Read a file from a staged skill, confined to that skill's directory. */
+function readSkill(skillsDir, names, name, file) {
+  if (!names.has(name)) return { ok: false, output: `no skill named ${JSON.stringify(name)}; the skills are: ${[...names].join(", ")}` };
+  const base = join(skillsDir, name);
+  const rel = confine(base, file ?? "SKILL.md");
+  if (rel === null) return { ok: false, output: "refused: path is outside the skill" };
+  const abs = resolve(base, rel);
+  if (!existsSync(abs) || !statSync(abs).isFile()) return { ok: false, output: `no such file in skill ${name}: ${file}` };
+  return { ok: true, output: cap(readFileSync(abs, "utf8")) };
+}
 
 const cap = (s) => (s.length > OUTPUT_CAP ? `${s.slice(0, OUTPUT_CAP)}\n[truncated: ${s.length - OUTPUT_CAP} more characters]` : s);
 
@@ -179,9 +196,10 @@ export function containerExecutor({ runtime, name }) {
 
 /* ------------------------------------------------------------------ loop */
 
-function dispatch(ex, call) {
+function dispatch(ex, call, offered, skill) {
   const name = call?.function?.name;
-  if (!TOOL_NAMES.has(name)) return { invented: true, ok: false, output: `error: there is no tool named ${JSON.stringify(name)}. The tools are: ${[...TOOL_NAMES].join(", ")}` };
+  const names = new Set(offered.map((t) => t.name));
+  if (!names.has(name)) return { invented: true, ok: false, output: `error: there is no tool named ${JSON.stringify(name)}. The tools are: ${[...names].join(", ")}` };
   let args;
   try {
     args = call.function.arguments === undefined || call.function.arguments === "" ? {} : JSON.parse(call.function.arguments);
@@ -189,20 +207,27 @@ function dispatch(ex, call) {
   } catch {
     return { malformed: true, ok: false, output: "error: the arguments were not a JSON object. Call the tool again with valid JSON arguments." };
   }
-  const spec = TOOLS.find((t) => t.name === name);
+  const spec = offered.find((t) => t.name === name);
   const missing = spec.parameters.required.filter((k) => typeof args[k] !== "string");
   if (missing.length) return { malformed: true, ok: false, output: `error: ${name} needs ${missing.join(", ")} as string(s)` };
+  if (name === "read_skill") return skill(args.name, args.file);
   if (name === "list_files") return ex.list(args.path);
   if (name === "read_file") return ex.read(args.path);
   if (name === "write_file") return ex.write(args.path, args.content);
   return ex.run(args.command);
 }
 
-const systemPrompt = (containerised) =>
+const systemPrompt = (containerised, skills) =>
   [
     "You are a software engineer working in a repository" + (containerised ? " mounted at /work inside a sandbox." : "."),
     "Use the tools to inspect and change files and to run commands. Paths are relative to the repository root.",
     "When the task is done, reply with a short summary and do NOT call a tool. That is how you signal you have finished.",
+    ...(skills.length
+      ? [
+          "\n\nSkills are available. When one fits the task, read it with read_skill before you start, and follow it:",
+          ...skills.map((s) => `\n- ${s.name}: ${s.description ?? "(no description)"}`),
+        ]
+      : []),
   ].join(" ");
 
 /**
@@ -258,11 +283,15 @@ export async function openaiCompatibleAdapter({ workspace, prompt, policy, paths
 
   const log = (obj) => appendFileSync(paths.stdout, `${JSON.stringify(obj)}\n`);
   const err = (line) => appendFileSync(paths.stderr, `${line}\n`);
+  const skills = policy.skillsDir ? staged(policy.skillsDir) : [];
+  const skillNames = new Set(skills.map((s) => s.name));
+  const offered = skills.length ? [...TOOLS, READ_SKILL] : TOOLS;
+  const skill = (name, file) => readSkill(policy.skillsDir, skillNames, name, file);
   const messages = [
-    { role: "system", content: systemPrompt(Boolean(container)) },
+    { role: "system", content: systemPrompt(Boolean(container), skills) },
     { role: "user", content: prompt },
   ];
-  const tools = TOOLS.map((t) => ({ type: "function", function: t }));
+  const tools = offered.map((t) => ({ type: "function", function: t }));
   const toolUse = { calls: 0, malformed: 0, invented: 0, stopped: false, turns: 0 };
   const usage = { prompt_tokens: 0, completion_tokens: 0, cached_input_tokens: 0 };
   let usageSeen = false;
@@ -344,7 +373,15 @@ export async function openaiCompatibleAdapter({ workspace, prompt, policy, paths
       }
       for (const call of calls) {
         toolUse.calls += 1;
-        const out = dispatch(ex, call);
+        // A tool that THROWS (a write into a directory, a permission error) is
+        // a failed tool call, answered to the model like any other. Letting it
+        // escape would end the whole run over one bad call and lose the diff.
+        let out;
+        try {
+          out = dispatch(ex, call, offered, skill);
+        } catch (e) {
+          out = { ok: false, output: `error: the ${call?.function?.name ?? "tool"} call failed: ${e.message}` };
+        }
         if (out.malformed) toolUse.malformed += 1;
         if (out.invented) toolUse.invented += 1;
         log({ type: "tool", turn: toolUse.turns, name: call?.function?.name ?? null, ok: out.ok, output: out.output });

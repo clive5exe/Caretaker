@@ -126,6 +126,10 @@ const DEFAULTS = {
   endpoint: null,
   apiKeyEnv: null,
   maxTurns: 50,
+  // S-1: a HOST directory of staged skills (<name>/SKILL.md), from
+  // `skills.mjs`. Mounted read-only for a CLI that reads skills, offered as a
+  // tool by the openai-compatible adapter. Never copied into the workspace.
+  skillsDir: null,
 };
 
 const newRunId = () => `r_${randomBytes(4).toString("hex")}`;
@@ -186,6 +190,8 @@ export const CLI_PRESETS = {
      * on its first write with an error that reads like a permissions bug.
      */
     env: { HOME: "/tmp/agent-home" },
+    /** Where this CLI reads user-level skills, given the HOME above (S-1). */
+    skillsPath: "/tmp/agent-home/.claude/skills",
   },
   codex: {
     bin: "codex",
@@ -715,6 +721,20 @@ function looksUnavailable(exitCode, stderrText) {
   );
 }
 
+/**
+ * The read-only mount that hands a CLI its skills (S-1), or nothing. A preset
+ * that names no skills location gets a warning rather than a guessed path: a
+ * mount the CLI never reads would look like skills were given when they were not.
+ */
+export function skillsMount(policy, preset, warnings) {
+  if (!policy.skillsDir) return [];
+  if (!preset.skillsPath) {
+    warnings.push(`skills were staged but NOT attached: the ${typeof policy.cli === "string" ? policy.cli : "custom"} CLI has no known skills location`);
+    return [];
+  }
+  return ["-v", `${resolve(policy.skillsDir)}:${preset.skillsPath}:ro,Z`];
+}
+
 async function cliAdapter({ workspace, prompt, policy, paths, warnings }) {
   const preset =
     typeof policy.cli === "string"
@@ -751,6 +771,11 @@ async function cliAdapter({ workspace, prompt, policy, paths, warnings }) {
       "sandbox:none — the CLI ran on the HOST, not in a container. No filesystem " +
         "isolation, no resource ceiling and no egress control applied to this run.",
     );
+    if (policy.skillsDir) {
+      // On the host the CLI reads the operator's own skills directory; there is
+      // nowhere to mount these without writing into it, so they are not given.
+      warnings.push("skills were staged but NOT attached: with sandbox:none there is no container to mount them into");
+    }
     file = cliArgv[0];
     args = cliArgv.slice(1);
   } else {
@@ -802,7 +827,7 @@ async function cliAdapter({ workspace, prompt, policy, paths, warnings }) {
       containerName,
       cliArgv,
       env,
-      extraRunFlags: policy.extraRunFlags,
+      extraRunFlags: [...policy.extraRunFlags, ...skillsMount(policy, preset, warnings)],
     });
     file = policy.sandbox;
     container = { runtime: policy.sandbox, name: containerName, image };
