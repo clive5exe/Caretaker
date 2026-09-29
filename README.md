@@ -188,6 +188,47 @@ bin/tui-mock.mjs   a runnable layout mockup of the terminal UI
 
 Tests are plain scripts with no runner: `node bin/<name>.test.mjs`.
 
+## A web client, proposed and not built
+
+There is no web UI today. There is a draft decision to add one:
+`docs/decisions/0002-an-optional-web-client.md`, with the product and technical
+specs it points to in `specs/foreman-web/`. Until someone accepts that decision,
+treat this section as what is proposed, not what exists.
+
+What is proposed is a local page for the person at the machine: runs, what is
+stuck, what it cost, and an Inbox of the decisions only a human can make. It is
+a client of the core, never a peer. If it and the CLI disagree, it is wrong.
+
+It keeps the three reasons the terminal UI was preferred, rather than waving
+them away:
+
+- **No daemon.** `node bin/serve.mjs` runs in the foreground and stops on
+  Ctrl-C. It writes no pidfile and stores nothing the files cannot rebuild.
+- **No port anyone else can reach.** One port, on 127.0.0.1, only while it
+  runs. Any other bind is refused. Remote access is `ssh -L`.
+- **Auth anyway.** A one-time token in the printed URL becomes a
+  `SameSite=Strict` cookie, with exact `Host` checks and a strict CSP, because
+  agent-written text is the realistic injection path. That makes it an auth
+  change, so it needs `security` as well as `reviewer` and `qa`.
+
+What it does not change:
+
+- **The files stay authoritative.** No database. Every button calls the same
+  core function the CLI calls, and core re-checks.
+- **The browser cannot record a verdict.** A one-click pass is the rubber stamp
+  ADR-0001 rejects, so reviewer, qa and security stay out of it in v1.
+- **`docs/board.html` stays** zero-dependency and offline, built from the same
+  metric functions the server uses, so the two cannot disagree.
+- **The install stays dependency-free.** The optional React client in `web/`
+  would hold the only npm dependencies in the repo, and nothing in `bin/` or
+  `ops/foreman/` would import it.
+- **The terminal UI is not replaced.** Over SSH, with nothing listening, it is
+  still the right tool.
+
+Accepting the decision is not a decision to build it now. The layers are built
+bottom-up, and the harness does not pass qa yet. Pages over board data could
+proceed; anything that shows runs waits on the harness and the event log.
+
 ## RULES.md
 
 Ships with the install. The rules the gates enforce, and the ones that were
