@@ -19,7 +19,8 @@
  *
  * Usage:
  *   node bin/tool-fixture.mjs --endpoint http://localhost:11434/v1 --model qwen2.5-coder
- *        [--api-key-env VAR] [--runs N] [--sandbox none|podman] [--image IMG] [--json]
+ *        [--api-key-env VAR] [--runs N] [--sandbox podman|none] [--image IMG] [--json]
+ *   --sandbox defaults to podman: the candidate's shell commands are untrusted.
  * Exit: 0 every run passed, 1 any run did not, 2 misuse.
  */
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
@@ -91,13 +92,15 @@ if (isEntry) {
     else f[key] = a.includes("=") ? a.slice(a.indexOf("=") + 1) : argv[++i];
   }
   if (!f.endpoint || !f.model) {
-    console.error("usage: tool-fixture.mjs --endpoint URL --model M [--api-key-env VAR] [--runs N] [--sandbox none|podman] [--image IMG] [--json]");
+    console.error("usage: tool-fixture.mjs --endpoint URL --model M [--api-key-env VAR] [--runs N] [--sandbox podman|none] [--image IMG] [--json]");
     process.exit(2);
   }
   const policy = {
     endpoint: f.endpoint,
     model: f.model,
-    sandbox: f.sandbox ?? "none",
+    // The model under test is untrusted: its `run` calls are shell commands.
+    // In the sandbox by default; on the host only when asked for by name.
+    sandbox: f.sandbox ?? "podman",
     ...(f["api-key-env"] ? { apiKeyEnv: f["api-key-env"] } : {}),
     ...(f.image ? { image: f.image } : {}),
     ...(f.timeout ? { timeoutMs: Number(f.timeout) } : {}),

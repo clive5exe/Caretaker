@@ -264,6 +264,12 @@ export async function runArchived(workspace, prompt, policy = {}, { stateDir, ta
     } else {
       result = await h.run(workspace, prompt, harnessPolicy);
     }
+  } catch (e) {
+    // The run threw, so archive() below will not run and would not redact the
+    // proxy's log: do it here, or it stays raw on disk (independent review).
+    const egressLog = join(dir, "egress.jsonl");
+    if (existsSync(egressLog)) writeAtomic(egressLog, redactLines(readFileSync(egressLog, "utf8"), redact));
+    throw e;
   } finally {
     mirror.stop();
   }
