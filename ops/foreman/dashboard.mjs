@@ -29,38 +29,34 @@
  * TABS ARE CSS-ONLY. Radio inputs plus sibling selectors, no script, because the
  * page has to stay one file that works from disk with no server and no build.
  *
+ * IT IS ALSO A LIBRARY (TECH.md C-2). The metric functions below are pure and
+ * exported, and `metrics()` composes them. The web API calls the same functions
+ * this page is rendered from, so the two surfaces cannot headline different
+ * numbers. Reading sources, the history append and the file write happen only
+ * when this file is executed.
+ *
  * Run: node ops/foreman/dashboard.mjs [path/to/config.json]
  */
 import {
-  readFileSync, writeFileSync, appendFileSync, existsSync, readdirSync, mkdirSync,
+  readFileSync, writeFileSync, appendFileSync, existsSync, readdirSync, mkdirSync, realpathSync,
 } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-
 const HERE = dirname(fileURLToPath(import.meta.url));
-const cfgPath = process.argv[2] ? resolve(process.argv[2]) : join(HERE, "config.json");
-const cfg = JSON.parse(readFileSync(cfgPath, "utf8"));
-const ROOT = resolve(dirname(cfgPath), "..", "..", cfg.repo ?? ".");
-const at = (p) => join(ROOT, p);
 
 const esc = (s) =>
   String(s ?? "").replace(/[&<>"']/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c],
   );
 
-/* ------------------------------------------------------------------ sources */
+/* ------------------------------------------------------------------ metrics */
+// Pure: every function here takes what it reads as arguments and touches no
+// file, no clock and no process.
 
-const board = JSON.parse(readFileSync(at(cfg.board), "utf8"));
-const phases = board.phases ?? [];
-const GATES = cfg.gates ?? ["reviewer", "qa", "security"];
-const DAYS = cfg.window ?? 14;
-/** A working day, in hours. Used to turn `1d` and `1w` into a common unit. */
-const DAY_HOURS = cfg.dayHours ?? 8;
-
-function lastDays(n) {
+/** The last n calendar days ending on `now`, oldest first, as YYYY-MM-DD. */
+export function lastDays(n, now = new Date()) {
   const out = [];
-  const now = new Date();
   for (let i = n - 1; i >= 0; i--) {
     const d = new Date(now);
     d.setDate(d.getDate() - i);
@@ -68,7 +64,6 @@ function lastDays(n) {
   }
   return out;
 }
-const WINDOW = lastDays(DAYS);
 
 /**
  * An estimate in hours, or null when the board does not carry one.
@@ -78,7 +73,7 @@ const WINDOW = lastDays(DAYS);
  * this data. Anything unrecognised returns null and is counted separately, so an
  * unparsed estimate shows up as a known gap instead of silently weighing zero.
  */
-function estHours(t) {
+export function estHours(t, dayHours = 8) {
   const raw = String(t.est ?? t.estimate ?? "").trim().toLowerCase();
   if (!raw) return null;
   const shirt = { xs: 1, s: 2, m: 6, l: 16, xl: 32 };
@@ -87,125 +82,14 @@ function estHours(t) {
   if (!m) return null;
   const n = Number(m[1]);
   if (!Number.isFinite(n)) return null;
-  return { m: n / 60, h: n, d: n * DAY_HOURS, w: n * DAY_HOURS * 5 }[m[2]];
+  return { m: n / 60, h: n, d: n * dayHours, w: n * dayHours * 5 }[m[2]];
 }
 
-function agents() {
-  const dir = at(cfg.agentsDir);
-  if (!existsSync(dir)) return [];
-  return readdirSync(dir)
-    .filter((f) => f.endsWith(".md"))
-    .map((f) => {
-      const head = readFileSync(join(dir, f), "utf8").slice(0, 2000);
-      const m = /^model:\s*(\S+)/m.exec(head);
-      return { name: f.replace(/\.md$/, ""), model: m ? m[1] : "inherit" };
-    })
-    .sort((a, b) => a.name.localeCompare(b.name));
-}
 
-/*
- * A literal separator rather than an ASCII control code: a control character in
- * a shell argument is invisible in a diff and in an approval prompt, and an
- * earlier version of this file was rejected for exactly that.
- */
-const SEP = "|~|";
-const git = (args, fallback = "") => {
-  try {
-    return execFileSync("git", ["-C", ROOT, ...args], { encoding: "utf8" });
-  } catch {
-    return fallback;
-  }
-};
+export const isDone = (t) => t.status === "done";
+export const verdict = (t, k) => (t.gate ?? {})[k]?.verdict ?? null;
 
-const commits = git(["log", "-20", `--pretty=format:%h${SEP}%ar${SEP}%s`])
-  .split("\n")
-  .filter(Boolean)
-  .map((l) => {
-    const [sha, when, ...rest] = l.split(SEP);
-    return { sha, when, subject: rest.join(SEP) };
-  });
-
-const commitsByDay = (() => {
-  const counts = Object.fromEntries(WINDOW.map((d) => [d, 0]));
-  for (const line of git(["log", `--since=${DAYS}.days`, "--pretty=format:%ad", "--date=short"])
-    .split("\n")
-    .filter(Boolean)) {
-    if (line in counts) counts[line] += 1;
-  }
-  return WINDOW.map((d) => counts[d]);
-})();
-
-function runs() {
-  const p = at(cfg.runs);
-  if (!existsSync(p)) return null;
-  return readFileSync(p, "utf8")
-    .split("\n")
-    .filter(Boolean)
-    .map((l) => {
-      try {
-        return JSON.parse(l);
-      } catch {
-        return null; // a half-written last line is normal in an appended file
-      }
-    })
-    .filter(Boolean);
-}
-
-/* ------------------------------------------------------------------ shaping */
-
-const active = phases.find((p) => p.name === cfg.activePhase) ?? phases[phases.length - 1];
-const activeTasks = (active?.tasks ?? []).map((t) => ({ ...t, phase: active.name }));
-
-const isDone = (t) => t.status === "done";
-const doneCount = activeTasks.filter(isDone).length;
-const pctTasks = activeTasks.length ? Math.round((doneCount / activeTasks.length) * 100) : 0;
-
-/* Effort, and an explicit count of what could not be parsed. */
-const hoursOf = new Map(activeTasks.map((t) => [t.id, estHours(t)]));
-const unestimated = activeTasks.filter((t) => hoursOf.get(t.id) === null).length;
-const sumHours = (list) => list.reduce((n, t) => n + (hoursOf.get(t.id) ?? 0), 0);
-const totalHours = sumHours(activeTasks);
-const doneHours = sumHours(activeTasks.filter(isDone));
-const remainingHours = totalHours - doneHours;
-const pctEffort = totalHours ? Math.round((doneHours / totalHours) * 100) : 0;
-
-/* Effort closed per calendar day in the window, from the board's own stamps. */
-const closedHoursByDay = (() => {
-  const counts = Object.fromEntries(WINDOW.map((d) => [d, 0]));
-  for (const p of phases) {
-    for (const t of p.tasks ?? []) {
-      if (t.completed && t.completed in counts) counts[t.completed] += estHours(t) ?? 0;
-    }
-  }
-  return WINDOW.map((d) => counts[d]);
-})();
-const closedByDay = (() => {
-  const counts = Object.fromEntries(WINDOW.map((d) => [d, 0]));
-  for (const p of phases) {
-    for (const t of p.tasks ?? []) {
-      if (t.completed && t.completed in counts) counts[t.completed] += 1;
-    }
-  }
-  return WINDOW.map((d) => counts[d]);
-})();
-
-/**
- * The ETA. Idle days stay in the divisor deliberately — the question is when
- * this lands on a calendar, not what a good day looks like.
- */
-const eta = (() => {
-  const closed = closedHoursByDay.reduce((a, b) => a + b, 0);
-  if (closed <= 0 || remainingHours <= 0) return null;
-  const perDay = closed / DAYS;
-  const days = Math.ceil(remainingHours / perDay);
-  const when = new Date();
-  when.setDate(when.getDate() + days);
-  return { days, perDay, date: when.toISOString().slice(0, 10) };
-})();
-
-const verdict = (t, k) => (t.gate ?? {})[k]?.verdict ?? null;
-
-function held(t) {
+export function held(t, GATES) {
   if (isDone(t)) return null;
   const present = GATES.filter((k) => verdict(t, k));
   const failed = present.filter((k) => verdict(t, k) !== "pass");
@@ -214,85 +98,24 @@ function held(t) {
   return null;
 }
 
-const acOf = (t) => {
+export const acOf = (t) => {
   const a = t.ac ?? t.accept ?? "";
   return (Array.isArray(a) ? a.join(" ") : String(a)).trim();
 };
 
-const heldTotal = activeTasks.filter((t) => held(t)).length;
-const blockedTotal = activeTasks.filter((t) => t.status === "blocked").length;
-const noAc = activeTasks.filter((t) => !isDone(t) && !acOf(t)).length;
-const landedToday = commitsByDay[commitsByDay.length - 1] ?? 0;
-
-/* ------------------------------------------------------------------- history */
-
-/*
- * ONE LINE PER BUILD, so the ETA can be checked against what happened rather
- * than only asserted. Nothing else on this page has a memory: every other number
- * is recomputed from the board and from git, which is why they cannot rot. This
- * one file is the exception, and it is append-only for the same reason an audit
- * table is — a prediction you can quietly revise is not a prediction.
- */
-const HIST = at(cfg.history ?? "ops/foreman/history.jsonl");
-const today = new Date().toISOString().slice(0, 10);
-const history = existsSync(HIST)
-  ? readFileSync(HIST, "utf8")
-      .split("\n")
-      .filter(Boolean)
-      .map((l) => {
-        try {
-          return JSON.parse(l);
-        } catch {
-          return null;
-        }
-      })
-      .filter(Boolean)
-  : [];
-// One record per DAY, not per build: this script runs on every publish, and a
-// day with forty builds would otherwise drown a day with one.
-if (!history.some((h) => h.d === today)) {
-  const row = {
-    d: today,
-    pctEffort,
-    pctTasks,
-    remainingHours: Math.round(remainingHours),
-    eta: eta?.date ?? null,
-    done: doneCount,
-    held: heldTotal,
-    blocked: blockedTotal,
-  };
-  try {
-    mkdirSync(dirname(HIST), { recursive: true });
-    appendFileSync(HIST, JSON.stringify(row) + "\n");
-    history.push(row);
-  } catch {
-    // A read-only checkout still renders; it just cannot remember.
-  }
-}
-
-/* --------------------------------------------------------------------- stats */
-
 /**
- * Task to commits, by scanning subjects and bodies for the id. Loose on
- * purpose: this is a CHURN signal, not an audit. A task named in twenty commits
- * is one that fought back, which is worth seeing next to its estimate.
+ * The ETA. Idle days stay in the divisor deliberately — the question is when
+ * this lands on a calendar, not what a good day looks like.
  */
-const commitsPerTask = (() => {
-  const map = new Map();
-  const log = git(["log", `--pretty=format:%H${SEP}%ad${SEP}%s %b`, "--date=short"]);
-  for (const line of log.split("\n").filter(Boolean)) {
-    const [, date, text] = line.split(SEP);
-    const ids = new Set(String(text).match(/\bT-\d+[a-z]?\b/g) ?? []);
-    for (const id of ids) {
-      const cur = map.get(id) ?? { n: 0, first: date, last: date };
-      cur.n += 1;
-      if (date < cur.first) cur.first = date;
-      if (date > cur.last) cur.last = date;
-      map.set(id, cur);
-    }
-  }
-  return map;
-})();
+export function eta(closedHoursByDay, remainingHours, DAYS, now = new Date()) {
+  const closed = closedHoursByDay.reduce((a, b) => a + b, 0);
+  if (closed <= 0 || remainingHours <= 0) return null;
+  const perDay = closed / DAYS;
+  const days = Math.ceil(remainingHours / perDay);
+  const when = new Date(now);
+  when.setDate(when.getDate() + days);
+  return { days, perDay, date: when.toISOString().slice(0, 10) };
+}
 
 /**
  * Estimate against elapsed, for closed tasks that git can date.
@@ -302,7 +125,7 @@ const commitsPerTask = (() => {
  * wall clock and possibly two hours of work. What this measures is how long a
  * task SITS, which is the thing an ETA actually depends on.
  */
-const cycle = (() => {
+export function cycle(phases, commitsPerTask, dayHours = 8) {
   const rows = [];
   for (const p of phases) {
     for (const t of p.tasks ?? []) {
@@ -312,21 +135,20 @@ const cycle = (() => {
       const days =
         Math.round((Date.parse(t.completed) - Date.parse(c.first)) / 86400000) + 1;
       if (!Number.isFinite(days) || days < 1) continue;
-      rows.push({ id: t.id, title: t.title, est: estHours(t), days, commits: c.n });
+      rows.push({ id: t.id, title: t.title, est: estHours(t, dayHours), days, commits: c.n });
     }
   }
   return rows.sort((a, b) => b.days - a.days);
-})();
-const median = (xs) => {
+}
+
+export const median = (xs) => {
   if (!xs.length) return 0;
   const s = [...xs].sort((a, b) => a - b);
   return s[Math.floor(s.length / 2)];
 };
-const medDays = median(cycle.map((r) => r.days));
-const medEst = median(cycle.filter((r) => r.est).map((r) => r.est));
 
 /** Remaining effort by owner: who the queue is actually waiting on. */
-const byOwner = (() => {
+export function byOwner(activeTasks, hoursOf) {
   const m = new Map();
   for (const t of activeTasks) {
     if (isDone(t)) continue;
@@ -338,7 +160,7 @@ const byOwner = (() => {
     m.set(k, cur);
   }
   return [...m.entries()].sort((a, b) => b[1].h - a[1].h);
-})();
+}
 
 /**
  * Every gate verdict ever recorded, by role — including the ones that were
@@ -349,7 +171,7 @@ const byOwner = (() => {
  * understated rework by construction and the page had to carry a caveat saying
  * so. P-2 made verdicts append, so the history is here and the caveat is gone.
  */
-const gateStats = (() => {
+export function gateStats(phases, GATES) {
   const m = new Map(GATES.map((g) => [g, { pass: 0, fail: 0 }]));
   for (const p of phases) {
     for (const t of p.tasks ?? []) {
@@ -365,7 +187,7 @@ const gateStats = (() => {
     }
   }
   return [...m.entries()];
-})();
+}
 
 /**
  * First-pass rate and rework, the two quality metrics that actually predict
@@ -375,7 +197,7 @@ const gateStats = (() => {
  * nobody has reviewed is not a first-pass success, and including it would make
  * the number improve every time work is skipped.
  */
-const quality = (() => {
+export function quality(phases, GATES) {
   let gated = 0;
   let firstPass = 0;
   let reworked = 0;
@@ -401,9 +223,7 @@ const quality = (() => {
     firstPassPct: gated ? Math.round((firstPass / gated) * 100) : 0,
     reworkPct: gated ? Math.round((reworked / gated) * 100) : 0,
   };
-})();
-
-const runList = runs();
+}
 
 /**
  * Token spend, from the run log. Absent until something writes one, and split by
@@ -411,7 +231,7 @@ const runList = runs();
  * from a transcript are different objects. Averaging them silently would invent
  * precision this page has no right to.
  */
-const tokenStats = (() => {
+export function tokenStats(runList) {
   const list = (runList ?? []).filter((r) => Number.isFinite(r.tokens));
   if (!list.length) return null;
   const byTask = new Map();
@@ -476,7 +296,7 @@ const tokenStats = (() => {
     churnShare: compTotal ? comp.write / (comp.cached + comp.write || 1) : null,
     perTurn: turns ? Math.round(compTotal / turns) : null,
   };
-})();
+}
 
 /**
  * Tokens spent on work that had to be done again.
@@ -485,7 +305,7 @@ const tokenStats = (() => {
  * the spend WAS; this says which part of it bought nothing, because the task
  * failed a gate and ran again. Only computable since verdicts started appending.
  */
-const reworkSpend = (() => {
+export function reworkSpend(phases, runList, GATES) {
   if (!runList) return null;
   const failed = new Set();
   for (const p of phases) {
@@ -505,9 +325,243 @@ const reworkSpend = (() => {
     if (r.task && failed.has(r.task)) wasted += r.tokens;
   }
   return { wasted, total, pct: total ? Math.round((wasted / total) * 100) : 0, tasks: failed.size };
-})();
+}
+
+/**
+ * Every number the page shows, from the board, the run log and git facts.
+ * `git` is { commitsByDay, commitsPerTask } as readGit returns them, so a
+ * caller with no git passes empty ones and gets empty velocity, not an error.
+ */
+export function metrics(board, runList, git, cfg, now = new Date()) {
+  const phases = board.phases ?? [];
+  const GATES = cfg.gates ?? ["reviewer", "qa", "security"];
+  const DAYS = cfg.window ?? 14;
+  /** A working day, in hours. Used to turn `1d` and `1w` into a common unit. */
+  const DAY_HOURS = cfg.dayHours ?? 8;
+  const WINDOW = lastDays(DAYS, now);
+  const { commitsByDay, commitsPerTask } = git;
+
+  const active = phases.find((p) => p.name === cfg.activePhase) ?? phases[phases.length - 1];
+  const activeTasks = (active?.tasks ?? []).map((t) => ({ ...t, phase: active.name }));
+
+  const doneCount = activeTasks.filter(isDone).length;
+  const pctTasks = activeTasks.length ? Math.round((doneCount / activeTasks.length) * 100) : 0;
+
+  /* Effort, and an explicit count of what could not be parsed. */
+  const hoursOf = new Map(activeTasks.map((t) => [t.id, estHours(t, DAY_HOURS)]));
+  const unestimated = activeTasks.filter((t) => hoursOf.get(t.id) === null).length;
+  const sumHours = (list) => list.reduce((n, t) => n + (hoursOf.get(t.id) ?? 0), 0);
+  const totalHours = sumHours(activeTasks);
+  const doneHours = sumHours(activeTasks.filter(isDone));
+  const remainingHours = totalHours - doneHours;
+  const pctEffort = totalHours ? Math.round((doneHours / totalHours) * 100) : 0;
+
+  /* Effort closed per calendar day in the window, from the board's own stamps. */
+  const closedHoursByDay = (() => {
+    const counts = Object.fromEntries(WINDOW.map((d) => [d, 0]));
+    for (const p of phases) {
+      for (const t of p.tasks ?? []) {
+        if (t.completed && t.completed in counts) counts[t.completed] += estHours(t, DAY_HOURS) ?? 0;
+      }
+    }
+    return WINDOW.map((d) => counts[d]);
+  })();
+  const closedByDay = (() => {
+    const counts = Object.fromEntries(WINDOW.map((d) => [d, 0]));
+    for (const p of phases) {
+      for (const t of p.tasks ?? []) {
+        if (t.completed && t.completed in counts) counts[t.completed] += 1;
+      }
+    }
+    return WINDOW.map((d) => counts[d]);
+  })();
+
+  const etaV = eta(closedHoursByDay, remainingHours, DAYS, now);
+
+  const heldTotal = activeTasks.filter((t) => held(t, GATES)).length;
+  const blockedTotal = activeTasks.filter((t) => t.status === "blocked").length;
+  const noAc = activeTasks.filter((t) => !isDone(t) && !acOf(t)).length;
+  const landedToday = commitsByDay[commitsByDay.length - 1] ?? 0;
+
+  const cycleRows = cycle(phases, commitsPerTask, DAY_HOURS);
+  return {
+    phases, GATES, DAYS, DAY_HOURS, WINDOW, commitsByDay,
+    active, activeTasks, doneCount, pctTasks, hoursOf, unestimated,
+    totalHours, doneHours, remainingHours, pctEffort,
+    closedHoursByDay, closedByDay, eta: etaV,
+    heldTotal, blockedTotal, noAc, landedToday,
+    cycle: cycleRows,
+    medDays: median(cycleRows.map((r) => r.days)),
+    medEst: median(cycleRows.filter((r) => r.est).map((r) => r.est)),
+    byOwner: byOwner(activeTasks, hoursOf),
+    gateStats: gateStats(phases, GATES),
+    quality: quality(phases, GATES),
+    runList,
+    tokenStats: tokenStats(runList),
+    reworkSpend: reworkSpend(phases, runList, GATES),
+  };
+}
+
+/* ------------------------------------------------------------------ sources */
+
+export function readAgents(root, cfg) {
+  const dir = join(root, cfg.agentsDir);
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir)
+    .filter((f) => f.endsWith(".md"))
+    .map((f) => {
+      const head = readFileSync(join(dir, f), "utf8").slice(0, 2000);
+      const m = /^model:\s*(\S+)/m.exec(head);
+      return { name: f.replace(/\.md$/, ""), model: m ? m[1] : "inherit" };
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/*
+ * A literal separator rather than an ASCII control code: a control character in
+ * a shell argument is invisible in a diff and in an approval prompt, and an
+ * earlier version of this file was rejected for exactly that.
+ */
+const SEP = "|~|";
+const gitIn = (root) => (args, fallback = "") => {
+  try {
+    return execFileSync("git", ["-C", root, ...args], { encoding: "utf8" });
+  } catch {
+    return fallback;
+  }
+};
+
+/** Commits, commits per day in the window, and commits per task id, from git. */
+export function readGit(root, DAYS = 14, now = new Date()) {
+  const git = gitIn(root);
+  const WINDOW = lastDays(DAYS, now);
+  const commits = git(["log", "-20", `--pretty=format:%h${SEP}%ar${SEP}%s`])
+    .split("\n")
+    .filter(Boolean)
+    .map((l) => {
+      const [sha, when, ...rest] = l.split(SEP);
+      return { sha, when, subject: rest.join(SEP) };
+    });
+
+  const commitsByDay = (() => {
+    const counts = Object.fromEntries(WINDOW.map((d) => [d, 0]));
+    for (const line of git(["log", `--since=${DAYS}.days`, "--pretty=format:%ad", "--date=short"])
+      .split("\n")
+      .filter(Boolean)) {
+      if (line in counts) counts[line] += 1;
+    }
+    return WINDOW.map((d) => counts[d]);
+  })();
+
+  /**
+   * Task to commits, by scanning subjects and bodies for the id. Loose on
+   * purpose: this is a CHURN signal, not an audit. A task named in twenty commits
+   * is one that fought back, which is worth seeing next to its estimate.
+   */
+  const commitsPerTask = (() => {
+    const map = new Map();
+    const log = git(["log", `--pretty=format:%H${SEP}%ad${SEP}%s %b`, "--date=short"]);
+    for (const line of log.split("\n").filter(Boolean)) {
+      const [, date, text] = line.split(SEP);
+      const ids = new Set(String(text).match(/\bT-\d+[a-z]?\b/g) ?? []);
+      for (const id of ids) {
+        const cur = map.get(id) ?? { n: 0, first: date, last: date };
+        cur.n += 1;
+        if (date < cur.first) cur.first = date;
+        if (date > cur.last) cur.last = date;
+        map.set(id, cur);
+      }
+    }
+    return map;
+  })();
+
+
+  return { commits, commitsByDay, commitsPerTask };
+}
+
+export function readRuns(root, cfg) {
+  const p = join(root, cfg.runs);
+  if (!existsSync(p)) return null;
+  return readFileSync(p, "utf8")
+    .split("\n")
+    .filter(Boolean)
+    .map((l) => {
+      try {
+        return JSON.parse(l);
+      } catch {
+        return null; // a half-written last line is normal in an appended file
+      }
+    })
+    .filter(Boolean);
+}
+
+/** The config and the repo root it describes, as the page has always resolved them. */
+export function readConfig(cfgPath = join(HERE, "config.json")) {
+  const cfg = JSON.parse(readFileSync(cfgPath, "utf8"));
+  const root = resolve(dirname(cfgPath), "..", "..", cfg.repo ?? ".");
+  return { cfg, root };
+}
+
+/* ------------------------------------------------------------------- history */
+
+/*
+ * ONE LINE PER BUILD, so the ETA can be checked against what happened rather
+ * than only asserted. Nothing else on this page has a memory: every other number
+ * is recomputed from the board and from git, which is why they cannot rot. This
+ * one file is the exception, and it is append-only for the same reason an audit
+ * table is — a prediction you can quietly revise is not a prediction.
+ */
+export function recordHistory(HIST, m, today) {
+  const history = existsSync(HIST)
+    ? readFileSync(HIST, "utf8")
+        .split("\n")
+        .filter(Boolean)
+        .map((l) => {
+          try {
+            return JSON.parse(l);
+          } catch {
+            return null;
+          }
+        })
+        .filter(Boolean)
+    : [];
+  // One record per DAY, not per build: this script runs on every publish, and a
+  // day with forty builds would otherwise drown a day with one.
+  if (!history.some((h) => h.d === today)) {
+    const row = {
+      d: today,
+      pctEffort: m.pctEffort,
+      pctTasks: m.pctTasks,
+      remainingHours: Math.round(m.remainingHours),
+      eta: m.eta?.date ?? null,
+      done: m.doneCount,
+      held: m.heldTotal,
+      blocked: m.blockedTotal,
+    };
+    try {
+      mkdirSync(dirname(HIST), { recursive: true });
+      appendFileSync(HIST, JSON.stringify(row) + "\n");
+      history.push(row);
+    } catch {
+      // A read-only checkout still renders; it just cannot remember.
+    }
+  }
+
+  return history;
+}
 
 /* -------------------------------------------------------------------- render */
+
+/** The page, from metrics() and the few sources only the page shows. */
+export function render(m, { cfg, agentList = [], commits = [], history = [], now = new Date() }) {
+  const {
+    phases, GATES, DAYS, WINDOW, commitsByDay, active, activeTasks, doneCount, pctTasks,
+    hoursOf, unestimated, totalHours, doneHours, remainingHours, pctEffort, closedHoursByDay,
+    closedByDay, eta, heldTotal, blockedTotal, noAc, landedToday, cycle, medDays, medEst,
+    byOwner, gateStats, quality, runList, tokenStats, reworkSpend,
+  } = m;
+  const sumHours = (list) => list.reduce((n, t) => n + (hoursOf.get(t.id) ?? 0), 0);
+
 
 function spark(values, cls) {
   const w = 240;
@@ -534,7 +588,7 @@ function gateRail(t) {
 }
 
 function taskCard(t) {
-  const h = held(t);
+  const h = held(t, GATES);
   const hrs = hoursOf.get(t.id);
   const meta = [
     t.owner ? `<span class="ow">${esc(t.owner)}</span>` : "",
@@ -619,7 +673,7 @@ const phaseRows = phases
   .join("");
 
 const agentRows = (() => {
-  const list = agents();
+  const list = agentList;
   if (!list.length) return "";
   const byModel = new Map();
   for (const a of list) byModel.set(a.model, [...(byModel.get(a.model) ?? []), a.name]);
@@ -729,7 +783,7 @@ const compBar = tokenStats?.compTotal
     })()
   : "";
 
-const built = new Date().toISOString().replace("T", " ").slice(0, 16);
+const built = now.toISOString().replace("T", " ").slice(0, 16);
 const etaLine = eta
   ? `<b>${esc(eta.date)}</b> &middot; ${eta.days} day${eta.days === 1 ? "" : "s"} at
      ${eta.perDay.toFixed(1)}h/day`
@@ -1109,13 +1163,37 @@ footer{margin-top:34px;color:var(--faint);font-size:13px;line-height:1.7;
   that failed.
 </footer>
 </div></body></html>`;
+  return html;
+}
 
-const outPath = at(cfg.out);
-mkdirSync(dirname(outPath), { recursive: true });
-writeFileSync(outPath, html);
-console.log(
-  `[foreman] ${cfg.name}: ${pctEffort}% by effort (${Math.round(doneHours)}/${Math.round(
-    totalHours,
-  )}h), ${pctTasks}% by count (${doneCount}/${activeTasks.length}), ${heldTotal} held, ` +
-    `${blockedTotal} blocked, ${noAc} no finish line, ETA ${eta ? eta.date : "no rate"} -> ${cfg.out}`,
-);
+/* --------------------------------------------------------------------- cli */
+const isEntry = (() => {
+  try {
+    return !!process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+})();
+
+if (isEntry) {
+  const cfgPath = process.argv[2] ? resolve(process.argv[2]) : join(HERE, "config.json");
+  const { cfg, root: ROOT } = readConfig(cfgPath);
+  const at = (p) => join(ROOT, p);
+  const now = new Date();
+  const board = JSON.parse(readFileSync(at(cfg.board), "utf8"));
+  const gitFacts = readGit(ROOT, cfg.window ?? 14, now);
+  const m = metrics(board, readRuns(ROOT, cfg), gitFacts, cfg, now);
+  const history = recordHistory(at(cfg.history ?? "ops/foreman/history.jsonl"), m, now.toISOString().slice(0, 10));
+  const html = render(m, { cfg, agentList: readAgents(ROOT, cfg), commits: gitFacts.commits, history, now });
+
+  const outPath = at(cfg.out);
+  mkdirSync(dirname(outPath), { recursive: true });
+  writeFileSync(outPath, html);
+  const { pctEffort, doneHours, totalHours, pctTasks, doneCount, activeTasks, heldTotal, blockedTotal, noAc, eta } = m;
+  console.log(
+    `[foreman] ${cfg.name}: ${pctEffort}% by effort (${Math.round(doneHours)}/${Math.round(
+      totalHours,
+    )}h), ${pctTasks}% by count (${doneCount}/${activeTasks.length}), ${heldTotal} held, ` +
+      `${blockedTotal} blocked, ${noAc} no finish line, ETA ${eta ? eta.date : "no rate"} -> ${cfg.out}`,
+  );
+}
