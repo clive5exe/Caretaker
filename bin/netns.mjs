@@ -23,17 +23,25 @@
  * link`), no default route at all. `--internal` does what ADR-0001 assumes:
  * the container has no path off its own subnet, full stop.
  *
- * DNS: `dns_enabled: true` even on an internal network (aardvark-dns still
- * runs), but it resolves NAMES OF CONTAINERS ON THE SAME NETWORK ONLY — it does
- * not forward to an external resolver:
+ * DNS IS TURNED OFF ON THE INTERNAL NETWORK (`--disable-dns`), because
+ * whether aardvark-dns forwards on an `--internal` network depends on its
+ * version. On the podman 5.8.2 box above it did not. On Ubuntu 24.04's podman
+ * 4.9.3 with aardvark-dns 1.4.0 (also what GitHub's ubuntu-24.04 runner ships)
+ * it does, measured 2026-09-29:
  *
- *   $ podman run --rm --network fm-internal-test nginx:alpine \
- *       wget -q -T3 -O- http://example.com
- *   wget: bad address 'example.com'
+ *   $ podman network create --internal fmi
+ *   $ podman run --rm --network fmi nginx:alpine getent hosts example.com
+ *   2606:4700:10::ac42:93f3  example.com  example.com
  *
- * So the agent reaches the proxy by its `--network-alias` (aardvark-dns
- * resolves that fine within the shared internal network — verified below in
- * `runAttackSuite`), not by a public hostname, and never needs one.
+ * A resolver that forwards is an exfiltration channel with no TCP at all: the
+ * agent encodes the repo into query names and an attacker's authoritative
+ * server reads them. With `--disable-dns` the same probe exits 2 with no
+ * address, and the container's resolv.conf names only servers it has no route
+ * to. `netns.test.mjs` re-measures this live rather than trusting either.
+ *
+ * So the agent cannot find the proxy by name through DNS either. It gets the
+ * proxy's address as a static `/etc/hosts` entry (`agentHostArgs`), read from
+ * the running proxy with `proxyAddressArgs`, and needs no resolver at all.
  *
  * THE HOLE THE TASK ASKED ABOUT — does `--internal` still let the container
  * reach the host? Measured, not assumed. Rootless podman on this box runs
@@ -72,15 +80,15 @@
  *
  * WHAT THIS DOES NOT DO: run the agent container itself. `sandbox.mjs run
  * --net <name>` already accepts an arbitrary podman network name in its `net`
- * flag (it just does `--network <net>`, unmodified here) — point it at the
- * internal network this file creates and it is wired correctly with no change
- * to that file.
+ * flag (it just does `--network <net>`, unmodified here), which puts the agent
+ * on the internal network. It cannot yet pass `--add-host`, so the agent has
+ * no name for the proxy until that flag is added there (see `agentNetFlag`).
  *
  * Usage:
  *   netns.mjs create-internal <name>
  *   netns.mjs create-egress   <name>
  *   netns.mjs proxy    <internal-net> <egress-net> --allow a.com,b.com [--port 8080] [--name NAME]
- *   netns.mjs verify   <internal-net> <proxy-alias> <proxy-port> --allow-host H --deny-host H
+ *   netns.mjs verify   <internal-net> <proxy-alias> <proxy-port> --allow-host H --deny-host H [--proxy-name NAME]
  *   netns.mjs teardown <name...>
  */
 import { execFileSync, spawnSync } from "node:child_process";
@@ -91,9 +99,12 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 /* --------------------------------------------------------------- networks */
 
-/** `podman network create --internal <name>` — no route off the host at all. */
+/**
+ * `podman network create --internal --disable-dns <name>` — no route off the
+ * host, and no resolver that might forward (see the header).
+ */
 export function internalNetworkArgs(name) {
-  return ["network", "create", "--internal", name];
+  return ["network", "create", "--internal", "--disable-dns", name];
 }
 
 /** A normally-connected network, for the proxy's outbound leg. */
@@ -120,7 +131,6 @@ export function proxyRunArgs({
   name = "fm-egress-proxy",
   internalNetwork,
   egressNetwork,
-  alias = "proxy",
   image = "docker.io/library/node:22-alpine",
   binDir = __dirname,
   allow = null,
@@ -145,8 +155,6 @@ export function proxyRunArgs({
     // interfaces present from the first moment the process starts).
     "--network",
     internalNetwork,
-    "--network-alias",
-    alias,
     "--network",
     egressNetwork,
     // The proxy relays; it does not need to write to the repo or run as root.
@@ -171,10 +179,28 @@ export function proxyRunArgs({
   return args;
 }
 
+/** The argv that prints the proxy's address on the internal network. */
+export function proxyAddressArgs(proxyName, internalNetwork) {
+  return ["inspect", proxyName, "--format", `{{ (index .NetworkSettings.Networks "${internalNetwork}").IPAddress }}`];
+}
+
 /**
- * What to pass sandbox.mjs. Not a wrapper — `sandbox.mjs run --net <name>`
- * already does exactly `--network <name>`, so the internal network's name IS
- * the value, and this function exists only so nobody has to remember that.
+ * The flags that let an agent on the internal network reach the proxy as
+ * `alias` with DNS off: a static `/etc/hosts` entry.
+ */
+export function agentHostArgs(proxyIp, alias = "proxy") {
+  if (!/^[0-9a-fA-F.:]+$/.test(String(proxyIp ?? ""))) {
+    throw new Error(`agentHostArgs needs an IP address, got ${JSON.stringify(proxyIp)}`);
+  }
+  return ["--add-host", `${alias}:${proxyIp}`];
+}
+
+/**
+ * What to pass sandbox.mjs as `--net`. `sandbox.mjs run --net <name>` does
+ * exactly `--network <name>`, so the internal network's name IS the value.
+ * The agent also needs `agentHostArgs` to reach the proxy, and sandbox.mjs
+ * has no way to pass `--add-host` yet, so wiring a real agent run through the
+ * proxy still needs that flag added there.
  */
 export function agentNetFlag(internalNetwork) {
   return internalNetwork;
@@ -187,10 +213,10 @@ export function agentNetFlag(internalNetwork) {
  * `cmd` is a shell string executed with `sh -c`, because every check here is
  * "did the request get through", which a one-line curl answers.
  */
-function attackerRun({ network, image, cmd, timeoutMs = 15000 }) {
+function attackerRun({ network, image, cmd, extraArgs = [], timeoutMs = 15000 }) {
   const r = spawnSync(
     "podman",
-    ["run", "--rm", "--network", network, image, "sh", "-c", cmd],
+    ["run", "--rm", "--network", network, ...extraArgs, image, "sh", "-c", cmd],
     { encoding: "utf8", timeout: timeoutMs },
   );
   return { status: r.status, stdout: (r.stdout ?? "").trim(), stderr: (r.stderr ?? "").trim() };
@@ -203,7 +229,7 @@ function attackerRun({ network, image, cmd, timeoutMs = 15000 }) {
  * real output so a report can quote it rather than paraphrase it.
  *
  * Requires: `internalNetwork` already created `--internal`, and a proxy already
- * running on it (see `proxyRunArgs`) reachable at `proxyAlias:proxyPort`,
+ * running on it (see `proxyRunArgs`) at `proxyIp`, reached as `proxyAlias:proxyPort`,
  * configured to allow `allowedHost` and refuse `deniedHost`. This function
  * does not create or start either — it only attacks what is already there, so
  * the same code path serves the automated test and a person re-running it by
@@ -211,6 +237,7 @@ function attackerRun({ network, image, cmd, timeoutMs = 15000 }) {
  */
 export function runAttackSuite({
   internalNetwork,
+  proxyIp,
   proxyAlias = "proxy",
   proxyPort = 8080,
   allowedHost,
@@ -223,6 +250,10 @@ export function runAttackSuite({
   if (!internalNetwork) throw new Error("runAttackSuite needs internalNetwork");
   if (!allowedHost) throw new Error("runAttackSuite needs allowedHost");
   if (!deniedHost) throw new Error("runAttackSuite needs deniedHost");
+  // Every attacker gets the same /etc/hosts entry a real agent would, so
+  // attack #3 proves the bypass fails even with the proxy's address in hand.
+  const hosts = agentHostArgs(proxyIp, proxyAlias);
+  const attack = (cmd) => attackerRun({ network: internalNetwork, image: agentImage, cmd, extraArgs: hosts });
 
   const curl = (target, { proxy = null } = {}) => {
     const proxyFlag = proxy ? `-x http://${proxy}` : "";
@@ -246,7 +277,7 @@ export function runAttackSuite({
     const command = curl(allowedHost, { proxy: `${proxyAlias}:${proxyPort}` });
     record("allowed host through the proxy reaches it", (out) => /HTTP_STATUS=200/.test(out.stdout), {
       command,
-      out: attackerRun({ network: internalNetwork, image: agentImage, cmd: command }),
+      out: attack(command),
     });
   }
 
@@ -256,7 +287,7 @@ export function runAttackSuite({
     record(
       "not-allowed host through the proxy is refused (403)",
       (out) => /CONNECT tunnel failed, response 403/.test(out.stdout) || /HTTP_STATUS=403/.test(out.stdout),
-      { command, out: attackerRun({ network: internalNetwork, image: agentImage, cmd: command }) },
+      { command, out: attack(command) },
     );
   }
 
@@ -268,7 +299,7 @@ export function runAttackSuite({
     record(
       "bypassing the proxy and dialing out directly fails",
       (out) => out.status !== 0 && /Could not resolve host|Could not connect|Network unreachable/.test(out.stdout),
-      { command, out: attackerRun({ network: internalNetwork, image: agentImage, cmd: command }) },
+      { command, out: attack(command) },
     );
   }
 
@@ -279,7 +310,7 @@ export function runAttackSuite({
     record(
       "reaching another container on a sibling network fails",
       (out) => out.status !== 0 && !/HTTP_STATUS=200/.test(out.stdout),
-      { command, out: attackerRun({ network: internalNetwork, image: agentImage, cmd: command }) },
+      { command, out: attack(command) },
     );
   }
 
@@ -291,7 +322,7 @@ export function runAttackSuite({
     record(
       "reaching a service on the host itself fails",
       (out) => out.status !== 0 && !/HTTP_STATUS=200/.test(out.stdout),
-      { command, out: attackerRun({ network: internalNetwork, image: agentImage, cmd: command }) },
+      { command, out: attack(command) },
     );
   }
 
@@ -354,12 +385,19 @@ if (isEntry) {
     if (!internalNetwork || !flags["allow-host"] || !flags["deny-host"]) {
       console.error(
         "usage: netns.mjs verify <internal-net> [proxy-alias] [proxy-port] --allow-host H --deny-host H " +
-          "[--victim-host ip:port] [--host-probe host:port]",
+          "[--proxy-name NAME] [--victim-host ip:port] [--host-probe host:port]",
       );
       process.exit(2);
     }
+    const proxyName = flags["proxy-name"] ?? "fm-egress-proxy";
+    const proxyIp = spawnSync("podman", proxyAddressArgs(proxyName, internalNetwork), { encoding: "utf8" }).stdout?.trim();
+    if (!proxyIp) {
+      console.error(`no address for proxy container ${proxyName} on ${internalNetwork} — is it running?`);
+      process.exit(1);
+    }
     const results = runAttackSuite({
       internalNetwork,
+      proxyIp,
       proxyAlias: proxyAlias ?? "proxy",
       proxyPort: proxyPort ? Number(proxyPort) : 8080,
       allowedHost: flags["allow-host"],
@@ -393,7 +431,7 @@ if (isEntry) {
   } else {
     console.error(
       "usage: netns.mjs create-internal <name> | create-egress <name> | " +
-        "proxy <internal> <egress> --allow H | verify <internal> [alias] [port] --allow-host H --deny-host H | " +
+        "proxy <internal> <egress> --allow H | verify <internal> [alias] [port] --allow-host H --deny-host H [--proxy-name N] | " +
         "teardown <name...>",
     );
     process.exit(2);
