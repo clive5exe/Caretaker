@@ -63,7 +63,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { createWriteStream, existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { randomBytes } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { DEFAULT_DIR as DEFAULT_EVENTS_DIR, STAGES, append as appendEvents } from "./events.mjs";
@@ -71,6 +71,7 @@ import { buildArgs, checkLimits, delegatedControllers } from "./sandbox.mjs";
 import { readDevcontainer, toLimits } from "./spec.mjs";
 import { openaiCompatibleAdapter } from "./openai-compatible.mjs";
 import { EnvironmentError, imageId, resolveImage } from "./environment.mjs";
+import { within } from "./paths.mjs";
 
 /**
  * The seam, as data. Exported so a test can assert the shape rather than trust
@@ -922,9 +923,7 @@ function ensureLogDir(policy, workspace) {
   const dir = policy.logDir
     ? resolve(policy.logDir)
     : join(tmpdir(), "caretaker-runs", policy.runId);
-  const rel = relative(workspace, dir);
-  const inside = rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
-  if ((inside || dir === workspace) && !policy.allowLogDirInWorkspace) {
+  if (within(dir, workspace) && !policy.allowLogDirInWorkspace) {
     /*
      * REFUSED, not warned. The transcript is written while the run is in
      * flight, so a log inside the workspace lands between the two snapshots and

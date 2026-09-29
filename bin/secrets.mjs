@@ -157,7 +157,8 @@ import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { under } from "./paths.mjs";
 
 /* ------------------------------------------------------------------ errors */
 
@@ -190,11 +191,14 @@ export function repoRootOf(start = process.cwd()) {
   }
 }
 
-/** Is `p` inside `root`? Path-segment comparison, so `/repo-backup` is not `/repo`. */
+/**
+ * Is `p` inside `root` (and not root itself)? paths.mjs's answer: whole path
+ * segments, so `/repo-backup` is not `/repo` and `/repo/..x` is inside it, with
+ * symlinks resolved.
+ */
 export function isInside(p, root) {
   if (!root) return false;
-  const rel = relative(resolve(root), resolve(p));
-  return rel !== "" && !rel.startsWith("..") && !rel.startsWith(sep) && !/^[A-Za-z]:/.test(rel);
+  return under(p, root);
 }
 
 /**

@@ -42,11 +42,12 @@ import {
   closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, renameSync, statSync, writeFileSync, appendFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { randomBytes } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { makeRedactor, requireSecrets } from "./secrets.mjs";
 import { stateDirFor } from "./statedir.mjs";
+import { within } from "./paths.mjs";
 import { harvest, liveRecorder } from "./harvest.mjs";
 
 export const RUN_ID = /^r_[0-9a-f]{8}$/;
@@ -64,10 +65,7 @@ export class RunStoreError extends Error {
 /** The state directory for a repo; defined in statedir.mjs (see there for why). */
 export { stateDirFor };
 
-const inside = (p, root) => {
-  const rel = relative(resolve(root), resolve(p));
-  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
-};
+const inside = within;
 
 /** Refuse a state dir the next agent could read. See the header for why. */
 export function checkStateDir(stateDir, workspace) {

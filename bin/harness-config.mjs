@@ -47,11 +47,12 @@
  *   node bin/harness-config.mjs path
  * Exit: 0 ok, 1 the file is refused (the reason is printed), 2 misuse.
  */
-import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { CLI_PRESETS, cliLabel } from "./harness.mjs";
+import { within } from "./paths.mjs";
 
 export class HarnessConfigError extends Error {
   constructor(code, message) {
@@ -73,17 +74,7 @@ export function defaultPath() {
   return join(process.env.XDG_CONFIG_HOME || join(homedir(), ".config"), "caretaker", "harness.json");
 }
 
-const real = (p) => {
-  try {
-    return realpathSync(p);
-  } catch {
-    return resolve(p);
-  }
-};
-const inside = (p, root) => {
-  const rel = relative(real(root), real(p));
-  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
-};
+const inside = within;
 
 function checkProfile(where, prof, clis) {
   if (prof === null || typeof prof !== "object" || Array.isArray(prof)) throw new HarnessConfigError("BAD_SHAPE", `${where} must be an object`);
