@@ -303,7 +303,8 @@ rows: run log rows and gate verdicts. A figure with no dates behind it says
 - **From `dashboard.mjs` today** (exported in C-2):
   - tokens by kind, as cached, in, write and out per day
   - context churn: the share of context the cache could not match
-  - rework spend: tokens on tasks that failed a gate and ran again
+  - rework spend: a failed task's tokens up to the day of its last failed gate
+    verdict (the attempts sent back, not the run that passed)
   - pass rate per gate, counting every attempt from the verdict history
   - first-pass rate
   - estimate against elapsed time for closed tasks

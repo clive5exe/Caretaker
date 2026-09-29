@@ -169,6 +169,9 @@ Fixing them is a rule change and gets its own task (see Findings).
 - `dashboard.mjs` exports pure functions: `estHours`, `held`, `eta`,
   `quality`, `gateStats`, `tokenStats`, `reworkSpend`, `cycle`, `byOwner`, and
   a `metrics(board, runs, gitFacts, cfg, now)` that composes them.
+- `reworkSpend` returns `{ wasted, total, pct, tasks, unplaced }`. `wasted` is a
+  failed task's tokens up to the day of its last failed verdict. A run or a
+  failure with no date on a failed task is `unplaced`, never counted as rework.
 - Rendering, the `history.jsonl` append and the file write move behind
   `isEntry`.
 - **Test.** Generate the page with the old and new code back to back on a

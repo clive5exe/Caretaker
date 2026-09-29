@@ -281,7 +281,7 @@ export function renderMetrics(d, st, W, H, p) {
       out.push(`  ${["cached", "in", "write", "out"].map((k) => `${k} ${tokens(t.comp[k])}`).join(" · ")}`);
       out.push(`  churn ${t.churnShare == null ? "unknown" : `${Math.round(t.churnShare * 100)}%`} · output ${t.outShare == null ? "unknown" : `${Math.round(t.outShare * 100)}%`} · per turn ${t.perTurn == null ? "unknown" : tokens(t.perTurn)}`);
     }
-    if (m.reworkSpend) out.push(`  rework spend ${tokens(m.reworkSpend.wasted)} (${m.reworkSpend.pct}%) on ${m.reworkSpend.tasks} tasks`);
+    if (m.reworkSpend) out.push(`  rework spend ${tokens(m.reworkSpend.wasted)} (${m.reworkSpend.pct}%) on ${m.reworkSpend.tasks} tasks, up to each one's last failed verdict`);
     if (t.byAgent.length) out.push(`  by agent  ${t.byAgent.map(([a, v]) => `${a ?? "unnamed"} ${tokens(v.tokens)}`).join(" · ")}`);
     if (t.byModel.length) out.push(`  by model  ${t.byModel.map(([a, v]) => `${a} ${tokens(v.tokens)}`).join(" · ")}`);
   } else out.push(`${p.bold("Tokens")} ${NR(p, m.sources.runs === "absent" ? "no run log (ops/caretaker/runs.jsonl)" : "no tokens logged in range")}`);

@@ -327,7 +327,7 @@ export interface Metrics {
   window: string[];
   tokens: TokenStats | null;
   tokensPerDay: { day: string; comp: TokenComp | null; total: number }[] | null;
-  reworkSpend: { wasted: number; total: number; pct: number; tasks: number } | null;
+  reworkSpend: { wasted: number; total: number; pct: number; tasks: number; unplaced: number } | null;
   gateStats: GateStats;
   quality: Quality;
   allTime: { gateStats: GateStats; quality: Quality };

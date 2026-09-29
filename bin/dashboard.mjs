@@ -302,29 +302,43 @@ export function tokenStats(runList) {
  * Tokens spent on work that had to be done again.
  *
  * THE ONE ACTIONABLE WASTE NUMBER. Everything else on this page describes what
- * the spend WAS; this says which part of it bought nothing, because the task
- * failed a gate and ran again. Only computable since verdicts started appending.
+ * the spend WAS; this says which part went on attempts a gate sent back: a
+ * failed task's runs up to its last failed verdict. Only computable since
+ * verdicts started appending.
  */
 export function reworkSpend(phases, runList, GATES) {
   if (!runList) return null;
-  const failed = new Set();
+  // Per task that failed a gate: the day of its LAST failed verdict. Runs up
+  // to that day are the attempts sent back; the run that then passed bought
+  // the work and is not rework (independent review: it was counted).
+  const lastFail = new Map();
   for (const p of phases) {
     for (const t of p.tasks ?? []) {
-      const everFailed = GATES.some((g) => {
+      for (const g of GATES) {
         const r = (t.gate ?? {})[g];
-        return r && (r.verdict !== "pass" || (r.history ?? []).some((h) => h.verdict !== "pass"));
-      });
-      if (everFailed) failed.add(t.id);
+        if (!r) continue;
+        for (const e of [...(r.history ?? []), r]) {
+          if (e.verdict === "pass") continue;
+          const at = /^\d{4}-\d{2}-\d{2}/.test(e.at ?? "") ? e.at.slice(0, 10) : "";
+          if (!lastFail.has(t.id) || at > lastFail.get(t.id)) lastFail.set(t.id, at);
+        }
+      }
     }
   }
   let wasted = 0;
   let total = 0;
+  let unplaced = 0;
   for (const r of runList) {
     if (!Number.isFinite(r.tokens)) continue;
     total += r.tokens;
-    if (r.task && failed.has(r.task)) wasted += r.tokens;
+    if (!r.task || !lastFail.has(r.task)) continue;
+    // Verdicts carry a date only, so a run on the day of the failure counts
+    // as rework. A run or a failure with no date cannot be placed either side.
+    const day = /^\d{4}-\d{2}-\d{2}/.test(r.t ?? "") ? r.t.slice(0, 10) : "";
+    if (!day || !lastFail.get(r.task)) unplaced += r.tokens;
+    else if (day <= lastFail.get(r.task)) wasted += r.tokens;
   }
-  return { wasted, total, pct: total ? Math.round((wasted / total) * 100) : 0, tasks: failed.size };
+  return { wasted, total, pct: total ? Math.round((wasted / total) * 100) : 0, tasks: lastFail.size, unplaced };
 }
 
 /**
@@ -1067,8 +1081,9 @@ footer{margin-top:34px;color:var(--faint);font-size:13px;line-height:1.7;
            ${reworkSpend?.wasted ? `<div><p class="k">Rework</p>
              <p class="v worse">${reworkSpend.pct}%</p>
              <p class="w">${reworkSpend.wasted.toLocaleString("en-US")} tokens on
-               ${reworkSpend.tasks} task${reworkSpend.tasks === 1 ? "" : "s"} that failed a gate and
-               ran again. The one number here that bought nothing.</p></div>` : ""}
+               ${reworkSpend.tasks} task${reworkSpend.tasks === 1 ? "" : "s"} that failed a gate, spent
+               up to the day each last failed: the attempts that were sent back. Verdicts carry a
+               date only, so a retry on the day of a failure is counted here too.</p></div>` : ""}
          </div>
          <p class="cav">Composition is computed from ${tokenStats.detailedCount} run(s) that
            reported a breakdown; runs logging only a total are counted in the totals elsewhere but

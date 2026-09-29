@@ -32,11 +32,18 @@
  *   node bin/harvest.mjs keep    --run r_… --id d1 [--by NAME]
  *   node bin/harvest.mjs discard --run r_… --id d1 --reason "…" [--by NAME]
  *   node bin/harvest.mjs pending [--config …]
+ *   node bin/harvest.mjs import  --transcript FILE [--task T-1] [--cli claude] [--source loop.sh]
+ *
+ * `import` is for a run that did not go through runstore: the unattended loop
+ * calls its CLI directly. Its output is archived as a run (redacted) and
+ * harvested, and the run id is printed so the loop can log it on its row.
  */
+import { randomBytes } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { userInfo } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { makeRedactor } from "./secrets.mjs";
 import { stateDirFor } from "./statedir.mjs";
 import { transcriptTexts } from "./transcript.mjs";
 
@@ -159,6 +166,39 @@ export function harvest({ root, runDir, specsDir = "specs" }) {
   return out;
 }
 
+/**
+ * B-5: archive the output of a run that did not go through runstore, and
+ * harvest it. Only the transcript is known, so run.json records no diff,
+ * verdict or egress, and says why rather than leaving them to read as empty.
+ *
+ * Redacted before it is written: by key shape, and by the value of any
+ * credential variable this process holds, since that is the environment the
+ * loop's CLI ran in.
+ */
+export const LOOP_CREDENTIALS = ["ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "OPENAI_API_KEY"];
+export function importRun({ root, stateDir, transcript, task = null, cli = null, source = null, env = process.env, specsDir = "specs" }) {
+  const runId = `r_${randomBytes(4).toString("hex")}`;
+  const runDir = join(stateDir, "runs", runId);
+  mkdirSync(runDir, { recursive: true, mode: 0o700 });
+  const held = Object.fromEntries(LOOP_CREDENTIALS.filter((k) => String(env[k] ?? "").length >= 8).map((k) => [k, env[k]]));
+  const redact = makeRedactor(held);
+  const text = String(transcript ?? "");
+  writeFileSync(join(runDir, "transcript.log"), text.split("\n").map((l) => (l ? redact(l) : l)).join("\n"));
+  const rec = {
+    runId,
+    task,
+    parent: null,
+    adapter: cli ? "cli" : null,
+    cli,
+    source,
+    notRecorded: "diff, verdict and egress: this run did not go through runstore, so only its output was archived",
+    transcript: { bytes: Buffer.byteLength(text), lines: text ? text.split("\n").length : 0 },
+    archivedAt: new Date().toISOString(),
+  };
+  writeFileSync(join(runDir, "run.json"), `${redact(JSON.stringify(rec, null, 2))}\n`);
+  return { runId, runDir, ...harvest({ root, runDir, specsDir }) };
+}
+
 const decisionsLog = (runDir) => join(runDir, "harvest-decisions.jsonl");
 
 /** Pending decisions across every archived run: declared, recorded nowhere, not yet kept or discarded. */
@@ -231,7 +271,7 @@ export function decide({ root, stateDir, run, id, decision, by = null, reason = 
 const isEntry = process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href;
 if (isEntry) {
   const [cmd, ...argv] = process.argv.slice(2);
-  const KNOWN = new Set(["config", "run", "id", "by", "reason", "state-dir", "specs"]);
+  const KNOWN = new Set(["config", "run", "id", "by", "reason", "state-dir", "specs", "transcript", "task", "cli", "source"]);
   const f = {};
   for (let i = 0; i < argv.length; i++) {
     const key = argv[i].replace(/^--/, "");
@@ -253,6 +293,13 @@ if (isEntry) {
       console.error(`[harvest] ${f.run}: ${h.decisions.length} decision(s), ${h.decisions.filter((d) => !d.recordedIn).length} recorded nowhere`);
       process.exit(0);
     }
+    if (cmd === "import") {
+      if (!f.transcript || !existsSync(f.transcript)) throw new HarvestError("USAGE", `import needs --transcript FILE${f.transcript ? `; ${f.transcript} does not exist` : ""}`);
+      const h = importRun({ root, stateDir, transcript: readFileSync(f.transcript, "utf8"), task: f.task ?? null, cli: f.cli ?? null, source: f.source ?? null, specsDir: f.specs ?? "specs" });
+      console.log(h.runId);
+      console.error(`[harvest] ${h.runId}: ${h.decisions.length} decision(s), ${h.decisions.filter((d) => !d.recordedIn).length} recorded nowhere`);
+      process.exit(0);
+    }
     if (cmd === "keep" || cmd === "discard") {
       const r = decide({ root, stateDir, run: f.run, id: f.id, decision: cmd, by: f.by, reason: f.reason });
       console.log(`[harvest] ${f.run} ${f.id} ${cmd === "keep" ? `kept as ${r.adr} (draft)` : "discarded"} by ${r.by}`);
@@ -264,7 +311,7 @@ if (isEntry) {
       console.error(`[harvest] ${p.length} pending`);
       process.exit(0);
     }
-    throw new HarvestError("USAGE", "usage: harvest.mjs run|keep|discard|pending --run r_… [--id dN] [--reason …]");
+    throw new HarvestError("USAGE", "usage: harvest.mjs run|keep|discard|pending|import --run r_… [--id dN] [--reason …] [--transcript FILE]");
   } catch (e) {
     console.error(`[harvest] ${e.name}: ${e.message}`);
     process.exit(2);

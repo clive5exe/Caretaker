@@ -191,7 +191,7 @@ export function MetricsPage() {
                 <dd>{t.perTurn == null ? <span className="muted">not recorded</span> : fmtTokens(t.perTurn)}</dd>
                 <dt>Rework spend</dt>
                 <dd>
-                  {m.reworkSpend ? `${fmtTokens(m.reworkSpend.wasted)} (${m.reworkSpend.pct}%) on ${m.reworkSpend.tasks} task${m.reworkSpend.tasks === 1 ? "" : "s"} that failed a gate and ran again` : <span className="muted">not recorded</span>}
+                  {m.reworkSpend ? `${fmtTokens(m.reworkSpend.wasted)} (${m.reworkSpend.pct}%) on ${m.reworkSpend.tasks} task${m.reworkSpend.tasks === 1 ? "" : "s"} that failed a gate, up to the day each last failed` : <span className="muted">not recorded</span>}
                 </dd>
               </dl>
             </>

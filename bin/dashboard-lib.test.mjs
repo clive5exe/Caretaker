@@ -90,6 +90,8 @@ function fixture(dashFile) {
   writeFileSync(
     join(ops, "runs.jsonl"),
     [
+      // T-001's first attempt, sent back by qa on day(4); the day(2) run then passed.
+      { t: `${day(4)}T10:00:00Z`, kind: "end", name: "builder", state: "done", task: "T-001", tokens: 40000, model: "opus", src: "live" },
       { t: `${day(2)}T10:00:00Z`, kind: "start", name: "builder", state: "running", task: "T-001" },
       { t: `${day(2)}T11:00:00Z`, kind: "end", name: "builder", state: "done", task: "T-001", tokens: 120000, in: 5000, cached: 100000, write: 10000, out: 5000, turns: 12, model: "opus", src: "live" },
       { t: `${day(1)}T11:00:00Z`, kind: "end", name: "reviewer", state: "done", task: "T-002", tokens: 3000, model: "haiku", src: "reconstructed" },
@@ -139,7 +141,7 @@ const normalise = (html) =>
   ok("the console summary line is identical", ro.stdout === rn.stdout, `${ro.stdout}\n      ${rn.stdout}`);
   ok("the history file is identical", readFileSync(join(old.ops, "history.jsonl"), "utf8") === readFileSync(join(neu.ops, "history.jsonl"), "utf8"));
   // The fixture must exercise the parts it claims to: held, tokens, the ETA table.
-  ok("the fixture reaches held tasks, token composition and ETA history", /failed/.test(b) && /Where the tokens go/.test(b) && /drift vs now/.test(b) && /builder/.test(b));
+  ok("the fixture reaches held tasks, token composition, rework and ETA history", /failed/.test(b) && /attempts that were sent back/.test(b) && /Where the tokens go/.test(b) && /drift vs now/.test(b) && /builder/.test(b));
   for (const x of [old, neu]) rmSync(x.root, { recursive: true, force: true });
 }
 
@@ -157,6 +159,18 @@ const normalise = (html) =>
       keys: Object.keys(m).sort(),
       pctTasks: r.pctTasks, pctEffort: r.pctEffort, held: r.heldTotal, blocked: r.blockedTotal,
       eta: r.eta, fp: r.quality.firstPassPct, tokens: r.tokenStats.total, rework: r.reworkSpend.wasted,
+      // Independent review: the run that finally passed was counted as rework.
+      rw: m.reworkSpend(
+        [{ tasks: [{ id: "A", gate: { qa: { verdict: "pass", at: "2026-01-03", history: [{ verdict: "fail", at: "2026-01-01" }, { verdict: "fail", at: "2026-01-02" }] } } }, { id: "B", gate: { qa: { verdict: "pass", at: "2026-01-02" } } }] }],
+        [
+          { task: "A", t: "2026-01-01T10:00:00Z", tokens: 1 },
+          { task: "A", t: "2026-01-02T10:00:00Z", tokens: 10 },
+          { task: "A", t: "2026-01-03T10:00:00Z", tokens: 100 },
+          { task: "A", tokens: 1000 },
+          { task: "B", t: "2026-01-01T10:00:00Z", tokens: 10000 },
+        ],
+        ["qa"],
+      ),
       est: [m.estHours({ est: "1d" }), m.estHours({ est: "1d" }, 6), m.estHours({ est: "nonsense" })],
       noGit: m.metrics(board, null, { commitsByDay: [], commitsPerTask: new Map() }, cfg).pctTasks,
     }));
@@ -177,8 +191,11 @@ const normalise = (html) =>
   ok("metrics: blocked is 1", o.blocked === 1);
   // Gated: T-001 (qa failed once), T-002, T-003 (security failed), T-007.
   ok("metrics: first-pass rate is 2 of 4 gated tasks", o.fp === 50, `fp=${o.fp}`);
-  ok("metrics: tokens total the rows that carry them", o.tokens === 123000);
-  ok("metrics: rework spend is the tokens on tasks that ever failed a gate", o.rework === 120000);
+  ok("metrics: tokens total the rows that carry them", o.tokens === 163000);
+  ok("metrics: rework spend is a failed task's tokens up to its failed verdict, not the run that passed", o.rework === 40000, JSON.stringify(o));
+  ok("rework: every run up to the day of the LAST failure counts, the passing run does not", o.rw?.wasted === 11, JSON.stringify(o.rw));
+  ok("rework: a run with no time on a failed task is unplaced, not rework", o.rw?.unplaced === 1000 && o.rw?.total === 11111);
+  ok("rework: a task that never failed spends nothing on rework", o.rw?.tasks === 1);
   ok("estHours: 1d is 8h by default, 6h with a 6h day, null when unparsed", JSON.stringify(o.est) === "[8,6,null]");
   ok("metrics: no git and no run log still computes", o.noGit === o.pctTasks);
   rmSync(f.root, { recursive: true, force: true });

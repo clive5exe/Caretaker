@@ -20,7 +20,9 @@ You are running UNATTENDED from cron. Nobody is watching, so:
   the commit message. When you settle something no spec or ADR already says,
   put it on a line of its own the moment you decide it:
       DECISION: <what> because <why>
-  Anything no spec or ADR records reaches a human's Inbox to keep or discard.
+  The loop harvests these from your output when it ends: anything no spec or
+  ADR records reaches a human's Inbox to keep or discard (or the loop's log,
+  where harvest.mjs is not installed).
 
 Report at the end in two or three sentences: what you did, and anything a human
 needs to decide.

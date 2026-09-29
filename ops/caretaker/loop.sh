@@ -99,28 +99,54 @@ if [ $RC -ne 0 ]; then
   exit $RC
 fi
 
+# DECISIONS FIRST, because the output is deleted below. This loop calls the CLI
+# directly rather than through runstore, so nothing else would archive what it
+# said: harvest.mjs archives the output as a run (redacted) and puts any
+# DECISION: line no spec or ADR records in the Inbox. harvest.mjs lives in the
+# caretaker checkout, not the installed copy; without it the decision lines are
+# kept in loop.log rather than lost with the output.
+HARVEST="${CARETAKER_HARVEST:-$ROOT/bin/harvest.mjs}"
+RUN_ID=""
+if [ -n "$NODE" ] && [ -f "$HARVEST" ]; then
+  RUN_ID=$("$NODE" "$HARVEST" import --config "$HERE/config.json" --transcript "$OUT" \
+    --cli claude --source loop.sh 2>>"$LOG")
+  case "$RUN_ID" in r_????????) ;; *) say "harvest failed — decision lines below"; RUN_ID="" ;; esac
+fi
+if [ -z "$RUN_ID" ]; then
+  [ -f "$HARVEST" ] || say "no harvest.mjs at $HARVEST — decision lines kept here, not in the Inbox"
+  grep -o 'DECISION:[^"\\]*' "$OUT" | sed 's/^/  /' >> "$LOG"
+fi
+
 # Token spend, if the JSON carries it. Best effort on purpose: a shape change in
-# the CLI's output must not fail a pass that already did its work.
+# the CLI's output must not fail a pass that already did its work. The
+# breakdown, not only the total: run.mjs derives the total from the parts, and
+# the dashboard's composition panel is empty for a row that has only a total.
 if [ -n "$NODE" ]; then
-  "$NODE" -e '
+  mapfile -t RUN_FLAGS < <("$NODE" -e '
     const fs = require("node:fs");
     try {
       const j = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
       const u = j.usage ?? {};
-      const tok =
-        (u.input_tokens ?? 0) + (u.output_tokens ?? 0) +
-        (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
-      process.stdout.write(String(tok || 0));
-    } catch { process.stdout.write("0"); }
-  ' "$OUT" > /tmp/caretaker-loop-tokens 2>/dev/null
-  TOK=$(cat /tmp/caretaker-loop-tokens 2>/dev/null || echo 0)
-  if [ "${TOK:-0}" -gt 0 ]; then
-    "$NODE" "$HERE/run.mjs" end --name cron-loop --tokens "$TOK" \
-      --state done --note "unattended pass" >/dev/null 2>&1
+      const out = [];
+      const put = (flag, v) => { if (Number.isFinite(v)) out.push(flag, String(v)); };
+      put("--in", u.input_tokens);
+      put("--cached", u.cache_read_input_tokens);
+      put("--write", u.cache_creation_input_tokens);
+      put("--out", u.output_tokens);
+      put("--turns", j.num_turns);
+      // One model or none: a pass that used two would put all its tokens on one.
+      const models = Object.keys(j.modelUsage ?? {});
+      if (models.length === 1) out.push("--model", models[0]);
+      process.stdout.write(out.join("\n"));
+    } catch {}
+  ' "$OUT" 2>/dev/null)
+  if [ "${#RUN_FLAGS[@]}" -gt 0 ]; then
+    "$NODE" "$HERE/run.mjs" end --name cron-loop "${RUN_FLAGS[@]}" \
+      ${RUN_ID:+--run "$RUN_ID"} --state done --note "unattended pass" >> "$LOG" 2>&1
   fi
-  say "done — ${TOK:-0} tokens"
+  say "done — ${RUN_ID:-no run id}${RUN_FLAGS[*]:+, ${RUN_FLAGS[*]}}"
 else
   say "done — node not found, token spend not recorded"
 fi
 
-rm -f "$OUT" /tmp/caretaker-loop-tokens
+rm -f "$OUT"
