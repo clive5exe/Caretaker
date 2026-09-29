@@ -73,13 +73,13 @@
           "title": "Three tiers: decision, spec, log — separated, not one docs pile",
           "owner": "architect",
           "est": "1d",
-          "status": "todo",
+          "status": "doing",
           "deps": [
             "P-1"
           ],
           "spec": "docs/memory.md",
           "ac": "decisions are immutable and superseded rather than edited, specs carry current state only, and the log is append-only; a tool can answer 'why is this like this' from the decisions without reading the log",
-          "note": "They rot at completely different speeds and want opposite treatment. A spec that accumulates a changelog becomes unreadable, unreadable specs are not consulted, and unconsulted specs drift. An ADR that gets edited stops being a record of what was decided."
+          "note": "They rot at completely different speeds and want opposite treatment. A spec that accumulates a changelog becomes unreadable, unreadable specs are not consulted, and unconsulted specs drift. An ADR that gets edited stops being a record of what was decided. — Built the tool half: bin/graduate.mjs why <path> answers from the decisions without reading the log (governing specs, ADRs they cite, ADRs naming the spec, path or bare file name, each labelled with how it was found). decisions checks status vocabulary, dangling supersedes, superseded-by agreement, and immutability: a decided ADR whose text (other than status/updated) changed in a later commit, or in the working tree, is a named problem with the commit. Run on this repo it reports ADR-0001 (cfbf4fe7) and ADR-0002 (2b38c586, d823eb59) as edited after acceptance: real, left for the owner to supersede or accept. Checked by bin/graduate.test.mjs; mutations M8-M12 fail it by name. Gate verdicts not recorded."
         },
         {
           "id": "P-5",
@@ -244,13 +244,13 @@
           "title": "Timeouts, and killing a run that hangs",
           "owner": "backend",
           "est": "4h",
-          "status": "todo",
+          "status": "doing",
           "deps": [
             "H-1"
           ],
           "spec": "docs/architecture.md",
           "ac": "a run has a wall-clock ceiling, exceeding it kills the process tree and the container, and the event log records that it was killed rather than that it finished",
-          "note": "Boring, essential, and it was missing. A hung agent holds the lock forever - which happened on this box today: four wait loops from a deploy sat spinning for sixteen hours because the condition they polled matched their own command line."
+          "note": "Boring, essential, and it was missing. A hung agent holds the lock forever - which happened on this box today: four wait loops from a deploy sat spinning for sixteen hours because the condition they polled matched their own command line. — Built (board status lagged): bin/harness.mjs kills the process group, then the container, at the wall-clock ceiling and settles on a bounded timer after SIGKILL; the verdict is `killed`, never completed. B-6's event log records a WARN end event with state killed. Checked by bin/harness.test.mjs ('a run that hangs is KILLED', 'a killed run's end event is a WARN that says killed', live 'a hung container run is KILLED' in CI). Gate verdicts not recorded."
         },
         {
           "id": "H-10",
@@ -493,11 +493,11 @@
           "title": "One append-only event log, tailable, with the keys as fields",
           "owner": "backend",
           "est": "1d",
-          "status": "todo",
+          "status": "doing",
           "deps": [],
           "spec": "docs/events.md",
           "ac": "every run appends JSONL to a day-rotated events file, tail -f and jq give the per-task, per-run and failures-only views with no extra tooling, and a half-written final line is skipped rather than throwing",
-          "note": "The organising key is a FIELD, never a folder. A run spans tasks, a task spans runs, a PR maps to neither, so any directory hierarchy locks in an assumption that breaks once there is history in the old shape. level is the field that gets skipped and then missed: without it an autonomous run logs too little to debug and too much to read, on the same day."
+          "note": "The organising key is a FIELD, never a folder. A run spans tasks, a task spans runs, a PR maps to neither, so any directory hierarchy locks in an assumption that breaks once there is history in the old shape. level is the field that gets skipped and then missed: without it an autonomous run logs too little to debug and too much to read, on the same day. — Built in #6 (merged): bin/events.mjs is the one writer and reader, day-rotated by each line's own t, level required, a half-written line skipped and counted. Checked by bin/events.test.mjs. Gate verdicts not recorded."
         },
         {
           "id": "B-7",
@@ -517,13 +517,13 @@
           "title": "Token KPIs: composition, churn, per-turn, rework spend",
           "owner": "backend",
           "est": "1d",
-          "status": "todo",
+          "status": "doing",
           "deps": [
             "B-6"
           ],
           "spec": "docs/vendors.md",
           "ac": "the run log records in/cached/write/out/turns/model per run, the total is DERIVED from the parts rather than stored beside them, and the dashboard shows output share, context churn, tokens per turn, rework spend and spend by model",
-          "note": "THE TOTAL HIDES THE ONLY ACTIONABLE PART. A run reporting 400k tokens is unreadable; the same run as 380k cache reads, 15k fresh input and 5k output says immediately that the cost is context REPLAY rather than work, and those want opposite fixes - better context selection versus a smaller task.\n\nRework spend is the one number that bought nothing, and it only became computable once gate verdicts started appending. Cost is a PROJECTION rather than a stored figure, because a subscription run and a self-hosted run both have zero marginal token cost while still spending tokens as effort."
+          "note": "THE TOTAL HIDES THE ONLY ACTIONABLE PART. A run reporting 400k tokens is unreadable; the same run as 380k cache reads, 15k fresh input and 5k output says immediately that the cost is context REPLAY rather than work, and those want opposite fixes - better context selection versus a smaller task.\n\nRework spend is the one number that bought nothing, and it only became computable once gate verdicts started appending. Cost is a PROJECTION rather than a stored figure, because a subscription run and a self-hosted run both have zero marginal token cost while still spending tokens as effort. — Built (board status lagged): bin/run.mjs records in/cached/write/out/turns/model and DERIVES the total, refusing a total that disagrees with its parts; dashboard.mjs shows output share, context churn, tokens per turn, rework spend and spend by model. Gate verdicts not recorded."
         }
       ]
     },
@@ -566,14 +566,14 @@
           "title": "Generate CI and docs from what actually happened",
           "owner": "devops",
           "est": "3d",
-          "status": "todo",
+          "status": "doing",
           "deps": [
             "B-3",
             "E-4"
           ],
           "spec": "docs/architecture.md",
           "ac": "a graduate command emits a workflow file built from the commands the gates really ran, a docs site from the specs really written, and a decision index from the ADRs really recorded; nothing in the output is a template placeholder",
-          "note": "Every scaffolder emits CI at init, when it knows nothing about the project. During a build CI is friction; at handoff its absence is what makes a project unmaintainable."
+          "note": "Every scaffolder emits CI at init, when it knows nothing about the project. During a build CI is friction; at handoff its absence is what makes a project unmaintainable. — Built: bin/graduate.mjs all writes graduate/.github/workflows/ci.yml, graduate/site/ and graduate/DECISIONS.md, never over the project's own files. Each CI step carries the evidence it came from: tests in bin/, a real npm test script (npm's default is not evidence), a drift gate only if drift gate runs are in the event log (a refutation naming drift is not one), the board-current step if the config names a board markdown. No evidence, no workflow, and the skip says why. The site shows each spec with freshness (stale / date lies / current). Checked by bin/graduate.test.mjs; mutations M1-M7 each fail it by name. E-4 is not done, so nothing here has been graduated onto a real box. Gate verdicts not recorded."
         },
         {
           "id": "G-2",
