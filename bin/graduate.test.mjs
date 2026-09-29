@@ -72,6 +72,42 @@ commit("2026-02-03", "round half even"); // an accepted decision rewritten in pl
   write("docs/decisions/0006-no-retry.md", "---\ntitle: No retry\nstatus: superseded-by: ADR-0005\nupdated: 2026-02-02\n---\n\nNever retry.\n");
   ok("outside a git checkout the question is unanswered (null), not answered 'no edits'", editsAfterDecided(TMP, "x.md") === null);
 }
+{
+  // Independent review: three ways to change a decided record that raised nothing.
+  const S = join(TMP, "second");
+  mkdirSync(join(S, "docs/decisions"), { recursive: true });
+  const g = (...a) => spawnSync("git", ["-C", S, ...a], { encoding: "utf8", env: { ...process.env, GIT_AUTHOR_DATE: "2026-03-01T12:00:00Z", GIT_COMMITTER_DATE: "2026-03-01T12:00:00Z" } });
+  const put = (p, t) => writeFileSync(join(S, p), t);
+  const snap = (msg) => (g("add", "-A"), g("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", msg));
+  g("init", "-q");
+  g("config", "diff.renames", "false"); // a person's config may turn rename detection off; graduate must not depend on it
+  const cache = (ttl) => `---\ntitle: Cache\nstatus: accepted\n---\n\nCache for ${ttl}.\nThe cache is warmed at start.\nIt is read on every request.\nA miss goes to the database.\nThe database is never read twice for one key.\n`;
+  put("docs/decisions/0001-cache.md", cache("one hour"));
+  put("docs/decisions/0002-queue.md", "---\ntitle: Queue\nstatus: accepted\n---\n\nUse one queue.\n");
+  put("docs/decisions/0003-log.md", "---\ntitle: Log\nstatus: accepted\n---\n\nThe log format:\nupdated: when the row last changed\n");
+  put("docs/decisions/0004-draft.md", "---\ntitle: Draft\nstatus: draft\n---\n\nMaybe.\n");
+  put("docs/decisions/0005-auth.md", "---\ntitle: Auth\nstatus: accepted\n---\n\nTokens expire hourly.\n");
+  put("docs/decisions/0006-names.md", "---\ntitle: Names\nstatus: accepted\n---\n\nNames are lower case.\nWords are joined by hyphens.\nNo name starts with a digit.\n");
+  snap("init");
+  g("mv", "docs/decisions/0001-cache.md", "docs/decisions/0001-cache-policy.md");
+  put("docs/decisions/0001-cache-policy.md", cache("one day"));
+  g("mv", "docs/decisions/0005-auth.md", "docs/decisions/0005-tokens.md");
+  put("docs/decisions/0005-tokens.md", "---\ntitle: Session tokens are forever\nstatus: accepted\nupdated: 2026-03-01\n---\n\n## Context\n\nLogging in again annoys people.\n\n## Decision\n\nTokens never expire.\nThey are revoked by hand.\n");
+  g("mv", "docs/decisions/0006-names.md", "docs/decisions/0006-naming.md");
+  snap("rename cache");
+  g("rm", "-q", "docs/decisions/0002-queue.md", "docs/decisions/0004-draft.md");
+  snap("drop queue");
+  put("docs/decisions/0003-log.md", "---\ntitle: Log\nstatus: accepted\n---\n\nThe log format:\nupdated: never\n");
+  snap("log field");
+  const { problems } = decisions(S);
+  ok("a decided ADR renamed while its body changed is still an edit to it", problems.some((p) => /^ADR-0001 was edited after it was decided \(accepted\): [0-9a-f]{8} 2026-03-01 "rename cache"/.test(p)), JSON.stringify(problems));
+  ok("a decided ADR deleted from history is a named problem, with the commit", problems.some((p) => /^docs\/decisions\/0002-queue\.md was DELETED after it was decided \(accepted\): [0-9a-f]{8} 2026-03-01 "drop queue"/.test(p)), JSON.stringify(problems));
+  ok("deleting a draft is not deleting a decision", !problems.some((p) => /0004-draft/.test(p)));
+  ok("a rename that rewrites past git's rename threshold reads as a deletion, and is still reported", problems.some((p) => /^docs\/decisions\/0005-auth\.md was DELETED/.test(p)), JSON.stringify(problems));
+  ok("a plain rename is neither an edit nor a deletion", !problems.some((p) => /ADR-0006|0006-names/.test(p)), JSON.stringify(problems));
+  ok("…nor is the renamed-and-edited record also reported as deleted", !problems.some((p) => /0001-cache\.md was DELETED/.test(p)), JSON.stringify(problems));
+  ok("a BODY line starting 'updated:' is text: editing it is an edit", problems.some((p) => /^ADR-0003 was edited after it was decided \(accepted\): [0-9a-f]{8} 2026-03-01 "log field"/.test(p)), JSON.stringify(problems));
+}
 
 /* -------------------------------------------------------------------- why */
 {

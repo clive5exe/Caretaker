@@ -82,6 +82,7 @@ export function decisions(root) {
     if (says && !byId.has(says[1])) problems.push(`${d.id} says it is superseded by ${says[1]}, which does not exist`);
     if (says && !d.supersededBy.includes(says[1])) problems.push(`${d.id} says it is superseded by ${says[1]}, but ${says[1]} does not say it supersedes ${d.id}`);
   }
+  for (const g of deletedDecisions(root)) problems.push(`${g.file} was DELETED after it was decided (${g.status}): ${g.sha.slice(0, 8)} ${g.day} "${g.subject}". A decision is superseded, never removed`);
   for (const d of list) {
     for (const e of editsAfterDecided(root, d.file) ?? []) problems.push(`${d.id} was edited after it was decided (${e.status}): ${e.sha ? `${e.sha.slice(0, 8)} ${e.day} "${e.subject}"` : "uncommitted change in the working tree"}. Write a new decision that supersedes it instead`);
   }
@@ -92,7 +93,31 @@ export function decisions(root) {
 // `status:` (to superseded-by) and `updated:` lines may: superseding one has to
 // rewrite its status, and nothing else.
 const UNDECIDED = /^(draft|proposed)$/;
-const decidedText = (text) => String(text).replace(/^(status|updated):.*$/gm, "");
+// Only the FRONTMATTER's status and updated lines may change: a body line that
+// happens to start "updated:" is text like any other (independent review).
+const decidedText = (text) =>
+  String(text).replace(/^---\r?\n[\s\S]*?\r?\n---/, (fm) => fm.replace(/^(status|updated):.*$/gm, ""));
+
+/** Decision records deleted from git history after they were decided. [] outside git. */
+export function deletedDecisions(root) {
+  const git = (...a) => spawnSync("git", ["-C", root, ...a], { encoding: "utf8" });
+  if (git("rev-parse", "--is-inside-work-tree").stdout.trim() !== "true") return [];
+  // -M: a rename is not a deletion, even where a person's config turns
+  // rename detection off. A rewrite past git's rename threshold still reads
+  // as a deletion, and is reported as one.
+  const log = git("log", "-M", "--diff-filter=D", "--name-only", "--format=%x00%H%x09%cs%x09%s", "--", DECISIONS_DIR);
+  const out = [];
+  for (const chunk of log.stdout.split("\0").filter((c) => c.trim())) {
+    const [head, ...rest] = chunk.split("\n");
+    const [sha, day, ...subject] = head.split("\t");
+    for (const file of rest.map((l) => l.trim()).filter((l) => /^docs\/decisions\/\d{4}-.*\.md$/.test(l))) {
+      const before = git("show", `${sha}^:${file}`).stdout;
+      const status = frontmatter(before).status ?? "";
+      if (status && !UNDECIDED.test(status)) out.push({ file, sha, day, subject: subject.join("\t"), status });
+    }
+  }
+  return out;
+}
 
 /**
  * The commits (and a working-tree change) that altered a decision's text after
@@ -101,14 +126,21 @@ const decidedText = (text) => String(text).replace(/^(status|updated):.*$/gm, ""
 export function editsAfterDecided(root, file) {
   const git = (...a) => spawnSync("git", ["-C", root, ...a], { encoding: "utf8" });
   if (git("rev-parse", "--is-inside-work-tree").stdout.trim() !== "true") return null;
-  const log = git("log", "--reverse", "--format=%H%x09%cs%x09%s", "--", file);
+  // --follow: a decision renamed while it was rewritten is still that decision
+  // (independent review: a rename plus a body change raised nothing). Each
+  // commit's own path is read from --name-only, since it changes at the rename.
+  // Not --reverse: git ignores the rename with --follow --reverse, so the
+  // oldest-first order is made here.
+  const log = git("log", "--follow", "--name-only", "--format=%x00%H%x09%cs%x09%s", "--", file);
   if (log.status !== 0) return null;
   const edits = [];
   let decided = null;
-  const states = log.stdout.split("\n").filter(Boolean).map((l) => {
-    const [sha, day, ...subject] = l.split("\t");
-    return { sha, day, subject: subject.join("\t"), text: git("show", `${sha}:${file}`).stdout };
-  });
+  const states = log.stdout.split("\0").filter((c) => c.trim()).map((chunk) => {
+    const [head, ...rest] = chunk.split("\n");
+    const [sha, day, ...subject] = head.split("\t");
+    const path = rest.map((l) => l.trim()).filter(Boolean).at(-1) ?? file;
+    return { sha, day, subject: subject.join("\t"), text: git("show", `${sha}:${path}`).stdout };
+  }).reverse();
   const abs = join(root, file);
   if (existsSync(abs)) {
     const now = readFileSync(abs, "utf8");
