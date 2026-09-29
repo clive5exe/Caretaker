@@ -438,12 +438,26 @@
             "reviewer": {
               "verdict": "fail",
               "at": "2026-09-29",
-              "note": "Independent review (fresh agent, not the builder): the AC says the default CLI adapter runs inside the dev environment 'so a subscription login works'. Nothing makes it work. The container gets only the workspace mount (sandbox.mjs buildArgs). HOME is moved to a fresh tmpfs, /tmp/agent-home (harness.mjs:216, 224). No credential or login state is mounted or delivered, and the preserve-fd secret channel is not wired in (see H-0). So neither a 'claude login' session nor an API key can reach the in-container CLI, and every real podman run of the default adapter is unauthenticated. The header comment (harness.mjs:12-16) defends the default with a capability that does not exist. Also: tool-fixture.mjs:100 defaults to sandbox:none, so scoring an untrusted candidate model runs its shell commands on the host with host network by default. The SDK half and fixture scoring are otherwise sound; tests green."
+              "note": "Independent re-review (fresh agent, not the builder): two of the old points are fixed. tool-fixture.mjs:108 now defaults to sandbox podman, and the harness header no longer claims a login reaches the container. The central point stands. The ac requires the in-container default CLI 'so a subscription login works', and harness.mjs:16-22 now says 'Carrying a subscription login into the container is not built'. Nothing mounts or delivers login state: CLI_PRESETS sets HOME=/tmp/agent-home (:226, :234), and grep finds no login wiring in harness, sandbox or runstore. :12-14 still gives subscription auth as the reason for the default, while the default sandbox (podman, :116) is where it does not work. The seam and SDK halves are otherwise sound.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent review (fresh agent, not the builder): the AC says the default CLI adapter runs inside the dev environment 'so a subscription login works'. Nothing makes it work. The container gets only the workspace mount (sandbox.mjs buildArgs). HOME is moved to a fresh tmpfs, /tmp/agent-home (harness.mjs:216, 224). No credential or login state is mounted or delivered, and the preserve-fd secret channel is not wired in (see H-0). So neither a 'claude login' session nor an API key can reach the in-container CLI, and every real podman run of the default adapter is unauthenticated. The header comment (harness.mjs:12-16) defends the default with a capability that does not exist. Also: tool-fixture.mjs:100 defaults to sandbox:none, so scoring an untrusted candidate model runs its shell commands on the host with host network by default. The SDK half and fixture scoring are otherwise sound; tests green."
+                }
+              ]
             },
             "qa": {
               "verdict": "fail",
               "at": "2026-09-29",
-              "note": "Independent QA (fresh agent, not the builder): the fixture does not score stopping when done. A scripted model that wrote upper.txt correctly and then made 45 more list_files turns scored pass with stopped:true (turns 48), because stopped means only that it stopped before maxTurns 50. Also, nothing lets a subscription login reach the CLI inside the container: HOME is a fresh /tmp/agent-home, net defaults to none, and PR #13 README says the container still needs \"a way for that CLI to sign in\"."
+              "note": "Independent re-QA (fresh agent, not the builder): the fixture half is fixed. score() now requires tu.calls <= FIXTURE.maxCalls (6) for stopped (tool-fixture.mjs:59). The busy-model test (correct upper.txt, then 10 list_files) fails stopped. Removing the limit fails 'did not stop WHEN done' by name; restored, sha256 checked. openai-compatible.test green, live check SKIP here. The other half of the old note stands: nothing lets a subscription login reach the CLI inside the container. HOME is a fresh /tmp/agent-home, no login is mounted, net defaults to none (harness.mjs:117), and the header now says outright that it is not built. So the ac's 'so a subscription login works' is not demonstrated for the default in-container adapter.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent QA (fresh agent, not the builder): the fixture does not score stopping when done. A scripted model that wrote upper.txt correctly and then made 45 more list_files turns scored pass with stopped:true (turns 48), because stopped means only that it stopped before maxTurns 50. Also, nothing lets a subscription login reach the CLI inside the container: HOME is a fresh /tmp/agent-home, net defaults to none, and PR #13 README says the container still needs \"a way for that CLI to sign in\"."
+                }
+              ]
             }
           }
         },
