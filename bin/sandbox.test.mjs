@@ -15,11 +15,13 @@
  * Run: node bin/sandbox.test.mjs
  */
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { buildArgs, checkLimits, delegatedControllers, detect, installHint } from "./sandbox.mjs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { buildArgs, checkLimits, delegatedControllers, detect, installCommand, installHint, isolationWarnings, offerInstall, parseFlags } from "./sandbox.mjs";
 
+const HERE = dirname(fileURLToPath(import.meta.url));
 let failures = 0;
 let skipped = 0;
 const ok = (name, passed, detail = "") => {
@@ -142,6 +144,19 @@ if (runtime.chosen !== "podman") {
   }
 
   {
+    // E-1 (independent review): nothing proved --cpus binds. cpu.max is
+    // "<quota> <period>", and --cpus 2 is a quota of two periods.
+    const cpuMissing = checkLimits(["cpus"], delegatedControllers().controllers).length > 0;
+    if (cpuMissing) {
+      skip("live: the cpu ceiling is real", "the cpu controller is not delegated here, so the preflight refuses --cpus rather than passing it");
+    } else {
+      const r = inside("cat /sys/fs/cgroup/cpu.max");
+      const [quota, period] = String(r.stdout).trim().split(/\s+/).map(Number);
+      ok(`live: the cpu ceiling is real (${r.stdout.trim()})`, period > 0 && quota === 2 * period, r.stdout.trim() || r.stderr.trim());
+    }
+  }
+
+  {
     const r = inside("cat /sys/fs/cgroup/pids.max");
     ok("live: the pids ceiling is real", String(r.stdout).trim() === "512", r.stdout.trim());
   }
@@ -176,6 +191,63 @@ if (runtime.chosen !== "podman") {
         "the rootless mapping is not in effect and an escape lands as root",
     );
   }
+}
+
+/* E-0: the install command is offered, and run only on a yes (independent review: only printed). */
+{
+  const ran = [];
+  const run = (c) => (ran.push(c), 0);
+  const yes = await offerInstall({ command: "sudo apt-get install -y podman", ask: async () => "y", run });
+  ok("a yes runs exactly the offered command", yes.ran && yes.status === 0 && ran.join() === "sudo apt-get install -y podman");
+  ran.length = 0;
+  for (const answer of ["", "n", "no", "maybe", undefined]) {
+    const r = await offerInstall({ command: "x", ask: async () => answer, run });
+    if (r.ran) ran.push(`ran on ${JSON.stringify(answer)}`);
+  }
+  ok("anything but a yes runs nothing", ran.length === 0, ran.join());
+  let asked = false;
+  const none = await offerInstall({ command: null, ask: async () => ((asked = true), "y"), run });
+  ok("with no single command for the platform, nothing is offered or run", !none.offered && !none.ran && !asked);
+  ok("the command per platform", installCommand("linux", (f) => f === "/etc/debian_version") === "sudo apt-get install -y podman" && installCommand("linux", (f) => f === "/etc/fedora-release") === "sudo dnf install -y podman" && installCommand("darwin", () => false).startsWith("brew install podman") && installCommand("linux", () => false) === null && installCommand("win32", () => false) === null);
+  // Run with a PATH holding only a stand-in `sh` that records what it is
+  // asked to run and installs nothing: if the terminal check were ever lost,
+  // this test must fail, not install podman on the machine running it.
+  const fake = mkdtempSync(join(tmpdir(), "sandbox-fake-sh-"));
+  const calls = join(fake, "calls");
+  writeFileSync(join(fake, "sh"), `#!/bin/sh\nprintf '%s\\n' "$*" >> '${calls}'\ncase "$2" in "command -v"*) exit 1;; esac\nexit 0\n`, { mode: 0o755 });
+  const cli = spawnSync(process.execPath, [join(HERE, "sandbox.mjs"), "install"], { encoding: "utf8", input: "y\n", env: { ...process.env, PATH: fake } });
+  const ranInstall = existsSync(calls) && readFileSync(calls, "utf8").split("\n").some((l) => l && !l.startsWith("-c command -v"));
+  ok("the CLI never installs without a terminal to confirm in, even given a y on stdin", cli.status === 1 && /not a terminal/.test(cli.stderr) && !ranInstall, `${cli.status} ${cli.stderr} ${existsSync(calls) ? readFileSync(calls, "utf8") : ""}`);
+  rmSync(fake, { recursive: true, force: true });
+}
+
+/* E-1, E-0: the CLI's flags and what it warns about (independent review). */
+{
+  const err = (a) => {
+    try {
+      parseFlags(a);
+      return null;
+    } catch (e) {
+      return e.message;
+    }
+  };
+  // The attack: a boolean flag first used to swallow the next flag as its
+  // value, so --workdir's value was dropped and the cwd was mounted rw.
+  const f = parseFlags(["--allow-missing-limits", "--workdir", "/srv/repo", "--net", "none"]);
+  ok("a boolean flag does not swallow the next flag: --workdir keeps its value", f.workdir === "/srv/repo" && f["allow-missing-limits"] === true && f.net === "none", JSON.stringify(f));
+  ok("--k=v works for a value flag", parseFlags(["--image=img:1"]).image === "img:1");
+  ok("a value flag with no value is refused, not given the next flag", /--workdir needs a value/.test(err(["--workdir", "--net", "none"]) ?? "") && /needs a value/.test(err(["--image"]) ?? ""));
+  ok("an unknown flag is refused, not ignored", /unknown flag --netw/.test(err(["--netw", "host"]) ?? ""));
+  ok("a boolean flag given a value is refused", /takes no value/.test(err(["--allow-missing-limits=1"]) ?? ""));
+  ok("a runtime other than podman or docker is refused", /--runtime must be/.test(err(["--runtime", "lxc"]) ?? ""));
+  const cli = spawnSync(process.execPath, [join(HERE, "sandbox.mjs"), "run", "--allow-missing-limits", "--wrokdir", "/x", "--", "true"], { encoding: "utf8" });
+  ok("the CLI refuses a misspelt flag with exit 2 before running anything", cli.status === 2 && /unknown flag --wrokdir/.test(cli.stderr), `${cli.status} ${cli.stderr}`);
+  const w = (o) => isolationWarnings(o).join(" | ");
+  ok("--runtime docker is warned about: its daemon is root", /docker's daemon runs as root/.test(w({ runtime: "docker", net: "none" })));
+  ok("rootful podman is warned about", /ROOTFUL/.test(w({ runtime: "podman", rootless: false, net: "none" })));
+  ok("rootless podman on no network warns about nothing", w({ runtime: "podman", rootless: true, net: "none" }) === "");
+  ok("--net host says no allowlist applies, not that none exists yet", /No allowlist applies/.test(w({ runtime: "podman", rootless: true, net: "host" })) && !/yet/.test(w({ runtime: "podman", rootless: true, net: "host" })));
+  ok("a named network says only the proxy's internal network is allowlisted", /netns\.mjs/.test(w({ runtime: "podman", rootless: true, net: "somenet" })));
 }
 
 console.log(

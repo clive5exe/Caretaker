@@ -36,17 +36,32 @@ const which = (bin) => {
  * sudo without explaining itself is exactly the behaviour this whole project is
  * supposed to make unnecessary.
  */
-export function installHint() {
-  const p = process.platform;
-  if (p === "darwin") return "brew install podman && podman machine init && podman machine start";
-  if (p === "linux") {
-    if (existsSync("/etc/debian_version")) return "sudo apt-get install -y podman";
-    if (existsSync("/etc/fedora-release") || existsSync("/etc/redhat-release"))
-      return "sudo dnf install -y podman";
-    if (existsSync("/etc/arch-release")) return "sudo pacman -S --needed podman";
-    return "install podman with your package manager";
+/** The command that installs podman on this platform, or null where there is no one command. */
+export function installCommand(platform = process.platform, has = existsSync) {
+  if (platform === "darwin") return "brew install podman && podman machine init && podman machine start";
+  if (platform === "linux") {
+    if (has("/etc/debian_version")) return "sudo apt-get install -y podman";
+    if (has("/etc/fedora-release") || has("/etc/redhat-release")) return "sudo dnf install -y podman";
+    if (has("/etc/arch-release")) return "sudo pacman -S --needed podman";
   }
-  return "see https://podman.io/docs/installation";
+  return null;
+}
+
+export function installHint() {
+  return installCommand() ?? (process.platform === "linux" ? "install podman with your package manager" : "see https://podman.io/docs/installation");
+}
+
+/**
+ * E-0: offer the install command and run it only on a person's yes. Not
+ * run without asking, and not offered where there is no one command to run
+ * (then the hint is printed instead). `ask` and `run` are passed in so the
+ * decision is testable without installing anything.
+ */
+export async function offerInstall({ command = installCommand(), ask, run }) {
+  if (!command) return { offered: false, ran: false };
+  const answer = await ask(`podman is not installed. Run this now?\n  ${command}\n[y/N] `);
+  if (!/^y(es)?$/i.test(String(answer ?? "").trim())) return { offered: true, ran: false };
+  return { offered: true, ran: true, status: run(command) };
 }
 
 export function detect() {
@@ -71,7 +86,7 @@ export function detect() {
       out.podman = "present but not responding";
     }
   }
-  if (!out.chosen && docker) out.chosen = null; // never chosen implicitly
+  // docker is never chosen implicitly: `chosen` stays null unless podman answered.
   return out;
 }
 
@@ -201,14 +216,64 @@ export function buildArgs({ image, limits, workdir, net = "none", cmd, runtime =
 
 /* --------------------------------------------------------------------- cli */
 
+/* ------------------------------------------------------------------ cli */
+
+/**
+ * The CLI's flags, parsed by NAME, not in pairs. Pairing broke the moment a
+ * flag took no value: `--allow-missing-limits --workdir R` read "--workdir"
+ * as the first flag's value and dropped R, so the run mounted the current
+ * directory read-write instead (independent review). A value flag needs a
+ * value that is not another flag; an unknown flag is refused.
+ */
+export const VALUE_FLAGS = ["devcontainer", "net", "runtime", "image", "workdir"];
+export const BOOL_FLAGS = ["allow-missing-limits"];
+export const RUNTIMES = ["podman", "docker"];
+export function parseFlags(args) {
+  const flags = {};
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (!a.startsWith("--")) throw new Error(`unexpected argument ${a}; the command goes after --`);
+    const eq = a.indexOf("=");
+    const name = a.slice(2, eq === -1 ? undefined : eq);
+    if (BOOL_FLAGS.includes(name)) {
+      if (eq !== -1) throw new Error(`--${name} takes no value`);
+      flags[name] = true;
+    } else if (VALUE_FLAGS.includes(name)) {
+      const v = eq === -1 ? args[++i] : a.slice(eq + 1);
+      if (v === undefined || v === "" || v.startsWith("--")) throw new Error(`--${name} needs a value`);
+      flags[name] = v;
+    } else throw new Error(`unknown flag --${name}`);
+  }
+  if (flags.runtime !== undefined && !RUNTIMES.includes(flags.runtime)) throw new Error(`--runtime must be ${RUNTIMES.join(" or ")}, not ${flags.runtime}`);
+  return flags;
+}
+
+/**
+ * What to say before a run whose isolation is weaker than rootless podman on
+ * no network (independent review: docker and rootful podman ran silently).
+ */
+export function isolationWarnings({ runtime, rootless, net }) {
+  const out = [];
+  if (runtime === "docker") out.push("--runtime docker: docker's daemon runs as root, so an escape from this container lands as root on the host. Rootless podman is the supported runtime.");
+  if (runtime === "podman" && rootless === false) out.push("podman is ROOTFUL here: an escape lands as root. Run it rootless (podman as your own user).");
+  if (net === "host") out.push("--net host: the container shares the host's network and can reach anything the host can. No allowlist applies.");
+  else if (net && net !== "none") out.push(`--net ${net}: egress is as open as that network. Only an internal network behind the allowlist proxy (bin/netns.mjs) is allowlisted.`);
+  return out;
+}
+
 const isEntry = process.argv[1] && import.meta.url === `file://${resolve(process.argv[1])}`;
 if (isEntry) {
   const argv = process.argv.slice(2);
   const cmd = argv[0];
   const dashdash = argv.indexOf("--");
-  const flags = {};
   const head = dashdash === -1 ? argv.slice(1) : argv.slice(1, dashdash);
-  for (let i = 0; i < head.length; i += 2) flags[head[i].replace(/^--/, "")] = head[i + 1];
+  let flags;
+  try {
+    flags = parseFlags(head);
+  } catch (e) {
+    console.error(`sandbox.mjs: ${e.message}`);
+    process.exit(2);
+  }
   const rest = dashdash === -1 ? [] : argv.slice(dashdash + 1);
 
   if (cmd === "detect") {
@@ -218,7 +283,9 @@ if (isEntry) {
       process.exit(0);
     }
     console.error("podman not found.\n");
-    console.error(`  install it:  ${installHint()}\n`);
+    console.error(`  install it:  ${installHint()}`);
+    if (installCommand()) console.error("  or run `node bin/sandbox.mjs install` in a terminal, which asks, then runs it.");
+    console.error("");
     if (d.docker) {
       console.error("  docker IS present, and is not used automatically.");
       console.error("  Rootless podman means an escape lands as an unprivileged user;");
@@ -226,6 +293,24 @@ if (isEntry) {
       console.error("  To use it anyway, pass --runtime docker and accept that.\n");
     }
     process.exit(1);
+  }
+
+  if (cmd === "install") {
+    if (detect().chosen === "podman") {
+      console.log("podman is already installed.");
+      process.exit(0);
+    }
+    if (!process.stdin.isTTY) {
+      console.error(`not a terminal, so nobody can confirm. install it:  ${installHint()}`);
+      process.exit(1);
+    }
+    const { createInterface } = await import("node:readline/promises");
+    const rl = createInterface({ input: process.stdin, output: process.stderr });
+    const r = await offerInstall({ ask: (q) => rl.question(q), run: (c) => spawnSync("sh", ["-c", c], { stdio: "inherit" }).status });
+    rl.close();
+    if (!r.offered) console.error(`no single install command for this platform: ${installHint()}`);
+    else if (!r.ran) console.error("not installed.");
+    process.exit(r.ran && r.status === 0 ? 0 : 1);
   }
 
   if (cmd === "limits") {
@@ -236,11 +321,12 @@ if (isEntry) {
 
   if (cmd === "run") {
     if (!rest.length) {
-      console.error("usage: sandbox.mjs run [--devcontainer F] [--net none|host] -- <command...>");
+      console.error("usage: sandbox.mjs run [--devcontainer F] [--image I] [--workdir D] [--net none|NETWORK] [--runtime podman|docker] [--allow-missing-limits] -- <command...>");
       process.exit(2);
     }
     const runtime = flags.runtime ?? "podman";
-    if (runtime === "podman" && detect().chosen !== "podman") {
+    const found = runtime === "podman" ? detect() : null;
+    if (found && found.chosen !== "podman") {
       console.error(`podman not available. install it:  ${installHint()}`);
       process.exit(1);
     }
@@ -257,17 +343,12 @@ if (isEntry) {
     }
     const workdir = resolve(flags.workdir ?? process.cwd());
     const net = flags.net ?? "none";
-    if (net !== "none") {
-      console.error(
-        `[sandbox] WARNING: --net ${net}. There is no egress allowlist yet (E-2), so this ` +
-          "container can reach anything the host can.",
-      );
-    }
+    for (const w of isolationWarnings({ runtime, rootless: found?.rootless ?? null, net })) console.error(`[sandbox] WARNING: ${w}`);
     // PREFLIGHT. Refuse rather than pass a limit the kernel will ignore or choke on.
     if (runtime === "podman") {
       const { controllers, path } = delegatedControllers();
       const missing = checkLimits(["memory", "cpus", "pids"], controllers);
-      if (missing.length && !("allow-missing-limits" in flags)) {
+      if (missing.length && !flags["allow-missing-limits"]) {
         console.error(`[sandbox] REFUSING — this user cannot enforce ${missing.length} limit(s).\n`);
         for (const m of missing) {
           console.error(`  --${m.limit} needs the "${m.controller}" cgroup controller, which is not delegated`);
@@ -277,7 +358,7 @@ if (isEntry) {
         console.error(`\n  fix it:\n    ${delegationFix()}\n`);
         console.error("  A ceiling you believe in and do not have is worse than none, which is why");
         console.error("  this refuses instead of dropping the flag. To run anyway, and accept that");
-        console.error("  the run is NOT limited on those axes: --allow-missing-limits 1\n");
+        console.error("  the run is NOT limited on those axes: --allow-missing-limits\n");
         process.exit(1);
       }
       if (missing.length) {
@@ -297,6 +378,6 @@ if (isEntry) {
     process.exit(r.status ?? 1);
   }
 
-  console.error("usage: sandbox.mjs detect | limits | run -- <command...>");
+  console.error("usage: sandbox.mjs detect | install | limits | run -- <command...>");
   process.exit(2);
 }

@@ -42,6 +42,23 @@ the registries implied by the toolchains `devcontainer.json` declares. Everythin
 else is refused with a 403 and a reason, and logged — a silent drop is
 indistinguishable from a broken network and gets debugged as one.
 
+## The runner's own command line
+
+`sandbox.mjs run` parses its flags by name: a value flag needs a value that is
+not another flag, the one boolean (`--allow-missing-limits`) takes none, and an
+unknown flag is refused with exit 2. Parsing in pairs let a boolean swallow the
+next flag, and `--workdir` quietly became the current directory, mounted
+read-write.
+
+Anything weaker than rootless podman on no network is said before the run:
+`--runtime docker` (its daemon is root), rootful podman, `--net host` (no
+allowlist applies), and any other named network (only an internal one behind
+the proxy is allowlisted).
+
+Podman missing: `sandbox.mjs install` offers this platform's install command
+and runs it only on a typed yes in a terminal. Without a terminal it prints the
+command and installs nothing. Docker is never chosen for you.
+
 ## The image, every run
 
 Nothing persists between runs except the repo. The container is `--rm`, its
