@@ -1,0 +1,41 @@
+{
+  "cloud-factory": {
+    "repo": "https://github.com/warpdotdev-demos/cloud-factory-demo",
+    "commit": "ab21d0c5b70e38abe1a53ff6e2934d2637415c5b",
+    "license": "MIT, Copyright (c) 2026 Warp",
+    "include": [
+      "LICENSE",
+      "README.md",
+      "vision.md",
+      "roadmap.md",
+      "scripts/install-cloud-factory.sh",
+      ".agents/skills/triage",
+      ".agents/skills/spec",
+      ".agents/skills/implementation",
+      ".agents/skills/verify-behavior",
+      ".agents/skills/review-pr",
+      ".agents/skills/improve-review-pr",
+      "templates/github/workflows"
+    ],
+    "install": {
+      ".agents/skills/": ".agents/skills/",
+      "templates/github/workflows/": ".github/workflows/",
+      "LICENSE": ".agents/THIRD_PARTY/cloud-factory.LICENSE"
+    }
+  },
+  "common-skills": {
+    "repo": "https://github.com/warpdotdev/common-skills",
+    "commit": "69b4753651ab7fab518c82be087b9f1d5b966631",
+    "license": "MIT, Copyright (c) 2026 Denver Technologies, Inc.",
+    "include": [
+      "LICENSE",
+      ".agents/skills/write-product-spec",
+      ".agents/skills/write-tech-spec",
+      ".agents/skills/validate-changes-match-specs"
+    ],
+    "install": {
+      ".agents/skills/": ".agents/skills/",
+      "LICENSE": ".agents/THIRD_PARTY/common-skills.LICENSE"
+    }
+  }
+}
