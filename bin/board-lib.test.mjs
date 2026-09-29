@@ -251,6 +251,19 @@ async function race(boardFile, n) {
   ok("and released afterwards", !existsSync(join(f.root, "docs", "board.json.lock")));
   rmSync(f.root, { recursive: true, force: true });
 }
+{
+  // Independent review: a holder that outlived LOCK_STALE_MS, whose lock the
+  // next writer judged stale and took, deleted THAT writer's lock on release.
+  const f = fixture(join(HERE, "board.mjs"));
+  const { withLock } = await import(pathToFileURL(join(f.ops, "board.mjs")).href);
+  const lock = join(f.root, "docs", "board.json.lock");
+  withLock({ data: join(f.root, "docs", "board.json") }, () => {
+    rmSync(lock);
+    writeFileSync(lock, JSON.stringify({ pid: process.pid, at: "the next writer" }));
+  });
+  ok("releasing never removes a lock the next writer took over", existsSync(lock) && readFileSync(lock, "utf8").includes("the next writer"));
+  rmSync(f.root, { recursive: true, force: true });
+}
 
 {
   // CLAUDE.md: money, auth and ISOLATION need security. The old list was the

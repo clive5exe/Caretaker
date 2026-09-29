@@ -31,6 +31,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import os from "node:os";
 
 /** Bumped when an export changes shape. The server refuses a board.mjs without it. */
@@ -90,10 +91,23 @@ const LOCK_WAIT_MS = 5000;
 const LOCK_STALE_MS = 30000;
 const sleepSync = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
-// The lock's inode if it is stale (its holder is dead, or it is older than any
-// board command runs), else null. null too if it vanished meanwhile: that is a
-// release, and the caller simply tries again.
-function staleLockIno(lockPath) {
+// A lock's identity is its inode AND its content. The inode alone is not
+// enough: a filesystem reuses a freed inode at once, so the lock the next
+// writer creates can carry the number of the one just removed. The content
+// holds a random nonce, so two locks never read the same.
+const lockId = (lockPath) => {
+  try {
+    return { ino: fs.statSync(lockPath).ino, text: fs.readFileSync(lockPath, "utf8") };
+  } catch {
+    return null;
+  }
+};
+const sameLock = (a, b) => !!a && !!b && a.ino === b.ino && a.text === b.text;
+
+// The lock's identity if it is stale (its holder is dead, or it is older than
+// any board command runs), else null. null too if it vanished meanwhile: that
+// is a release, and the caller simply tries again.
+function staleLockId(lockPath) {
   let st;
   try {
     st = fs.statSync(lockPath);
@@ -111,19 +125,19 @@ function staleLockIno(lockPath) {
     try {
       process.kill(info.pid, 0);
     } catch (e) {
-      if (e.code === "ESRCH") return st.ino; // the holder is gone
+      if (e.code === "ESRCH") return lockId(lockPath); // the holder is gone
     }
   }
-  return Date.now() - st.mtimeMs > LOCK_STALE_MS ? st.ino : null;
+  return Date.now() - st.mtimeMs > LOCK_STALE_MS ? lockId(lockPath) : null;
 }
 
 // Remove a stale lock without removing a fresh one that replaced it. Renaming
-// is atomic, so we hold whatever we renamed; if it is not the inode we judged
+// is atomic, so we hold whatever we renamed; if it is not the lock we judged
 // stale, another writer took the lock in between and it goes straight back.
 // linkSync never overwrites, so putting it back cannot clobber a third
 // writer. What is NOT covered: that third writer acquiring in the instant the
 // fresh lock is moved aside. That needs a crash and three writers at once.
-function breakStaleLock(lockPath, ino) {
+function breakStaleLock(lockPath, id) {
   const aside = `${lockPath}.${process.pid}.stale`;
   try {
     fs.renameSync(lockPath, aside);
@@ -131,7 +145,7 @@ function breakStaleLock(lockPath, ino) {
     return; // already gone
   }
   try {
-    if (fs.statSync(aside).ino !== ino) {
+    if (!sameLock(lockId(aside), id)) {
       try {
         fs.linkSync(aside, lockPath);
       } catch {
@@ -146,17 +160,20 @@ function breakStaleLock(lockPath, ino) {
 export function withLock(ctx, fn) {
   const lockPath = `${ctx.data}.lock`;
   const deadline = Date.now() + LOCK_WAIT_MS;
+  let mine;
   for (;;) {
     try {
       const fd = fs.openSync(lockPath, "wx");
-      fs.writeSync(fd, JSON.stringify({ pid: process.pid, at: new Date().toISOString() }));
+      const text = JSON.stringify({ pid: process.pid, at: new Date().toISOString(), nonce: randomBytes(8).toString("hex") });
+      mine = { ino: fs.fstatSync(fd).ino, text };
+      fs.writeSync(fd, text);
       fs.closeSync(fd);
       break;
     } catch (e) {
       if (e.code !== "EEXIST") throw e;
-      const ino = staleLockIno(lockPath);
-      if (ino !== null) {
-        breakStaleLock(lockPath, ino);
+      const id = staleLockId(lockPath);
+      if (id !== null) {
+        breakStaleLock(lockPath, id);
         continue;
       }
       if (Date.now() > deadline) {
@@ -168,7 +185,11 @@ export function withLock(ctx, fn) {
   try {
     return fn();
   } finally {
-    fs.rmSync(lockPath, { force: true });
+    // Only OUR lock. A holder that outlived LOCK_STALE_MS may have had its lock
+    // judged stale and taken by the next writer; removing that one would let a
+    // third writer in beside it (independent review). Same move as breaking a
+    // stale lock: take it aside, and put it back if it is not ours.
+    breakStaleLock(lockPath, mine);
   }
 }
 
