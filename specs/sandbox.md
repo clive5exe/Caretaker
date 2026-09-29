@@ -92,6 +92,10 @@ that asked for it, by where the log lives. The proxy is never told which run it
 serves, and so cannot tell a wrong story about it. Both are torn down when the
 run ends, however it ends.
 
+A client that resets while being refused does not stop the proxy either: the
+connection's error handler is attached before the decision, so one abrupt
+client cannot take down egress for the rest of the run.
+
 A log the proxy cannot write does not stop the proxy. The failure is reported
 once, and every refusal still goes to stderr. A proxy that died on its first
 event refused every connection, allowed or not, and that reads as a broken

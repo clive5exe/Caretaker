@@ -11,6 +11,10 @@
  */
 import { createProxy, allowed, splitHostPort } from "./egress.mjs";
 import { request } from "node:http";
+import { spawn } from "node:child_process";
+import { connect as tcpConnect, createServer as tcpServer } from "node:net";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 let failures = 0;
 const ok = (name, passed, detail = "") => {
@@ -141,6 +145,53 @@ const tryConnect = (authority) =>
 }
 
 server.close();
+
+{
+  // THE PROXY SURVIVES A CLIENT THAT RESETS WHILE BEING REFUSED. On a CONNECT,
+  // Node drops the socket's default error listener; a refusal path that added
+  // none let one reset raise an uncaught ECONNRESET, and the proxy died,
+  // taking every later request in the run with it (independent review,
+  // reproduced three times). Run as the CLI, in its own process, so a crash
+  // fails this check by name instead of taking the test down with it.
+  const free = await new Promise((r) => {
+    const s = tcpServer().listen(0, "127.0.0.1", () => {
+      const p = s.address().port;
+      s.close(() => r(p));
+    });
+  });
+  const here = dirname(fileURLToPath(import.meta.url));
+  const child = spawn(process.execPath, [join(here, "egress.mjs"), "serve", "--allow", "allowed.example", "--port", String(free)], { stdio: ["ignore", "ignore", "pipe"] });
+  let stderr = "";
+  child.stderr.on("data", (d) => (stderr += d));
+  await new Promise((r) => {
+    const t = setInterval(() => /listening/.test(stderr) && (clearInterval(t), r()), 20);
+  });
+  for (let i = 0; i < 20; i++) {
+    await new Promise((r) => {
+      const c = tcpConnect(free, "127.0.0.1", () => {
+        c.write("CONNECT blocked.example:443 HTTP/1.1\r\nHost: blocked.example:443\r\n\r\n");
+        setImmediate(() => {
+          c.resetAndDestroy();
+          r();
+        });
+      });
+      c.on("error", r);
+    });
+  }
+  await new Promise((r) => setTimeout(r, 300));
+  const alive = child.exitCode === null;
+  const after = await new Promise((resolve) => {
+    const req = request({ host: "127.0.0.1", port: free, method: "CONNECT", path: "blocked.example:443" });
+    req.on("connect", (res, socket) => {
+      socket.destroy();
+      resolve(res.statusCode);
+    });
+    req.on("error", (e) => resolve(String(e.message)));
+    req.end();
+  });
+  ok("THE PROXY SURVIVES CLIENTS THAT RESET WHILE BEING REFUSED, and still refuses", alive && after === 403, `alive=${alive} after=${after} ${stderr.split("\n").filter((l) => /Error|ECONNRESET/.test(l)).slice(0, 2).join(" | ")}`);
+  child.kill();
+}
 
 console.log(failures === 0 ? "\n[egress] all checks passed" : `\n[egress] ${failures} FAILURE(S) above.`);
 process.exit(failures === 0 ? 0 : 1);
