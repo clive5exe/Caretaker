@@ -46,6 +46,13 @@ const server = createServer((req, res) => {
       return res.end(JSON.stringify({ choices: [{ message: { role: "assistant", content: "done" } }] }));
     }
     if (next.delayMs) await new Promise((r) => setTimeout(r, next.delayMs));
+    if (next.stallBodyMs) {
+      // Headers and the first byte, then nothing: the body stalls.
+      res.writeHead(200, { "content-type": "application/json" });
+      res.write("{");
+      await new Promise((r) => setTimeout(r, next.stallBodyMs));
+      return res.end("}");
+    }
     if (next.status) {
       res.writeHead(next.status);
       return res.end(next.text ?? "");
@@ -215,6 +222,20 @@ const policy = (model, over = {}) => ({ adapter: "openai-compatible", endpoint: 
   scripts.slow = [{ delayMs: 3000, ...say(null) }];
   const k = await run(workspace(), "x", policy("slow", { timeoutMs: 500 }));
   ok("a model slower than the ceiling is KILLED, never completed", k.verdict.state === "killed");
+  // Independent re-review: headers on time, then a stalled BODY, threw out of
+  // run() entirely, and the run's end read as "did not start", with no diff.
+  const ws = workspace();
+  scripts.stallbody = [say([call("write_file", { path: "out.txt", content: "made it\n" })]), { stallBodyMs: 5000 }];
+  let stalled = null;
+  let stallThrew = null;
+  const t0 = Date.now();
+  try {
+    stalled = await run(ws, "x", policy("stallbody", { timeoutMs: 1500 }));
+  } catch (err) {
+    stallThrew = err;
+  }
+  ok("a body that stalls past the ceiling is KILLED, not thrown", !stallThrew && stalled?.verdict.state === "killed" && Date.now() - t0 < 4000, stallThrew ? String(stallThrew) : stalled?.verdict.state);
+  ok("…and the work it did before the stall is still measured", stalled?.diff?.files?.some((f) => f.path === "out.txt"), JSON.stringify(stalled?.diff?.files));
   let threw = null;
   try {
     await run(workspace(), "x", policy("x", { model: null }));

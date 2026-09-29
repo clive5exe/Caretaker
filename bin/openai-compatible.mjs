@@ -394,6 +394,7 @@ export async function openaiCompatibleAdapter({ workspace, prompt, policy, paths
       }
       toolUse.turns += 1;
       let res;
+      let bodyText;
       try {
         res = await fetch(url, {
           method: "POST",
@@ -401,11 +402,16 @@ export async function openaiCompatibleAdapter({ workspace, prompt, policy, paths
           body: JSON.stringify({ model: policy.model, messages, tools, tool_choice: "auto" }),
           signal: AbortSignal.timeout(remaining),
         });
+        // Inside the try, under the same deadline: a server that sends its
+        // headers and then stalls the body used to throw out of run()
+        // entirely, and the run was logged as never started (independent
+        // re-review).
+        bodyText = await res.text();
       } catch (e) {
         if (e.name === "TimeoutError" || e.name === "AbortError") {
           exec.killed = true;
           exec.killReason = "timeout";
-        } else if (toolUse.turns === 1) {
+        } else if (toolUse.turns === 1 && !res) {
           // Nothing answered at all: the model is not there, which is
           // UNAVAILABLE, not a failure of the work.
           exec.spawnError = Object.assign(new Error(e.cause?.message ?? e.message), { code: e.cause?.code ?? "ENDPOINT_UNREACHABLE" });
@@ -415,7 +421,6 @@ export async function openaiCompatibleAdapter({ workspace, prompt, policy, paths
         }
         break;
       }
-      const bodyText = await res.text();
       if (!res.ok) {
         exec.exitCode = 1;
         err(`HTTP ${res.status} from ${url}: ${bodyText.slice(0, 2000)}`);
