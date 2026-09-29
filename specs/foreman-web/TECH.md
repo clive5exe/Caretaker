@@ -477,19 +477,19 @@ share numbers (C-2), not styles.
 
 - **No external requests.** The page keeps the same "nothing leaves the
   machine" posture as the sandbox.
-  - Inter is bundled from `@fontsource-variable/inter`, which is a `web/`
-    dependency, and served from `web/dist/`. Only the Latin variable-weight
-    file is used.
+  - Inter is bundled from `@fontsource-variable/inter`, and Anton from
+    `@fontsource/anton`. Both are `web/` dependencies, served from
+    `web/dist/`, and only their Latin files are used.
   - Monospace uses the system stack (`ui-monospace, SFMono-Regular, Menlo,
     Consolas, monospace`).
   - The page contains no CDN link, web font URL or analytics call.
 - **Name and logo.**
   - The UI says **Caretaker**. Paths and commands keep saying `foreman`
     wherever the code does, as the README explains.
-  - The sidebar and the Getting started page use
-    `docs/assets/caretaker-logo-black.png`, which has black letters on white.
-    It is the repo logo inverted, thresholded so the thin gaps between the
-    letters survive.
+  - The wordmark in the sidebar and on the Getting started page is text:
+    CARETAKER in Anton, a heavy condensed face close to the repo logo's
+    letterforms, set in `fg` on the white page. It is text rather than an image
+    because the distressed repo logo breaks up at sidebar size, even inverted.
   - `docs/assets/caretaker-logo.png`, which is white on black, stays the logo
     for dark surfaces such as the README.
 - **Color.** Color has two jobs, and they never swap:
@@ -734,7 +734,7 @@ them.
 | W-14 | install upgrade mode; backward-compat end to end | all | reviewer, qa |
 | W-15 | Metrics page (PRODUCT.md page 8) | W-5, C-2 | reviewer, qa |
 | W-16 | command menu over `commandsFor`, and the Getting started page | W-5 | reviewer, qa |
-| W-17 | `theme.css` tokens, bundled Inter, logo; boundary test covers URLs and color literals | W-5 | reviewer, qa |
+| W-17 | `theme.css` tokens, bundled Inter and Anton, wordmark; boundary test covers URLs and color literals | W-5 | reviewer, qa |
 
 ## Findings recorded here, not fixed by this project
 
