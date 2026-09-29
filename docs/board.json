@@ -399,12 +399,26 @@
             "reviewer": {
               "verdict": "fail",
               "at": "2026-09-29",
-              "note": "Independent review (fresh agent, not the builder): the CLI path is right (group kill, container rm -f with its own ceiling, bounded settle after SIGKILL, WARN end event with state killed; harness.test.mjs green). The openai-compatible adapter, a run path through the same seam, has no enforced ceiling. Tool calls are blocking spawnSync (openai-compatible.mjs:143-145, 159-165) with a 120s per-call timeout, and the deadline is checked only between turns (:308). Reproduced in a copy: a 1000ms ceiling with two 'sleep 4' calls in one turn took 8100ms. Under sandbox:none, 'sleep 9 & echo started' took 9070ms: the backgrounded grandchild holds spawnSync's pipes, and nothing kills its process group. That is the hazard harness.mjs:634-657 documents and fixes for the CLI path, and it is unbounded with a longer sleep. Both report state killed, but only after the fact."
+              "note": "Independent re-review (fresh agent, not the builder): the old points are fixed. runBounded (openai-compatible.mjs:122-160) is async, group-kills, and each tool gets min(120s, time left) (:469). Scratch (atk/h9.mjs): 1000ms ceiling, two 'sleep 4' -> killed in 1039ms; 'sleep 171 &' and a redirected (sleep 172 &) are gone afterwards. New defect: the reply body is read outside the fetch try (:418 'await res.text()'). A server that sends headers and stalls the body past the ceiling makes the AbortSignal reject there, run() throws TimeoutError, and harness.mjs:1079 logs end state 'not-started', 'run did not start', with no diff measured, after turn 1 had written out.txt (atk/h9b.mjs). The log says not-started, not killed.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent review (fresh agent, not the builder): the CLI path is right (group kill, container rm -f with its own ceiling, bounded settle after SIGKILL, WARN end event with state killed; harness.test.mjs green). The openai-compatible adapter, a run path through the same seam, has no enforced ceiling. Tool calls are blocking spawnSync (openai-compatible.mjs:143-145, 159-165) with a 120s per-call timeout, and the deadline is checked only between turns (:308). Reproduced in a copy: a 1000ms ceiling with two 'sleep 4' calls in one turn took 8100ms. Under sandbox:none, 'sleep 9 & echo started' took 9070ms: the backgrounded grandchild holds spawnSync's pipes, and nothing kills its process group. That is the hazard harness.mjs:634-657 documents and fixes for the CLI path, and it is unbounded with a longer sleep. Both report state killed, but only after the fact."
+                }
+              ]
             },
             "qa": {
               "verdict": "fail",
               "at": "2026-09-29",
-              "note": "Independent QA (fresh agent, not the builder): the ceiling holds only on the cli adapter. On openai-compatible, a tool call runs under spawnSync with its own 120s limit and the deadline is checked only between turns. A run with a 1500ms ceiling whose model called run(\"sleep 171 & echo started\") returned after 120195ms, and the sleep was still alive afterwards, yet the verdict and end event said killed."
+              "note": "Independent re-QA (fresh agent, not the builder): the old repro is fixed. 1500ms ceiling, run('sleep 171 & echo started') returns in ~300ms and the sleep is gone; 1000ms with trap TERM + sleep -> killed at 1037ms, process gone; 20 quick calls at 1200ms -> killed at 1238ms; server stalling headers -> killed at 1031ms. The edge case that breaks it: turn 1 writes out.txt, then turn 2's reply sends headers and stalls the body. With a 1500ms ceiling run() THREW TimeoutError at 1521ms (no verdict), and the only end event is {state:'not-started', detail:'run did not start: The operation was aborted due to timeout'}, with no diff. Cause: openai-compatible.mjs:418 res.text() is outside the try. Repro: atk/h9b.mjs.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent QA (fresh agent, not the builder): the ceiling holds only on the cli adapter. On openai-compatible, a tool call runs under spawnSync with its own 120s limit and the deadline is checked only between turns. A run with a 1500ms ceiling whose model called run(\"sleep 171 & echo started\") returned after 120195ms, and the sleep was still alive afterwards, yet the verdict and end event said killed."
+                }
+              ]
             }
           }
         },
@@ -788,7 +802,14 @@
             "qa": {
               "verdict": "fail",
               "at": "2026-09-29",
-              "note": "Independent QA (fresh agent, not the builder): the spec path is not rendered as a link on any card. docs/board.html and docs/board.md never print t.spec (grep for spec in dashboard.mjs and board.mjs taskBlock finds nothing), and the web WorkItem.tsx:105 shows it as plain mono text with no href. The freshness half holds: bin/freshness.test.mjs passes, and disabling the lying comparison fails it by name."
+              "note": "Independent re-review (fresh agent, not the builder): the old finding is fixed: board.md and board.html cards show 'spec <a href=../specs/…>' and the web WorkItem links a governing spec to /specs?path=; tests pass. But the non-path edge case the tests cover (https:, javascript:, ../, /) is bypassable: a spec of 'docs/javascript:alert(document.cookie)' renders href=\"javascript:alert(document.cookie)\" on the card, since the scheme test runs before path.posix.relative strips 'docs/' (bin/board.mjs:302-305, bin/dashboard.mjs:613-617). Reproduced in a scratch clone with board.mjs build and dashboard render(). Minor: the web board card (Activity.tsx) shows the spec as text, not a link.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent QA (fresh agent, not the builder): the spec path is not rendered as a link on any card. docs/board.html and docs/board.md never print t.spec (grep for spec in dashboard.mjs and board.mjs taskBlock finds nothing), and the web WorkItem.tsx:105 shows it as plain mono text with no href. The freshness half holds: bin/freshness.test.mjs passes, and disabling the lying comparison fails it by name."
+                }
+              ]
             }
           }
         },
@@ -806,14 +827,28 @@
           "note": "Lines of code, agents spawned and tasks-per-day without effort weighting are deliberately absent. Each rewards exactly the wrong behaviour. — Built: bin/kpis.mjs. Delivery from git (a deploy is a first-parent merge; lead time branch-first-commit to merge; change failure = merge reverted after landing, a branch-internal revert is not one; time to restore merge to revert). AI: tokens per closed task, tokens per merged line (dollars only if cfg.pricing prices every model), first-pass and rework, model mix, estimate calibration, human intervention (questions, triage or spec not approved). Anti-KPIs listed with reasons. All null with a reason when not recorded. In the Metrics API and page, and node bin/kpis.mjs. Checked by bin/kpis.test.mjs on a scratch repo with dated merges and reverts, plus serve.test; mutations K1, K6-K12 fail by name. Gate verdicts not recorded.",
           "gate": {
             "reviewer": {
-              "verdict": "fail",
+              "verdict": "pass",
               "at": "2026-09-29",
-              "note": "Independent review (fresh agent, not the builder): cost per merged line is wrong: tokensPerMergedLine and dollarsPerMergedLine divide ALL-TIME run-log tokens by merged lines in the git window (kpis.mjs:194-206; readmodel.mjs:691 passes unranged rows with a 7/14/30-day window), so one old 1M-token run over a 7-day window gave 100100 tok/line. And dollars is null whenever the log has any start row (kpis.mjs:196-197 needs every row priced; run.mjs start rows carry no tokens), so $/line never appears on a real log. Test RUNS have no start rows and no timestamps, so neither is caught. Nit: lead time sorts %aI strings with mixed offsets lexically (:146)."
+              "note": "Independent re-review (fresh agent, not the builder): all three points fixed in bin/kpis.mjs:201-210,148. Scratch probe: the old case (one 1M-token run from March, 100 merged lines) now gives tokensPerMergedLine null with basis '0 of 1 run(s) with tokens fall in the 30-day window'; a real-shaped log with a start row, an in-window priced end row, an out-of-window run and an untimed run gives 20 tok/line and $0.0002/line, both hand-checked. readmodel.mjs:699 and the CLI pass gitFacts, which now carries since/until. firstAt is chosen by Date.parse. In a scratch clone, dropping the window filter fails 5 kpis tests by name; dropping the tokens filter fails 4.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent review (fresh agent, not the builder): cost per merged line is wrong: tokensPerMergedLine and dollarsPerMergedLine divide ALL-TIME run-log tokens by merged lines in the git window (kpis.mjs:194-206; readmodel.mjs:691 passes unranged rows with a 7/14/30-day window), so one old 1M-token run over a 7-day window gave 100100 tok/line. And dollars is null whenever the log has any start row (kpis.mjs:196-197 needs every row priced; run.mjs start rows carry no tokens), so $/line never appears on a real log. Test RUNS have no start rows and no timestamps, so neither is caught. Nit: lead time sorts %aI strings with mixed offsets lexically (:146)."
+                }
+              ]
             },
             "qa": {
-              "verdict": "fail",
+              "verdict": "pass",
               "at": "2026-09-29",
-              "note": "Independent QA (fresh agent, not the builder): cost per merged diff line divides all-time run-log tokens by merged lines in the git window. ai({phases:[]},[{t:'2026-03-01T00:00:00Z',tokens:1e6}],{days:30,merges:[{lines:100,...}],reverts:[]}) gives 10000 tokens/line with zero spend in the window, and readmodel.metrics and the CLI do the same, since rows are unwindowed. The other KPIs and the anti-KPIs check out in bin/kpis.test.mjs; they show on the web Metrics page, not docs/board.html."
+              "note": "Independent re-review (fresh agent, not the builder): the old repro now gives tokensPerMergedLine null, with a basis saying 0 of 1 runs fall in the window. Edge cases checked in a scratch probe: facts with no since (the old test shape) give null, not all-time; a start row without tokens no longer blocks pricing; an untimed row is left out and counted; a row priced only by a total leaves $ null with a basis that says why. node bin/kpis.mjs on this repo runs (12 merges, 18900 lines, no run log, so reported as not recorded). kpis.test passes, and 5 tests fail by name when the window filter is mutated out in a scratch clone.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent QA (fresh agent, not the builder): cost per merged diff line divides all-time run-log tokens by merged lines in the git window. ai({phases:[]},[{t:'2026-03-01T00:00:00Z',tokens:1e6}],{days:30,merges:[{lines:100,...}],reverts:[]}) gives 10000 tokens/line with zero spend in the window, and readmodel.metrics and the CLI do the same, since rows are unwindowed. The other KPIs and the anti-KPIs check out in bin/kpis.test.mjs; they show on the web Metrics page, not docs/board.html."
+                }
+              ]
             }
           }
         },
@@ -833,12 +868,26 @@
             "reviewer": {
               "verdict": "fail",
               "at": "2026-09-29",
-              "note": "Independent review (fresh agent, not the builder): the live mirror + liveRecorder path works for runstore runs, but ops/caretaker/prompt.txt:18-23 (changed in this commit) tells the agent a DECISION line 'reaches a human's Inbox'. Its only consumer, bin/loop.sh, runs claude directly with no runstore archive or harvest and deletes the output at :126, so in the loop every declared decision is lost, the opposite of the AC. Either route loop.sh through runstore or make the prompt say the DECISION line is harvested only for archived runs. Nit: startMirror decodes each chunk alone (runstore.mjs:115), so a multibyte char such as the em dash split across polls becomes U+FFFD."
+              "note": "Independent re-review (fresh agent, not the builder): a successful loop pass now archives and harvests its output (harvest.mjs import; loop.test passes). But the AC case, a killed session, still loses its decisions in the loop: loop.sh:95-99 exits before the harvest on any nonzero rc and rm's the output, keeping only its last 2000 bytes, unredacted, in loop.log. Scratch clone, fake CLI printing a DECISION then exit 137: no run archived, nothing reaches the Inbox. The prompt's 'harvests these ... when it ends' holds only for a clean exit. The multibyte nit also stands: runstore.mjs:114 decodes each chunk alone, and an em dash split across two pumps reached onLine as U+FFFD (reproduced).",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent review (fresh agent, not the builder): the live mirror + liveRecorder path works for runstore runs, but ops/caretaker/prompt.txt:18-23 (changed in this commit) tells the agent a DECISION line 'reaches a human's Inbox'. Its only consumer, bin/loop.sh, runs claude directly with no runstore archive or harvest and deletes the output at :126, so in the loop every declared decision is lost, the opposite of the AC. Either route loop.sh through runstore or make the prompt say the DECISION line is harvested only for archived runs. Nit: startMirror decodes each chunk alone (runstore.mjs:115), so a multibyte char such as the em dash split across polls becomes U+FFFD."
+                }
+              ]
             },
             "qa": {
               "verdict": "fail",
               "at": "2026-09-29",
-              "note": "Independent QA (fresh agent, not the builder): the AC holds only for adapters that print as they go. The claude preset (harness.mjs CLI_PRESETS, --print --output-format json) emits one result at exit, so mid-run DECISION lines never reach the mirror, killed or not. ops/caretaker/loop.sh, the unattended path, bypasses runstore entirely, so it gets no live record. Decisions also land in the run archive's decisions.live.jsonl rather than the artifact they explain. The killed-run test passes, but only with a shell fake that echoes."
+              "note": "Independent re-review (fresh agent, not the builder): two of the old points still stand. (1) The claude preset still uses --print --output-format json (harness.mjs:214-219), so it prints one result at exit and a killed claude run records no decision. The note lists this as a LIMIT; it is not fixed. (2) The loop is still not live. It harvests only after a clean exit. In a scratch clone, loop.sh with a fake CLI that prints a DECISION and exits 137 archives no run and sends nothing to the Inbox (loop.sh:95-99 deletes the output). A clean pass is now harvested at the end, and loop.test and runstore.test pass. The AC case (killed, loses nothing) fails on both real paths.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent QA (fresh agent, not the builder): the AC holds only for adapters that print as they go. The claude preset (harness.mjs CLI_PRESETS, --print --output-format json) emits one result at exit, so mid-run DECISION lines never reach the mirror, killed or not. ops/caretaker/loop.sh, the unattended path, bypasses runstore entirely, so it gets no live record. Decisions also land in the run archive's decisions.live.jsonl rather than the artifact they explain. The killed-run test passes, but only with a shell fake that echoes."
+                }
+              ]
             }
           }
         },
@@ -854,9 +903,16 @@
           "note": "The organising key is a FIELD, never a folder. A run spans tasks, a task spans runs, a PR maps to neither, so any directory hierarchy locks in an assumption that breaks once there is history in the old shape. level is the field that gets skipped and then missed: without it an autonomous run logs too little to debug and too much to read, on the same day. — Built in #6 (merged): bin/events.mjs is the one writer and reader, day-rotated by each line's own t, level required, a half-written line skipped and counted. Checked by bin/events.test.mjs. Gate verdicts not recorded.",
           "gate": {
             "reviewer": {
-              "verdict": "fail",
+              "verdict": "pass",
               "at": "2026-09-29",
-              "note": "Independent review (fresh agent, not the builder): events.mjs is sound (strict write, lenient read, fragment-terminating O_APPEND single write, day by own t). Fails on the doc it governs: docs/events.md:32 says 'tail -F rather than -f, because the file changes name at midnight UTC'. That is false: tail -F follows the NAME it was given, and $(node bin/events.mjs path) is resolved once, so the documented live watch goes silent at 00:00 UTC. -F is right for a different reason (today's file may not exist yet). A correct choice defended with a wrong reason, and the tailable view it describes breaks daily. Nit: the example event (:11) uses pricing.ts/pricing.md."
+              "note": "Independent re-review (fresh agent, not the builder): docs/events.md:32-35 now gives the true reason for -F (today's file may not exist yet) and says a tail does not cross midnight UTC. Checked: GNU tail -F on a missing file waits and reports 'has appeared; following new file'. events.mjs path resolves to today's dated name. The example (:11) no longer names pricing. 'Only what broke' now includes level error. events.test passes and reads the views from the doc: in a scratch clone, reverting that filter to .verdict==\"fail\" fails 'the views tested are the views docs/events.md documents' by name. events.mjs is unchanged since the earlier sound review.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent review (fresh agent, not the builder): events.mjs is sound (strict write, lenient read, fragment-terminating O_APPEND single write, day by own t). Fails on the doc it governs: docs/events.md:32 says 'tail -F rather than -f, because the file changes name at midnight UTC'. That is false: tail -F follows the NAME it was given, and $(node bin/events.mjs path) is resolved once, so the documented live watch goes silent at 00:00 UTC. -F is right for a different reason (today's file may not exist yet). A correct choice defended with a wrong reason, and the tailable view it describes breaks daily. Nit: the example event (:11) uses pricing.ts/pricing.md."
+                }
+              ]
             },
             "qa": {
               "verdict": "pass",
@@ -894,12 +950,26 @@
             "reviewer": {
               "verdict": "fail",
               "at": "2026-09-29",
-              "note": "Independent review (fresh agent, not the builder): the rework-spend number is wrong as labelled. dashboard.mjs:308-327 counts every token of any task that ever failed a gate, including the attempt that passed, and tasks = every such task whether or not it ran again. The page (:1067-1071) says 'tokens on N tasks that failed a gate and ran again. The one number here that bought nothing'. The test's own fixture asserts 120000 for T-001, which had a single run. Also the only run-log writer, bin/loop.sh:105-119, sums the usage parts into --tokens and drops in/cached/write/out/turns/model, so the composition panel is empty on real data. run.mjs derives and checks the total but still stores it beside the parts (AC says rather than)."
+              "note": "Independent re-review (fresh agent, not the builder): fixed: loop.sh passes in/cached/write/out/turns/model, and run.test covers derivation and refusal. Still stands: (1) the AC says the total is derived 'rather than stored beside' the parts, yet run.mjs:163-178 still writes tokens next to them and tokenStats sums r.tokens (dashboard.mjs). {in:10,out:10,tokens:400000} gives total 400000, compTotal 20. (2) rework spend still counts the passing attempt whenever the fail and the retry share a date, which is the normal case here: reworkSpend with a qa fail and a pass on the same day, plus a 5000-token passing run, reports 100% wasted. Its tasks count also includes tasks with no later run. The label now admits the same-day case, but the number is still wrong.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent review (fresh agent, not the builder): the rework-spend number is wrong as labelled. dashboard.mjs:308-327 counts every token of any task that ever failed a gate, including the attempt that passed, and tasks = every such task whether or not it ran again. The page (:1067-1071) says 'tokens on N tasks that failed a gate and ran again. The one number here that bought nothing'. The test's own fixture asserts 120000 for T-001, which had a single run. Also the only run-log writer, bin/loop.sh:105-119, sums the usage parts into --tokens and drops in/cached/write/out/turns/model, so the composition panel is empty on real data. run.mjs derives and checks the total but still stores it beside the parts (AC says rather than)."
+                }
+              ]
             },
             "qa": {
               "verdict": "fail",
               "at": "2026-09-29",
-              "note": "Independent QA (fresh agent, not the builder): the total is stored beside the parts, not derived in place of them. run.mjs end --in 15000 --cached 380000 --out 5000 writes tokens:400000 next to them, and tokenStats/kpis read r.tokens, so a row whose total and parts disagree is believed. loop.sh, the only automated writer, throws away the usage breakdown it parses and logs --tokens only, with no model or turns. No test covers run.mjs derivation or refusal. rework spend also counts the passing attempt's tokens as waste."
+              "note": "Independent re-review (fresh agent, not the builder): the first point from the old QA still stands. run.mjs still stores tokens beside the parts (run.mjs:176), and readers believe it. dashboard tokenStats([{in:10,out:10,tokens:400000}]) gives total 400000 against a composition total of 20, and readRuns does not re-derive it. Rework still counts the passing attempt when it falls on the day of the fail: a same-day fail, a 100-token failed run and a 5000-token passing run report wasted 5100 (100%). Fixed: loop.sh now logs the breakdown, turns and a single model (loop.test passes), and run.test covers derivation and a refused mismatch.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent QA (fresh agent, not the builder): the total is stored beside the parts, not derived in place of them. run.mjs end --in 15000 --cached 380000 --out 5000 writes tokens:400000 next to them, and tokenStats/kpis read r.tokens, so a row whose total and parts disagree is believed. loop.sh, the only automated writer, throws away the usage breakdown it parses and logs --tokens only, with no model or turns. No test covers run.mjs derivation or refusal. rework spend also counts the passing attempt's tokens as waste."
+                }
+              ]
             }
           }
         }
@@ -1083,9 +1153,16 @@
               "note": "Independent review (fresh agent, not the builder): stageOf checked row by row against TECH.md Lifecycle; rule 10-before-9 reorder is commented and justified; required gates come only from missingGates (no gate literals, substitution test moves the stage); commandsFor offers nothing core would refuse and never a verdict. Nits: STAGES omits ready and dropped though stageOf returns them; after a fail plus a rerun with a diff the task never reaches verify because rule 6 requires no verdict at all (spec-literal)."
             },
             "qa": {
-              "verdict": "fail",
+              "verdict": "pass",
               "at": "2026-09-29",
-              "note": "Independent QA (fresh agent, not the builder): the code honours missingGates, but the guard lifecycle.mjs:16-17 cites does not hold. Replacing line 72 with const required = \"reviewer qa security\".split(\" \") (or GATE_CMDS from board.mjs) still passes bin/lifecycle.test.mjs, yet it moves a plain task with reviewer pass and security fail from review to build (rework). Add a row asserting that task stays in review."
+              "note": "Independent re-review (fresh agent, not the builder): the old finding is fixed. bin/lifecycle.test.mjs:65-69 now asserts that a plain task with reviewer pass and security fail stays in review, waiting on qa, not rework. In a scratch clone, replacing lifecycle.mjs:72 with \"reviewer qa security\".split(\" \") fails that test by name. So does [...GATE_CMDS] imported from board.mjs. A literal array also fails 'names no gate in code'. Each restore was checked by sha256 against the working tree. So the guard lifecycle.mjs:16-17 cites now holds. lifecycle.test passes.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent QA (fresh agent, not the builder): the code honours missingGates, but the guard lifecycle.mjs:16-17 cites does not hold. Replacing line 72 with const required = \"reviewer qa security\".split(\" \") (or GATE_CMDS from board.mjs) still passes bin/lifecycle.test.mjs, yet it moves a plain task with reviewer pass and security fail from review to build (rework). Add a row asserting that task stays in review."
+                }
+              ]
             }
           }
         },
@@ -1157,9 +1234,16 @@
               "note": "Independent review (fresh agent, not the builder): ask/answer/triage/spec-approve/spec-reject/pr/drop each stamp by (operator or OS user) and ISO at, refuse closed tasks, reasons required where the spec says; spec review keyed on git blob with path-escape check; pre-C1 CLI preserves the new fields. Nits: pr replaces rather than appends (spec shape is a single object); answer is accepted on a done/dropped task; core transition start/todo on a dropped task resurrects it while leaving the dropped record."
             },
             "qa": {
-              "verdict": "fail",
+              "verdict": "pass",
               "at": "2026-09-29",
-              "note": "Independent QA (fresh agent, not the builder): pr and drop are not append-only. On a scratch board, pr T-1 .../pr/1 then pr T-1 .../pr/2 leaves only pr/2, and drop, start, drop replaces the first dropped {why,by,at}. The earlier by/at are lost (board.mjs recordPr says 'A later pr replaces it'). ask, answer, triage and spec review do append, with by from cfg.operator and ISO at."
+              "note": "Independent re-review (fresh agent, not the builder): the old finding is fixed. On a scratch clone's board, pr P-1 three times keeps /pull/1 and /pull/2 in pr.history, each with its own by and ISO at. drop, start, drop, todo, drop keeps both earlier drops in dropped.history. Only recordPr and drop write these (board.mjs:784-804); readmodel only reads them. board-facts.test passes, including the pre-C-1 CLI preserving the new fields. Nit: history entries keep url/why, by and at but drop the replaced record's via (cli or web), the same whitelist style gate history uses.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent QA (fresh agent, not the builder): pr and drop are not append-only. On a scratch board, pr T-1 .../pr/1 then pr T-1 .../pr/2 leaves only pr/2, and drop, start, drop replaces the first dropped {why,by,at}. The earlier by/at are lost (board.mjs recordPr says 'A later pr replaces it'). ask, answer, triage and spec review do append, with by from cfg.operator and ISO at."
+                }
+              ]
             }
           }
         },
@@ -1265,9 +1349,16 @@
           "note": "Spec: specs/caretaker-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built in PR #9, which also carries C-1, C-2, C-3, C-6 and U-2. Gate verdicts not recorded: nobody closes their own work. Needs security.",
           "gate": {
             "reviewer": {
-              "verdict": "fail",
+              "verdict": "pass",
               "at": "2026-09-29",
-              "note": "Independent review (fresh agent, not the builder): dispatch is right: 12 allowlisted commands to board.command under board.mutate's lock, verdicts 400, core refusal 409 verbatim, unknown task 404. But TECH §1 Identity says a web mutation records by=operator with via:web so browser and CLI actions can be told apart, and 5 of the 12 do not: start, block, todo, note and done go through transition() (board.mjs:524), which takes no opts, so readmodel.mjs:735-740 builds {by, via} and it is dropped. Reproduced in a copy: a web note and a web block left no by/via on the task, and a web 'done' would be indistinguishable from a CLI close. The UI then says the opposite: ui.tsx:282 prints 'Recorded by the operator, via web.' under every command form (including note and block) and Settings.tsx:119 says 'recorded as by on every command, with via web'. Record by/via for transitions in core, or stop claiming it."
+              "note": "Independent re-review (fresh agent, not the builder): the old finding is fixed. transition() now appends transitions[] {cmd, by, at, via} when opts.by is set (board.mjs:624) and command() passes opts for start/todo/done/block/note (:821-824); readmodel.command sets by=operator, via=web and still computes driftFailing for done. Over HTTP against startServer on a scratch repo: note, block, todo, start and an accepted done each recorded by five via web; a refused done returned 409 with core's missing list and left board.json byte-identical; the CLI records via cli. So ui.tsx:282 and Settings.tsx:73 are now true. Nit: only block is asserted; dropping by/via for start/todo/done (keeping driftFailing) leaves serve, getting-started and board-lib green (restored, sha256 OK).",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent review (fresh agent, not the builder): dispatch is right: 12 allowlisted commands to board.command under board.mutate's lock, verdicts 400, core refusal 409 verbatim, unknown task 404. But TECH §1 Identity says a web mutation records by=operator with via:web so browser and CLI actions can be told apart, and 5 of the 12 do not: start, block, todo, note and done go through transition() (board.mjs:524), which takes no opts, so readmodel.mjs:735-740 builds {by, via} and it is dropped. Reproduced in a copy: a web note and a web block left no by/via on the task, and a web 'done' would be indistinguishable from a CLI close. The UI then says the opposite: ui.tsx:282 prints 'Recorded by the operator, via web.' under every command form (including note and block) and Settings.tsx:119 says 'recorded as by on every command, with via web'. Record by/via for transitions in core, or stop claiming it."
+                }
+              ]
             },
             "qa": {
               "verdict": "pass",
@@ -1296,7 +1387,14 @@
             "qa": {
               "verdict": "fail",
               "at": "2026-09-29",
-              "note": "Independent QA (fresh agent, not the builder): web/ builds (npm run build in a copy, tsc plus vite, clean) and the boundary test catches bin/ imports, vendor SDK imports including a side-effect import, and innerHTML/dangerouslySetInnerHTML. It does not fail when web/src names a gate or stage outside labels.ts, except as a quoted string literal. Planted one at a time in a copy's web/src/pages/QaPlant.tsx, node bin/web-boundary.test.mjs stayed green for: t.gates.security?.verdict (property access), { reviewer: true, qa: true } (object keys), <span>human</span> (JSX text), and a template literal needing security. The first two are the natural way to hardcode a gate rule in the client, which is what the check exists to stop. The current tree has none of these (grep), so this is a gap in the enforcement, not a present violation."
+              "note": "Independent re-review (fresh agent, not the builder): partly fixed. web/ typechecks (tsc --noEmit clean) and web-boundary.test is green; in a copy of bin/ + web/src, t.gates.security?.verdict, { reviewer: true, qa: true }, ready/dropped and t.gates[`security`] are now caught. But two of the old note's four gaps still pass, planted one at a time in web/src/pages/Plant.tsx: <span>human</span> and <span>security</span> (JSX text), and `needs security` (template literal) stay green. So does const { security, qa } = t.gates (destructuring, web-boundary.test.mjs:81 only matches .name and name:), a natural way to hardcode a gate rule. The commit skipped unquoted stage words deliberately, but the AC says names a gate or stage, and the gate cases have no such excuse.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent QA (fresh agent, not the builder): web/ builds (npm run build in a copy, tsc plus vite, clean) and the boundary test catches bin/ imports, vendor SDK imports including a side-effect import, and innerHTML/dangerouslySetInnerHTML. It does not fail when web/src names a gate or stage outside labels.ts, except as a quoted string literal. Planted one at a time in a copy's web/src/pages/QaPlant.tsx, node bin/web-boundary.test.mjs stayed green for: t.gates.security?.verdict (property access), { reviewer: true, qa: true } (object keys), <span>human</span> (JSX text), and a template literal needing security. The first two are the natural way to hardcode a gate rule in the client, which is what the check exists to stop. The current tree has none of these (grep), so this is a gap in the enforcement, not a present violation."
+                }
+              ]
             }
           }
         },
@@ -1443,7 +1541,14 @@
             "qa": {
               "verdict": "fail",
               "at": "2026-09-29",
-              "note": "Independent QA (fresh agent, not the builder): at runtime the client holds. Chromium loaded every page with zero requests off 127.0.0.1, Inter Variable and Anton loaded from dist, and the wordmark is CARETAKER in Anton. The current web/src has no color outside theme.css (grep). But the boundary test does not enforce either half. Planted one at a time in a copy's web/src, node bin/web-boundary.test.mjs stayed green for: fetch('//evil.example.com/x') (protocol-relative), new WebSocket('wss://evil.example.com/'), @import url(//fonts.googleapis.com/...) in a .css file, .qa { color: red; background: white; } in a .css file other than theme.css (unquoted named colors are never checked), and style={{ color: 'tomato' }} or 'Red' (unlisted or capitalised names). web/index.html is outside the scanned tree."
+              "note": "Independent re-review (fresh agent, not the builder): mostly fixed. In a copy of bin/ + web/src, planted one at a time, these are now caught: fetch(\"//evil.example.com/x\"), new EventSource(\"//...\"), wss://, url(\"//...\") and @import \"//...\" in CSS, .x{color:white}, .x { color: RED; }, style color tomato/RED/backticked, <rect fill=\"red\">. Still open from the old note: web/index.html is not scanned (files(SRC) at web-boundary.test.mjs:103). Adding <link rel=stylesheet href=\"https://fonts.googleapis.com/...\"> and <style>body{color:red}</style> to the copy's web/index.html leaves the test green, and that is the usual way an external font gets in. New: the URL regex is case-sensitive, so fetch(\"HTTPS://evil.example.com/x\") passes too. The CSP still blocks both at runtime, but the AC says the boundary test enforces it.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent QA (fresh agent, not the builder): at runtime the client holds. Chromium loaded every page with zero requests off 127.0.0.1, Inter Variable and Anton loaded from dist, and the wordmark is CARETAKER in Anton. The current web/src has no color outside theme.css (grep). But the boundary test does not enforce either half. Planted one at a time in a copy's web/src, node bin/web-boundary.test.mjs stayed green for: fetch('//evil.example.com/x') (protocol-relative), new WebSocket('wss://evil.example.com/'), @import url(//fonts.googleapis.com/...) in a .css file, .qa { color: red; background: white; } in a .css file other than theme.css (unquoted named colors are never checked), and style={{ color: 'tomato' }} or 'Red' (unlisted or capitalised names). web/index.html is outside the scanned tree."
+                }
+              ]
             }
           }
         }
