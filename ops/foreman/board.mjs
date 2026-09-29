@@ -12,32 +12,135 @@
 //
 // Any mutating command rebuilds the page automatically, so the docs site is
 // never stale relative to the data.
+//
+// IT IS ALSO A LIBRARY. The web server imports the target repo's own installed
+// copy of this file, so the rules it applies are exactly the rules the CLI
+// applies (specs/foreman-web/TECH.md, C-1). That is why the exports live here
+// and not in a second module: install.sh copies four files, and a new import
+// would break every installed copy on upgrade.
 
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 
-// PATHS COME FROM config.json, so this file is the same in every project. It
+/** Bumped when an export changes shape. The server refuses a board.mjs without it. */
+export const API_VERSION = 1;
+
 // Paths come from config.json beside this file, so board.mjs is identical in
 // every project that installs it.
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const CFG = JSON.parse(
-  fs.readFileSync(process.env.FACTORY_CONFIG || path.join(HERE, "config.json"), "utf8"),
-);
-const ROOT = path.resolve(HERE, "..", "..", CFG.repo ?? ".");
-const DATA = path.join(ROOT, CFG.board);
-const OUT = path.join(ROOT, CFG.boardMarkdown ?? "docs/board.md");
 
-const load = () => JSON.parse(fs.readFileSync(DATA, "utf8"));
+/**
+ * Resolve the config at call time, not at import time, so importing this file
+ * reads nothing. FACTORY_CONFIG and the config.json beside this file stay the
+ * defaults, exactly as when the CLI resolved them at module load.
+ */
+export function loadConfig(cfgPath = process.env.FACTORY_CONFIG || path.join(HERE, "config.json")) {
+  const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
+  // The repo root is relative to THIS FILE, not to the config, as it always
+  // was: ops/foreman/ sits two levels below the repo it serves.
+  const root = path.resolve(HERE, "..", "..", cfg.repo ?? ".");
+  return {
+    cfg,
+    cfgPath: path.resolve(cfgPath),
+    root,
+    data: path.join(root, cfg.board),
+    out: path.join(root, cfg.boardMarkdown ?? "docs/board.md"),
+  };
+}
+
+export const load = (ctx) => JSON.parse(fs.readFileSync(ctx.data, "utf8"));
 // Trailing newline is load-bearing, not cosmetic: without it every board write
 // lands as "\ No newline at end of file" and the last line of the diff churns
 // on top of the real change. d9e37df was a repair of this exact file after it
 // was written by hand; the tool should not reintroduce a diff-noise defect.
-const save = (d) => fs.writeFileSync(DATA, `${JSON.stringify(d, null, 2)}\n`);
+//
+// Written to a temp file and renamed over the original, so a reader never sees
+// half a board: rename within one directory is atomic on POSIX filesystems.
+export function save(ctx, d) {
+  const tmp = `${ctx.data}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, `${JSON.stringify(d, null, 2)}\n`);
+  fs.renameSync(tmp, ctx.data);
+}
 const today = () => new Date().toISOString().slice(0, 10);
 
-const STATUS = {
+/* ------------------------------------------------------------------ lock */
+// One writer at a time, for the whole read-modify-write. Without it, two CLI
+// invocations that overlap both read the same board and the second write
+// discards the first one's change. A server beside the CLI makes that likelier,
+// so the lock lives here where both writers take it.
+//
+// O_EXCL ("wx") is the primitive: creating the file either succeeds for exactly
+// one process or fails with EEXIST. The file holds the holder's pid and start
+// time, so a lock left by a process that died is recognised and taken over
+// rather than wedging the board forever.
+const LOCK_WAIT_MS = 5000;
+const LOCK_STALE_MS = 30000;
+const sleepSync = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+
+function lockIsStale(lockPath) {
+  let info;
+  try {
+    info = JSON.parse(fs.readFileSync(lockPath, "utf8"));
+  } catch {
+    // Unreadable or half-written: the holder may be between open and write.
+    // Only its age can tell, so fall through to the mtime check.
+    info = null;
+  }
+  if (info?.pid) {
+    try {
+      process.kill(info.pid, 0);
+    } catch (e) {
+      if (e.code === "ESRCH") return true; // the holder is gone
+    }
+  }
+  try {
+    return Date.now() - fs.statSync(lockPath).mtimeMs > LOCK_STALE_MS;
+  } catch {
+    return true; // released between our failed open and this stat
+  }
+}
+
+export function withLock(ctx, fn) {
+  const lockPath = `${ctx.data}.lock`;
+  const deadline = Date.now() + LOCK_WAIT_MS;
+  for (;;) {
+    try {
+      const fd = fs.openSync(lockPath, "wx");
+      fs.writeSync(fd, JSON.stringify({ pid: process.pid, at: new Date().toISOString() }));
+      fs.closeSync(fd);
+      break;
+    } catch (e) {
+      if (e.code !== "EEXIST") throw e;
+      if (lockIsStale(lockPath)) {
+        fs.rmSync(lockPath, { force: true });
+        continue;
+      }
+      if (Date.now() > deadline) {
+        throw new Error(`board is locked by another writer (${lockPath}); retry, or remove it if no board command is running`);
+      }
+      sleepSync(25);
+    }
+  }
+  try {
+    return fn();
+  } finally {
+    fs.rmSync(lockPath, { force: true });
+  }
+}
+
+/** Load, apply fn, save when fn reports ok. Returns fn's result. */
+export function mutate(ctx, fn) {
+  return withLock(ctx, () => {
+    const d = load(ctx);
+    const res = fn(d);
+    if (res?.ok) save(ctx, d);
+    return res;
+  });
+}
+
+export const STATUS = {
   todo: { label: "To do", chip: "neutral", weight: 0 },
   doing: { label: "In progress", chip: "warn", weight: 0.5 },
   blocked: { label: "Blocked", chip: "bad", weight: 0 },
@@ -52,10 +155,10 @@ const STATUS = {
 // The board's denominator. Dropped scope is excluded everywhere progress is
 // computed or listed, so ADR-0028 deleting 26 tier tasks moves the percentage
 // because the work is gone, not because anything was built.
-const live = (tasks) => tasks.filter((t) => t.status !== "dropped");
+export const live = (tasks) => tasks.filter((t) => t.status !== "dropped");
 
-const allTasks = (d) => d.phases.flatMap((p) => p.tasks.map((t) => ({ ...t, phase: p })));
-const find = (d, id) => {
+export const allTasks = (d) => d.phases.flatMap((p) => p.tasks.map((t) => ({ ...t, phase: p })));
+export const find = (d, id) => {
   for (const p of d.phases) {
     const t = p.tasks.find((x) => x.id.toLowerCase() === id.toLowerCase());
     if (t) return { t, p };
@@ -65,7 +168,7 @@ const find = (d, id) => {
 
 /* ------------------------------------------------------------- estimates */
 // "4h" | "2d" | "1.5w" -> days
-function toDays(est) {
+export function toDays(est) {
   if (!est) return 0;
   const m = String(est).match(/^([\d.]+)\s*([hdw])$/);
   if (!m) return 0;
@@ -74,7 +177,7 @@ function toDays(est) {
 }
 
 /* ---------------------------------------------------------------- render */
-function progress(all) {
+export function progress(all) {
   const tasks = live(all);
   if (!tasks.length) return { pct: 0, done: 0, total: 0, dropped: all.length };
   const w = tasks.reduce((a, t) => a + (STATUS[t.status]?.weight ?? 0), 0);
@@ -164,8 +267,9 @@ function taskBlock(t) {
   );
 }
 
-function build() {
-  const d = load();
+export function build(ctx = loadConfig()) {
+  const { cfg: CFG, root: ROOT, out: OUT } = ctx;
+  const d = load(ctx);
   const all = allTasks(d);
   const overall = progress(all);
   const daysLeft = live(all).filter((t) => t.status !== "done").reduce((a, t) => a + toDays(t.est), 0);
@@ -324,112 +428,60 @@ ${bar(currentPct, "big")}
   };
 }
 
-/* ------------------------------------------------------------------ cli */
-const [cmd, id, ...rest] = process.argv.slice(2);
-const text = rest.join(" ");
+/* ---------------------------------------------------------------- domain */
+// The rules the CLI enforces, as functions that return a result instead of
+// printing and exiting, so a second caller (the web server) applies exactly
+// these rules rather than a copy of them.
 
-if (!cmd || cmd === "status") {
-  const d = load();
-  const all = allTasks(d);
-  const o = progress(all);
-  // LEAD WITH THE CURRENT PHASE, matching the dashboard. The all-phases figure
-  // sums Week 0 through Wave 3 — 45 tasks of pre-V1 scope that nobody is
-  // building — so it reads far lower than the work actually in flight and moves
-  // for reasons unrelated to today. The dashboard demoted it to a subline
-  // already; this printed it as THE number, so `ops/foreman/board.mjs status`, the stop
-  // hook and the dashboard were quoting three different figures for the same
-  // board. Founder, 2026-08-29: "We were at 34% not at 24, that board is
-  // fucking useless." He was reading 35% on the dashboard and 23% here.
-  const cur =
-    d.phases.find((p) => p.name === CFG.activePhase) ?? d.phases[d.phases.length - 1];
-  const cp = progress(cur.tasks);
-  console.log(`\n  ${cp.pct}%  ${cp.done}/${cp.total}  ${cur.name}`);
-  console.log(`         all phases ever, incl. pre-V1 scope: ${o.done}/${o.total} (${o.pct}%)\n`);
-  for (const p of d.phases) {
-    const pr = progress(p.tasks);
-    const blocked = p.tasks.filter((t) => t.status === "blocked").length;
-    console.log(`  ${String(pr.pct).padStart(3)}%  ${p.name}  (${pr.done}/${pr.total})${blocked ? `  ${blocked} BLOCKED` : ""}`);
-  }
-  const active = all.filter((t) => t.status === "doing" || t.status === "blocked");
-  if (active.length) {
-    console.log("\n  Active:");
-    for (const t of active) console.log(`    ${t.status === "blocked" ? "!" : ">"} ${t.id}  ${t.title}`);
-  }
-  console.log("");
-} else if (cmd === "build") {
-  const o = build();
-  console.log(`board rebuilt — ${o.currentPct}% (${o.currentDone}/${o.currentTotal} ${o.currentName})  ·  all phases ${o.done}/${o.total}`);
-} else if (["reviewer", "qa", "security"].includes(cmd)) {
-  // record a gate verdict:  node ops/foreman/board.mjs reviewer T-012 pass "notes"
-  if (!id) { console.error("need a task id"); process.exit(1); }
-  const d = load();
+export const GATE_CMDS = ["reviewer", "qa", "security"];
+export const TRANSITIONS = ["done", "start", "block", "todo", "note"];
+
+/**
+ * Which required gates a task has not passed. The body of `done`'s check,
+ * moved verbatim: the keyword test, the docs-only exemption and the order of
+ * the missing list are all unchanged, and the CLI prints this list as before.
+ *
+ * Known and recorded, not fixed here (TECH.md, Findings): this is one of four
+ * places that decide which gates apply, and the keyword lists are Encore's.
+ */
+export function missingGates(t) {
+  // THE LOOP IS NOT OPTIONAL. A task is done when the gate passed, not when
+  // the builder says so. Money/auth/tenant tasks additionally need security.
+  const g = t.gate || {};
+  const needsSecurity = /fee|refund|stripe|payment|auth|tenant|plan gat|domain|entitle|money|sign in|oauth|consent|webhook/i
+    .test(`${t.title} ${t.note || ""}`);
+  // Docs-only work has no executable surface — reviewer is the whole gate.
+  // Roles that never write code, on tasks that name no code path.
+  const DOC_ROLES = ["product-architect", "legal", "marketing", "product-manager"];
+  const NAMES_CODE = /web\/|\.tsx|\.ts\b|migration|schema|route|endpoint|component|playwright|spec\b|ci\b|gate\.yml/i;
+  const docsOnly =
+    DOC_ROLES.includes(t.owner) && !NAMES_CODE.test(`${t.title} ${t.ac || ""}`);
+  const missing = [];
+  if (g.reviewer?.verdict !== "pass") missing.push("reviewer");
+  if (!docsOnly && g.qa?.verdict !== "pass") missing.push("qa");
+  if (!docsOnly && needsSecurity && g.security?.verdict !== "pass") missing.push("security (money/auth/tenant)");
+  return { missing, docsOnly };
+}
+
+const noTask = (id) => ({ ok: false, error: `no such task: ${id}` });
+
+/**
+ * start | block | todo | note | done, applied to a loaded board in place.
+ * Returns { ok, task } or { ok:false, refused:{ missing, docsOnly } } when the
+ * gate refuses `done`, or { ok:false, error } for a bad id. It never exits.
+ */
+export function transition(d, id, cmd, text = "") {
+  if (!TRANSITIONS.includes(cmd)) return { ok: false, error: `unknown command: ${cmd}` };
   const hit = find(d, id);
-  if (!hit) { console.error(`no such task: ${id}`); process.exit(1); }
-  const verdict = (rest[0] || "").toLowerCase();
-  if (!["pass", "fail"].includes(verdict)) {
-    console.error("verdict must be pass or fail:  node ops/foreman/board.mjs " + cmd + " " + id + " pass");
-    process.exit(1);
-  }
-  // APPEND, NEVER OVERWRITE (P-2). This used to replace the verdict, so a task
-  // that failed qa three times and passed once recorded a single pass. Rework
-  // rate and first-pass rate — the two quality metrics that actually predict
-  // anything — were therefore not computable from the board at all, and the
-  // dashboard had to print a caveat saying its fail-rate column understated
-  // reality. Cheap to fix while there is no history to lose; impossible after.
-  //
-  // The shape stays BACKWARD COMPATIBLE. `gate.reviewer` is still an object with
-  // `.verdict`, and it is still the LATEST one, so every existing reader keeps
-  // working untouched. The history lives beside it in `gate.reviewer.history`,
-  // oldest first, and is only read by the code that wants it.
-  hit.t.gate = hit.t.gate || {};
-  const previous = hit.t.gate[cmd];
-  const entry = { verdict, at: today(), note: rest.slice(1).join(" ") || undefined };
-  const history = previous
-    ? [...(previous.history || []), { verdict: previous.verdict, at: previous.at, note: previous.note }]
-    : [];
-  hit.t.gate[cmd] = { ...entry, ...(history.length ? { history } : {}) };
-  d.meta.updated = today();
-  save(d);
-  build();
-  const attempts = (hit.t.gate[cmd].history || []).length + 1;
-  console.log(
-    `${hit.t.id} · ${cmd} → ${verdict}` +
-      (attempts > 1 ? `   (attempt ${attempts}; previous: ${(hit.t.gate[cmd].history || []).map((h) => h.verdict).join(", ")})` : ""),
-  );
-} else if (["done", "start", "block", "todo", "note"].includes(cmd)) {
-  if (!id) { console.error("need a task id, e.g. T-012"); process.exit(1); }
-  const d = load();
-  const hit = find(d, id);
-  if (!hit) { console.error(`no such task: ${id}`); process.exit(1); }
+  if (!hit) return noTask(id);
   const { t } = hit;
 
   if (cmd === "note") {
     t.note = t.note ? `${t.note} — ${text}` : text;
   } else {
     if (cmd === "done") {
-      // THE LOOP IS NOT OPTIONAL. A task is done when the gate passed, not when
-      // the builder says so. Money/auth/tenant tasks additionally need security.
-      const g = t.gate || {};
-      const needsSecurity = /fee|refund|stripe|payment|auth|tenant|plan gat|domain|entitle|money|sign in|oauth|consent|webhook/i
-        .test(`${t.title} ${t.note || ""}`);
-      // Docs-only work has no executable surface — reviewer is the whole gate.
-      // Roles that never write code, on tasks that name no code path.
-      const DOC_ROLES = ["product-architect", "legal", "marketing", "product-manager"];
-      const NAMES_CODE = /web\/|\.tsx|\.ts\b|migration|schema|route|endpoint|component|playwright|spec\b|ci\b|gate\.yml/i;
-      const docsOnly =
-        DOC_ROLES.includes(t.owner) && !NAMES_CODE.test(`${t.title} ${t.ac || ""}`);
-      const missing = [];
-      if (g.reviewer?.verdict !== "pass") missing.push("reviewer");
-      if (!docsOnly && g.qa?.verdict !== "pass") missing.push("qa");
-      if (!docsOnly && needsSecurity && g.security?.verdict !== "pass") missing.push("security (money/auth/tenant)");
-      if (missing.length) {
-        console.error(`\n  REFUSED — ${t.id} has not passed the gate${docsOnly ? " (docs-only: reviewer required)" : ""}.\n`);
-        console.error(`  Missing: ${missing.join(", ")}\n`);
-        console.error(`  Record verdicts first:`);
-        for (const m of missing) console.error(`    node ops/foreman/board.mjs ${m.split(" ")[0]} ${t.id} pass`);
-        console.error(`\n  This is enforced. Builder-says-done is a status report, not a completion.\n`);
-        process.exit(1);
-      }
+      const { missing, docsOnly } = missingGates(t);
+      if (missing.length) return { ok: false, task: t, refused: { missing, docsOnly } };
       t.completed = today();
     }
     if (cmd !== "done") delete t.completed;
@@ -439,10 +491,128 @@ if (!cmd || cmd === "status") {
     if (cmd === "block" && text) t.note = t.note ? `${t.note} — BLOCKED: ${text}` : `BLOCKED: ${text}`;
   }
   d.meta.updated = today();
-  save(d);
-  const o = build();
-  console.log(`${t.id} → ${t.status}${t.completed ? ` (${t.completed})` : ""}   ${o.currentName} now ${o.currentPct}% (${o.currentDone}/${o.currentTotal})`);
-} else {
-  console.log("usage: node ops/foreman/board.mjs [status|build|start|done|block|todo|note] [T-012] [text]");
-  console.log("       node ops/foreman/board.mjs [reviewer|qa|security] T-012 [pass|fail] [note]");
+  return { ok: true, task: t };
 }
+
+/**
+ * Record a reviewer | qa | security verdict. APPEND, NEVER OVERWRITE (P-2).
+ * This used to replace the verdict, so a task that failed qa three times and
+ * passed once recorded a single pass. Rework rate and first-pass rate — the
+ * two quality metrics that actually predict anything — were therefore not
+ * computable from the board at all.
+ *
+ * The shape stays BACKWARD COMPATIBLE. `gate.reviewer` is still an object with
+ * `.verdict`, and it is still the LATEST one, so every existing reader keeps
+ * working untouched. The history lives beside it in `gate.reviewer.history`,
+ * oldest first, and is only read by the code that wants it.
+ */
+export function recordVerdict(d, id, gate, verdict, note) {
+  if (!GATE_CMDS.includes(gate)) return { ok: false, error: `unknown gate: ${gate}` };
+  const hit = find(d, id);
+  if (!hit) return noTask(id);
+  verdict = String(verdict || "").toLowerCase();
+  if (!["pass", "fail"].includes(verdict)) return { ok: false, error: "verdict must be pass or fail" };
+  hit.t.gate = hit.t.gate || {};
+  const previous = hit.t.gate[gate];
+  const entry = { verdict, at: today(), note: note || undefined };
+  const history = previous
+    ? [...(previous.history || []), { verdict: previous.verdict, at: previous.at, note: previous.note }]
+    : [];
+  hit.t.gate[gate] = { ...entry, ...(history.length ? { history } : {}) };
+  d.meta.updated = today();
+  return { ok: true, task: hit.t };
+}
+
+/* ------------------------------------------------------------------ cli */
+function cli(argv) {
+  const [cmd, id, ...rest] = argv;
+  const text = rest.join(" ");
+
+  if (!cmd || cmd === "status") {
+    const ctx = loadConfig();
+    const CFG = ctx.cfg;
+    const d = load(ctx);
+    const all = allTasks(d);
+    const o = progress(all);
+    // LEAD WITH THE CURRENT PHASE, matching the dashboard. The all-phases figure
+    // sums every phase this board has ever had, including scope nobody is
+    // building, so it reads far lower than the work actually in flight and moves
+    // for reasons unrelated to today. The dashboard demoted it to a subline
+    // already; this printed it as THE number, so `ops/foreman/board.mjs status`,
+    // the stop hook and the dashboard were quoting three different figures for
+    // the same board.
+    const cur =
+      d.phases.find((p) => p.name === CFG.activePhase) ?? d.phases[d.phases.length - 1];
+    const cp = progress(cur.tasks);
+    console.log(`\n  ${cp.pct}%  ${cp.done}/${cp.total}  ${cur.name}`);
+    console.log(`         all phases ever, incl. pre-V1 scope: ${o.done}/${o.total} (${o.pct}%)\n`);
+    for (const p of d.phases) {
+      const pr = progress(p.tasks);
+      const blocked = p.tasks.filter((t) => t.status === "blocked").length;
+      console.log(`  ${String(pr.pct).padStart(3)}%  ${p.name}  (${pr.done}/${pr.total})${blocked ? `  ${blocked} BLOCKED` : ""}`);
+    }
+    const active = all.filter((t) => t.status === "doing" || t.status === "blocked");
+    if (active.length) {
+      console.log("\n  Active:");
+      for (const t of active) console.log(`    ${t.status === "blocked" ? "!" : ">"} ${t.id}  ${t.title}`);
+    }
+    console.log("");
+  } else if (cmd === "build") {
+    const o = build();
+    console.log(`board rebuilt — ${o.currentPct}% (${o.currentDone}/${o.currentTotal} ${o.currentName})  ·  all phases ${o.done}/${o.total}`);
+  } else if (GATE_CMDS.includes(cmd)) {
+    // record a gate verdict:  node ops/foreman/board.mjs reviewer T-012 pass "notes"
+    if (!id) { console.error("need a task id"); process.exit(1); }
+    const ctx = loadConfig();
+    const verdict = (rest[0] || "").toLowerCase();
+    const res = mutate(ctx, (d) => {
+      if (!find(d, id)) return noTask(id);
+      if (!["pass", "fail"].includes(verdict)) return { ok: false, badVerdict: true };
+      return recordVerdict(d, id, cmd, verdict, rest.slice(1).join(" "));
+    });
+    if (res.badVerdict) {
+      console.error("verdict must be pass or fail:  node ops/foreman/board.mjs " + cmd + " " + id + " pass");
+      process.exit(1);
+    }
+    if (!res.ok) { console.error(res.error); process.exit(1); }
+    build(ctx);
+    const rec = res.task.gate[cmd];
+    const attempts = (rec.history || []).length + 1;
+    console.log(
+      `${res.task.id} · ${cmd} → ${verdict}` +
+        (attempts > 1 ? `   (attempt ${attempts}; previous: ${(rec.history || []).map((h) => h.verdict).join(", ")})` : ""),
+    );
+  } else if (TRANSITIONS.includes(cmd)) {
+    if (!id) { console.error("need a task id, e.g. T-012"); process.exit(1); }
+    const ctx = loadConfig();
+    const res = mutate(ctx, (d) => transition(d, id, cmd, text));
+    if (res.refused) {
+      const { missing, docsOnly } = res.refused;
+      const t = res.task;
+      console.error(`\n  REFUSED — ${t.id} has not passed the gate${docsOnly ? " (docs-only: reviewer required)" : ""}.\n`);
+      console.error(`  Missing: ${missing.join(", ")}\n`);
+      console.error(`  Record verdicts first:`);
+      for (const m of missing) console.error(`    node ops/foreman/board.mjs ${m.split(" ")[0]} ${t.id} pass`);
+      console.error(`\n  This is enforced. Builder-says-done is a status report, not a completion.\n`);
+      process.exit(1);
+    }
+    if (!res.ok) { console.error(res.error); process.exit(1); }
+    const t = res.task;
+    const o = build(ctx);
+    console.log(`${t.id} → ${t.status}${t.completed ? ` (${t.completed})` : ""}   ${o.currentName} now ${o.currentPct}% (${o.currentDone}/${o.currentTotal})`);
+  } else {
+    console.log("usage: node ops/foreman/board.mjs [status|build|start|done|block|todo|note] [T-012] [text]");
+    console.log("       node ops/foreman/board.mjs [reviewer|qa|security] T-012 [pass|fail] [note]");
+  }
+}
+
+// Run as a command only when executed, never when imported. realpath on both
+// sides so a symlinked ops/foreman/ still counts as "executed".
+const isEntry = (() => {
+  try {
+    return !!process.argv[1] && fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+})();
+if (isEntry) cli(process.argv.slice(2));
