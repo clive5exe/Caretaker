@@ -1130,7 +1130,14 @@
             "C-1"
           ],
           "ac": "install.sh --upgrade replaces the tool files only, keeps backups, and rolls back if the new board cannot read the repo's; an old install becomes one the server opens",
-          "note": "Spec: specs/caretaker-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built on this branch, checked by bin/install.test.mjs and mutation-checked. Gate verdicts not recorded."
+          "note": "Spec: specs/caretaker-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built on this branch, checked by bin/install.test.mjs and mutation-checked. Gate verdicts not recorded.",
+          "gate": {
+            "reviewer": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "note": "Independent review (fresh agent, not the builder): install.sh --upgrade refuses a repo with no install, replaces only board.mjs, dashboard.mjs, run.mjs, loop.sh and RULES.md, backs each replaced file up under .upgrade-backup-<time>, checks the new board by running status and rolls back on failure, and never writes config.json, prompt.txt or the board. install.test upgrades the real pre-C-1 board into one readmodel.open accepts and sees the owner's task; removing the rollback restore or the status check goes red by name. Nits: the header says upgrade 'never opens' config and board, but the status check reads both (never WRITES is what is true, install.sh:17-18 vs :49-51); a rollback does not delete files the upgrade newly created; set -u without -e means a failed backup copy is not fatal; two upgrades in one second share a backup dir."
+            }
+          }
         },
         {
           "id": "W-15",
@@ -1143,7 +1150,14 @@
             "C-2"
           ],
           "ac": "the Metrics page shows the same numbers docs/board.html does, from the same functions",
-          "note": "Spec: specs/caretaker-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built in PR #9, which also carries C-1, C-2, C-3, C-6 and U-2. Gate verdicts not recorded: nobody closes their own work."
+          "note": "Spec: specs/caretaker-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built in PR #9, which also carries C-1, C-2, C-3, C-6 and U-2. Gate verdicts not recorded: nobody closes their own work.",
+          "gate": {
+            "reviewer": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "note": "Independent review (fresh agent, not the builder): the Metrics page shows dashboard.mjs's tokenStats, reworkSpend, gateStats and quality over the range, kpis.mjs's delivery and AI figures each null with a reason, the anti-KPIs, and not recorded with no run log. Nits: GateBars computes a pass percentage in the browser (Metrics.tsx:31) while board.html shows a fail percentage, and with rounding the two can sum to 101; a client-side derived figure is what TECH §5 says the UI never does, so ship the rate from the server. The per-day chart draws days with runs but no breakdown as 0 (disclosed in its footnote)."
+            }
+          }
         },
         {
           "id": "W-16",
@@ -1155,7 +1169,14 @@
             "W-5"
           ],
           "ac": "the command menu offers exactly what commandsFor returns, and Getting started walks a new repo to its first closed task",
-          "note": "Spec: specs/caretaker-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built in PR #9, which also carries C-1, C-2, C-3, C-6 and U-2. Gate verdicts not recorded: nobody closes their own work."
+          "note": "Spec: specs/caretaker-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built in PR #9, which also carries C-1, C-2, C-3, C-6 and U-2. Gate verdicts not recorded: nobody closes their own work.",
+          "gate": {
+            "reviewer": {
+              "verdict": "fail",
+              "at": "2026-09-29",
+              "note": "Independent review (fresh agent, not the builder): the command menu half is right: CommandMenu.tsx lists pages, work items, runs and, on a work item, exactly item.commands from commandsFor, adds none of its own, and choosing one opens the same CommandForm the page uses. The Getting started half does not meet the AC 'walks a new repo to its first closed task': GettingStarted.tsx:14-43 covers building the client, starting the server, ssh -L and the server's promises (PRODUCT.md §10), but never installs into a repo (install.sh), never shows the board, and never reaches a closed task: no board.mjs done, no gate verdicts, no refusal. Either the page walks install to first close, or the AC is narrowed to what PRODUCT §10 asks for, by someone other than the builder."
+            }
+          }
         },
         {
           "id": "W-17",
@@ -1167,7 +1188,14 @@
             "W-5"
           ],
           "ac": "the client makes no external request and uses no color outside theme.css, enforced by the boundary test",
-          "note": "Spec: specs/caretaker-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built in PR #9, which also carries C-1, C-2, C-3, C-6 and U-2. Gate verdicts not recorded: nobody closes their own work."
+          "note": "Spec: specs/caretaker-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built in PR #9, which also carries C-1, C-2, C-3, C-6 and U-2. Gate verdicts not recorded: nobody closes their own work.",
+          "gate": {
+            "reviewer": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "note": "Independent review (fresh agent, not the builder): theme.css holds every color as the TECH §4 tokens; Inter and Anton are bundled from @fontsource (Latin files only) and the built dist has no external stylesheet, font or script (only library namespace and error-doc strings); the wordmark is Anton text; the boundary test catches a planted https URL, CSS url(http…), hex, rgb() and named color and the real tree is clean. Nit: the no-build fallback page in serve.mjs:177-184 uses inline style attributes, which its own CSP (default-src 'self', no unsafe-inline) blocks, so that page renders unstyled."
+            }
+          }
         }
       ]
     }
