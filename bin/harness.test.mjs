@@ -327,6 +327,46 @@ sleep 60
   }
 }
 
+/*
+ * The fixture above keeps every descendant in the child's process group, so
+ * the group kill alone ends it and the bounded settle after SIGKILL never
+ * runs. This one leaves the group with `setsid`, holding stdout open, which is
+ * the only case the bounded settle exists for.
+ */
+{
+  const hasSetsid = spawnSync("sh", ["-c", "command -v setsid"]).status === 0;
+  if (!hasSetsid) {
+    skip("a descendant that ESCAPED the process group cannot hold the result hostage", "setsid not on PATH");
+  } else {
+    const ws = makeWorkspace("escaped");
+    const pidFile = join(TMP, "escaped.pid");
+    const ESCAPE = fakeCli(`
+cat > /dev/null
+setsid sh -c 'echo $$ > ${pidFile}; exec sleep 30' &
+sleep 30
+`);
+    const t0 = Date.now();
+    const r = await run(ws, "escape", basePolicy("escaped", ESCAPE, { timeoutMs: 800, graceMs: 200 }));
+    const elapsed = Date.now() - t0;
+    ok(
+      `a descendant that ESCAPED the process group cannot hold the result hostage (${elapsed}ms for an 800ms ceiling on a 30s sleep)`,
+      elapsed < 15_000,
+      `${elapsed}ms — the result waited for the pipes the escaped process still holds`,
+    );
+    ok("...and the run is still reported as killed", r.verdict.state === "killed", `state=${r.verdict.state}`);
+    // Nothing in sandbox:none can reach a process that left the group, so the
+    // test cleans up after itself rather than leaving a 30s sleep behind.
+    const epid = existsSync(pidFile) ? Number(readFileSync(pidFile, "utf8").trim()) : null;
+    if (epid) {
+      try {
+        process.kill(epid, "SIGKILL");
+      } catch {
+        /* already gone */
+      }
+    }
+  }
+}
+
 /* =================================================================== cost */
 
 {

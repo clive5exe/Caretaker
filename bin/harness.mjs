@@ -578,22 +578,29 @@ function execWithTimeout({ file, args, cwd, stdinData, stdoutPath, stderrPath, t
     let finalTimer = null;
 
     /*
-     * A TIMEOUT THAT CAN ITSELF BE BLOCKED IS NOT A TIMEOUT, and this one could.
+     * TWO CONTROLS, AND THE MEASURED 60s HANG WAS THE FIRST ONE MISSING.
      *
-     * `close` fires when the child has exited AND its stdio pipes are closed. A
-     * BACKGROUNDED GRANDCHILD inherits those pipes and holds them open, so if
-     * the group kill does not reach it — job control can put it in its own
-     * group — `close` never arrives and the promise waits for the grandchild's
-     * full sleep. Measured: an 800ms ceiling returned after 60112ms, the length
-     * of the sleep it was supposed to cut short. It reproduced 2 runs in 5,
-     * which is worse than always failing, because a flaky timeout teaches people
-     * to re-run until green.
+     * `close` fires when the child has exited AND its stdio pipes are closed.
+     * Every descendant inherits those pipes, so any descendant still alive
+     * holds `close` back for as long as it lives.
      *
-     * So after SIGKILL the result is settled on a bounded timer, whatever the
-     * pipes are doing. The exit code is unknown at that point and is reported as
-     * unknown; the verdict is `killed`, which is the fact that matters. Waiting
-     * for certainty about a process we have already SIGKILLed is how the hang
-     * this feature exists to prevent gets reintroduced one layer up.
+     * 1. THE GROUP KILL (`killTree` signals `-child.pid`). Before d502820 it
+     *    signalled `child.pid` alone: the fixture's shell died and its two
+     *    `sleep 60`s kept the pipes open, so an 800ms ceiling returned after
+     *    60112ms. That was recorded as a 2-in-5 flake; it is deterministic.
+     *    `git show d502820^:bin/harness.mjs` run against the current
+     *    harness.test.mjs fails "returns near the ceiling" 3 runs in 3
+     *    (60037, 60043, 60038ms). Mutating only this line on the current file
+     *    fails "THE WHOLE PROCESS TREE IS DEAD".
+     *
+     * 2. THE BOUNDED SETTLE (`finalTimer` below). A descendant that calls
+     *    `setsid` leaves the group, so no group kill reaches it and `close`
+     *    waits out its sleep. After SIGKILL the result settles on a timer
+     *    whatever the pipes are doing, with the exit code reported as unknown
+     *    and the verdict as `killed`. Mutating `done(null, "SIGKILL")` out
+     *    fails "a descendant that ESCAPED the process group cannot hold the
+     *    result hostage"; before that test existed, the same mutant passed
+     *    the whole suite.
      */
     const softTimer = setTimeout(() => {
       killed = true;
