@@ -63,6 +63,7 @@ import { tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { randomBytes } from "node:crypto";
 import { pathToFileURL } from "node:url";
+import { DEFAULT_DIR as DEFAULT_EVENTS_DIR, STAGES, append as appendEvents } from "./events.mjs";
 import { buildArgs, checkLimits, delegatedControllers } from "./sandbox.mjs";
 import { readDevcontainer, toLimits } from "./spec.mjs";
 
@@ -110,6 +111,11 @@ const DEFAULTS = {
   extraRunFlags: [],
   extraCliArgs: [],
   allowLogDirInWorkspace: false,
+  // The event log (B-6, `bin/events.mjs`). null is its default directory;
+  // false turns it off. `task` and `stage` are copied onto both events.
+  events: null,
+  task: null,
+  stage: "build",
 };
 
 const newRunId = () => `r_${randomBytes(4).toString("hex")}`;
@@ -128,6 +134,14 @@ export function normalisePolicy(policy = {}) {
   p.runId = policy.runId ?? newRunId();
   if (!Number.isFinite(p.timeoutMs) || p.timeoutMs <= 0) {
     throw new HarnessError(`timeoutMs must be a positive number, got ${policy.timeoutMs}`);
+  }
+  // Checked here, not left to the event writer: a bad stage there would only
+  // turn into a warning on every run, and nobody reads warnings they expect.
+  if (p.stage !== null && !STAGES.includes(p.stage)) {
+    throw new HarnessError(`stage must be one of ${STAGES.join(", ")} or null, got ${JSON.stringify(p.stage)}`);
+  }
+  if (p.task !== null && (typeof p.task !== "string" || !p.task)) {
+    throw new HarnessError(`task must be a non-empty string or null, got ${JSON.stringify(p.task)}`);
   }
   return p;
 }
@@ -578,22 +592,29 @@ function execWithTimeout({ file, args, cwd, stdinData, stdoutPath, stderrPath, t
     let finalTimer = null;
 
     /*
-     * A TIMEOUT THAT CAN ITSELF BE BLOCKED IS NOT A TIMEOUT, and this one could.
+     * TWO CONTROLS, AND THE MEASURED 60s HANG WAS THE FIRST ONE MISSING.
      *
-     * `close` fires when the child has exited AND its stdio pipes are closed. A
-     * BACKGROUNDED GRANDCHILD inherits those pipes and holds them open, so if
-     * the group kill does not reach it — job control can put it in its own
-     * group — `close` never arrives and the promise waits for the grandchild's
-     * full sleep. Measured: an 800ms ceiling returned after 60112ms, the length
-     * of the sleep it was supposed to cut short. It reproduced 2 runs in 5,
-     * which is worse than always failing, because a flaky timeout teaches people
-     * to re-run until green.
+     * `close` fires when the child has exited AND its stdio pipes are closed.
+     * Every descendant inherits those pipes, so any descendant still alive
+     * holds `close` back for as long as it lives.
      *
-     * So after SIGKILL the result is settled on a bounded timer, whatever the
-     * pipes are doing. The exit code is unknown at that point and is reported as
-     * unknown; the verdict is `killed`, which is the fact that matters. Waiting
-     * for certainty about a process we have already SIGKILLed is how the hang
-     * this feature exists to prevent gets reintroduced one layer up.
+     * 1. THE GROUP KILL (`killTree` signals `-child.pid`). Before d502820 it
+     *    signalled `child.pid` alone: the fixture's shell died and its two
+     *    `sleep 60`s kept the pipes open, so an 800ms ceiling returned after
+     *    60112ms. That was recorded as a 2-in-5 flake; it is deterministic.
+     *    `git show d502820^:bin/harness.mjs` run against the current
+     *    harness.test.mjs fails "returns near the ceiling" 3 runs in 3
+     *    (60037, 60043, 60038ms). Mutating only this line on the current file
+     *    fails "THE WHOLE PROCESS TREE IS DEAD".
+     *
+     * 2. THE BOUNDED SETTLE (`finalTimer` below). A descendant that calls
+     *    `setsid` leaves the group, so no group kill reaches it and `close`
+     *    waits out its sleep. After SIGKILL the result settles on a timer
+     *    whatever the pipes are doing, with the exit code reported as unknown
+     *    and the verdict as `killed`. Mutating `done(null, "SIGKILL")` out
+     *    fails "a descendant that ESCAPED the process group cannot hold the
+     *    result hostage"; before that test existed, the same mutant passed
+     *    the whole suite.
      */
     const softTimer = setTimeout(() => {
       killed = true;
@@ -909,6 +930,37 @@ export async function run(workspace, prompt, policy = {}) {
   };
   const warnings = [];
 
+  /*
+   * THE RUN'S TWO EVENTS, placed around the snapshots on purpose. `start` is
+   * written BEFORE the first snapshot and `end` AFTER the second, so if the
+   * event directory is inside the workspace neither line lands between them
+   * and neither is measured as the agent's work. `start` is what makes a run
+   * whose harness process died visible at all: a start with no end.
+   *
+   * A log that cannot be written does not fail the run. The run happened, and
+   * losing its result over a full disk would be the worse outcome, so the
+   * failure goes into verdict.warnings where the caller sees it.
+   */
+  const eventBase = {
+    run: p.runId,
+    ...(p.task ? { task: p.task } : {}),
+    ...(p.stage ? { stage: p.stage } : {}),
+    kind: "agent",
+  };
+  const logEvent = (ev) => {
+    if (p.events === false) return;
+    try {
+      appendEvents(p.events ?? DEFAULT_EVENTS_DIR, { ...eventBase, ...ev });
+    } catch (e) {
+      warnings.push(`the event log was not written (${e.message}); this run has no ${ev.phase} event`);
+    }
+  };
+  logEvent({
+    phase: "start",
+    level: "info",
+    detail: `run started: adapter ${p.adapter}, cli ${typeof p.cli === "string" ? p.cli : "custom"}, sandbox ${p.sandbox}, ceiling ${p.timeoutMs}ms`,
+  });
+
   // Snapshot BEFORE anything runs. Everything after this point is the delta.
   const shadow = openShadow(join(logDir, "shadow"), ws);
   const before = snapshot(shadow);
@@ -924,7 +976,15 @@ export async function run(workspace, prompt, policy = {}) {
    * snapshot below covers it. The adapter throws only when nothing ran at all
    * (an unknown CLI, no image), and then there is no diff to report.
    */
-  const result = await adapter({ workspace: ws, prompt, policy: p, paths, warnings });
+  let result;
+  try {
+    result = await adapter({ workspace: ws, prompt, policy: p, paths, warnings });
+  } catch (e) {
+    // The adapter throws only when nothing ran (see above). Without this line
+    // the log would hold a start with no end, which reads as a dead harness.
+    logEvent({ phase: "end", level: "error", state: "not-started", detail: `run did not start: ${e.message}`.replace(/[\r\n]+/g, " ") });
+    throw e;
+  }
 
   const after = snapshot(shadow);
   const diff = measureDiff(shadow, before, after);
@@ -997,6 +1057,16 @@ export async function run(workspace, prompt, policy = {}) {
     tail: stdoutText.slice(-4000),
     stderrTail: stderrText.slice(-4000),
   };
+
+  logEvent({
+    phase: "end",
+    level: state === "completed" ? "info" : state === "killed" ? "warn" : "error",
+    state,
+    tokens: Number.isInteger(cost.tokens.total) ? cost.tokens.total : null,
+    files: diff.measured ? diff.files.length : null,
+    durationMs: exec.durationMs,
+    detail: `run ${state}${reason ? `: ${reason}` : ""}`.replace(/[\r\n]+/g, " "),
+  });
 
   return { diff, transcript, verdict, cost };
 }

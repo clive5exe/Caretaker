@@ -33,6 +33,7 @@ import {
   run,
   spliceRunFlags,
 } from "./harness.mjs";
+import { read as readEvents } from "./events.mjs";
 import { checkLimits, delegatedControllers, detect } from "./sandbox.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -83,12 +84,15 @@ function fakeCli(body) {
 }
 
 const logDirFor = (label) => join(TMP, `logs-${label}`);
+/** Every run in this file logs here, never to the repo's own ops/foreman/events. */
+const EVENTS_DIR = join(TMP, "events");
 
 const basePolicy = (label, cli, over = {}) => ({
   adapter: "cli",
   cli,
   sandbox: "none",
   logDir: logDirFor(label),
+  events: EVENTS_DIR,
   timeoutMs: 20_000,
   ...over,
 });
@@ -176,7 +180,7 @@ ok("there is always a timeout, even when nobody asked for one", normalisePolicy(
   const ws = makeWorkspace("unknown-adapter");
   let threw = null;
   try {
-    await run(ws, "hi", { adapter: "clii", logDir: logDirFor("unknown-adapter") });
+    await run(ws, "hi", { adapter: "clii", logDir: logDirFor("unknown-adapter"), events: EVENTS_DIR });
   } catch (e) {
     threw = e;
   }
@@ -191,7 +195,7 @@ ok("there is always a timeout, even when nobody asked for one", normalisePolicy(
   let threw = null;
   let returned = null;
   try {
-    returned = await run(ws, "hi", { adapter: "sdk", logDir: logDirFor("sdk") });
+    returned = await run(ws, "hi", { adapter: "sdk", logDir: logDirFor("sdk"), events: EVENTS_DIR });
   } catch (e) {
     threw = e;
   }
@@ -324,6 +328,46 @@ sleep 60
       !alive(gpid),
       "killing only the child leaves a grandchild holding the lock, which is the sixteen-hour failure",
     );
+  }
+}
+
+/*
+ * The fixture above keeps every descendant in the child's process group, so
+ * the group kill alone ends it and the bounded settle after SIGKILL never
+ * runs. This one leaves the group with `setsid`, holding stdout open, which is
+ * the only case the bounded settle exists for.
+ */
+{
+  const hasSetsid = spawnSync("sh", ["-c", "command -v setsid"]).status === 0;
+  if (!hasSetsid) {
+    skip("a descendant that ESCAPED the process group cannot hold the result hostage", "setsid not on PATH");
+  } else {
+    const ws = makeWorkspace("escaped");
+    const pidFile = join(TMP, "escaped.pid");
+    const ESCAPE = fakeCli(`
+cat > /dev/null
+setsid sh -c 'echo $$ > ${pidFile}; exec sleep 30' &
+sleep 30
+`);
+    const t0 = Date.now();
+    const r = await run(ws, "escape", basePolicy("escaped", ESCAPE, { timeoutMs: 800, graceMs: 200 }));
+    const elapsed = Date.now() - t0;
+    ok(
+      `a descendant that ESCAPED the process group cannot hold the result hostage (${elapsed}ms for an 800ms ceiling on a 30s sleep)`,
+      elapsed < 15_000,
+      `${elapsed}ms — the result waited for the pipes the escaped process still holds`,
+    );
+    ok("...and the run is still reported as killed", r.verdict.state === "killed", `state=${r.verdict.state}`);
+    // Nothing in sandbox:none can reach a process that left the group, so the
+    // test cleans up after itself rather than leaving a 30s sleep behind.
+    const epid = existsSync(pidFile) ? Number(readFileSync(pidFile, "utf8").trim()) : null;
+    if (epid) {
+      try {
+        process.kill(epid, "SIGKILL");
+      } catch {
+        /* already gone */
+      }
+    }
   }
 }
 
@@ -511,6 +555,69 @@ exit 2
     "a TUI in a container with no tty hangs instead of failing");
 }
 
+/* ============================================================ event log */
+
+{
+  const byRun = (dir, runId) => readEvents(dir).events.filter((e) => e.run === runId);
+
+  const done = join(TMP, "events-done");
+  const ws = makeWorkspace("events-done");
+  const r = await run(ws, "go", basePolicy("events-done", LIAR, { events: done, task: "T-9" }));
+  const evs = byRun(done, r.verdict.runId);
+  const [start, end] = evs;
+  ok("every run appends a START and an END event, keyed by its run id",
+    evs.length === 2 && start.phase === "start" && end.phase === "end",
+    JSON.stringify(evs));
+  ok("...both carry the task and stage as FIELDS", evs.every((e) => e.task === "T-9" && e.stage === "build" && e.kind === "agent"));
+  ok("...and the end records the outcome, the measured file count and the tokens",
+    end?.state === "completed" && end.level === "info" && end.files === r.diff.files.length && end.tokens === r.cost.tokens.total,
+    JSON.stringify(end));
+
+  const killedDir = join(TMP, "events-killed");
+  const hang = fakeCli("cat > /dev/null\nsleep 30");
+  const k = await run(makeWorkspace("events-killed"), "go", basePolicy("events-killed", hang, { events: killedDir, timeoutMs: 500, graceMs: 100 }));
+  const kEnd = byRun(killedDir, k.verdict.runId).find((e) => e.phase === "end");
+  ok("a killed run's end event is a WARN that says killed", kEnd?.state === "killed" && kEnd.level === "warn", JSON.stringify(kEnd));
+
+  const sdkDir = join(TMP, "events-sdk");
+  try {
+    await run(makeWorkspace("events-sdk"), "go", { adapter: "sdk", logDir: logDirFor("events-sdk"), events: sdkDir });
+  } catch {
+    /* the sdk adapter throws; asserted above */
+  }
+  const sdkEvs = readEvents(sdkDir).events;
+  ok("a run that never started still gets an END, so the log holds no orphan start",
+    sdkEvs.length === 2 && sdkEvs[1].state === "not-started" && sdkEvs[1].level === "error",
+    JSON.stringify(sdkEvs));
+
+  const offDir = join(TMP, "events-off");
+  await run(makeWorkspace("events-off"), "go", basePolicy("events-off", SILENT, { events: false }));
+  let stageErr = null;
+  try {
+    await run(makeWorkspace("events-stage"), "go", basePolicy("events-stage", SILENT, { stage: "deploy" }));
+  } catch (e) {
+    stageErr = e;
+  }
+  ok("a stage the log does not know is refused up front, not warned about on every run",
+    stageErr instanceof HarnessError && /stage/.test(stageErr.message), String(stageErr?.message));
+
+  ok("events:false writes nothing", !existsSync(offDir) && readEvents(offDir).events.length === 0);
+
+  // A FILE where the directory should be: mkdir fails, the run must not.
+  const blocked = join(TMP, "events-blocked");
+  writeFileSync(blocked, "not a directory\n");
+  const b = await run(makeWorkspace("events-blocked"), "go", basePolicy("events-blocked", SILENT, { events: blocked }));
+  ok("an event log that cannot be written does NOT fail the run, and says so",
+    b.verdict.state === "completed" && b.verdict.warnings.filter((w) => /event log was not written/.test(w)).length === 2,
+    JSON.stringify(b.verdict.warnings));
+
+  const wsIn = makeWorkspace("events-inside");
+  const inside = await run(wsIn, "go", basePolicy("events-inside", SILENT, { events: join(wsIn, "events") }));
+  ok("an event directory INSIDE the workspace is not measured as the agent's work",
+    readEvents(join(wsIn, "events")).events.length === 2 && !inside.diff.files.some((f) => f.path.startsWith("events/")),
+    inside.diff.files.map((f) => f.path).join(","));
+}
+
 /* =============================================================== live run */
 
 /*
@@ -544,6 +651,7 @@ if (!havePodman) {
       net: "none",
       image: LIVE_IMAGE,
       logDir: logDirFor("live-edit"),
+      events: EVENTS_DIR,
       timeoutMs: 90_000,
     });
     ok(
@@ -583,6 +691,7 @@ if (!havePodman) {
       net: "none",
       image: LIVE_IMAGE,
       logDir: logDirFor("live-kill"),
+      events: EVENTS_DIR,
       timeoutMs: 6000,
       graceMs: 1000,
       runId,
