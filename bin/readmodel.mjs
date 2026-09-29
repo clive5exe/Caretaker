@@ -377,10 +377,15 @@ export function createReadModel({ cfgPath, board, dash, now = () => new Date(), 
       // rework rule below is where they surface. Counting one here would attach
       // a drift-dismissal command to it, and a later one could mask a drift fail.
       const driftGate = ev.filter((e) => e.task === t.id && e.kind === "gate" && e.verdict && e.source !== "refute").sort((a, b) => byTime(a.t, b.t));
-      const lastDrift = driftGate[driftGate.length - 1];
-      if (lastDrift?.verdict === "fail") {
-        reasons.push(`the drift gate failed at ${lastDrift.t}: ${lastDrift.detail ?? ""}`.trim());
-        since ??= lastDrift.t;
+      // Open or not is core's rule (board.driftOpen, H-4): a pass clears only
+      // the paths it checked. An older installed board.mjs without it keeps
+      // the old rule, the latest event.
+      const lastFail = [...driftGate].reverse().find((e) => e.verdict === "fail");
+      const openDrift = typeof board.driftOpen === "function" ? board.driftOpen(ev, t.id) : driftGate.at(-1)?.verdict === "fail" ? driftGate.at(-1).detail ?? "the drift gate failed" : null;
+      const lastDrift = openDrift ? lastFail : driftGate.at(-1);
+      if (openDrift) {
+        reasons.push(`the drift gate failed at ${lastFail?.t}: ${openDrift}`.trim());
+        since ??= lastFail?.t;
       }
       for (const g of required) {
         const rec = gate[g];

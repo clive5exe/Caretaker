@@ -439,15 +439,26 @@ if (!cmd || cmd === "status") {
       // on a docs-only task is still a failing check (independent review).
       if (docsOnly && g.qa?.verdict === "fail") missing.push("qa");
       // H-4: the drift gate's latest verdict for this task, from the event log.
+      // H-4, mirrored: a pass clears only the flagged paths it checked.
       let drift = null;
       try {
         const dir = path.join(ROOT, CFG.events ?? "ops/caretaker/events");
+        const evs = [];
         for (const f of fs.readdirSync(dir).filter((x) => /^events-\d{4}-\d{2}-\d{2}\.jsonl$/.test(x)).sort()) {
           for (const line of fs.readFileSync(path.join(dir, f), "utf8").split("\n")) {
-            let e;
-            try { e = JSON.parse(line); } catch { continue; }
-            if (e?.kind === "gate" && e.task === t.id && e.verdict && e.source === undefined && (!drift || String(e.t) >= String(drift.t))) drift = e;
+            try { evs.push(JSON.parse(line)); } catch { continue; }
           }
+        }
+        const open = new Map();
+        for (const e of evs.filter((x) => x?.kind === "gate" && x.task === t.id && x.verdict && x.source === undefined).sort((x, y) => (String(x.t) < String(y.t) ? -1 : String(x.t) > String(y.t) ? 1 : 0))) {
+          if (e.verdict === "fail") for (const p of Array.isArray(e.flagged) && e.flagged.length ? e.flagged : ["*"]) open.set(p, e);
+          else if (!Array.isArray(e.checked)) open.clear();
+          else { open.delete("*"); for (const p of e.checked) open.delete(p); }
+        }
+        if (open.size) {
+          const last = [...open.values()].sort((x, y) => (String(x.t) < String(y.t) ? 1 : -1))[0];
+          const paths = [...open.keys()].filter((p) => p !== "*");
+          drift = { verdict: "fail", detail: `${last.detail ?? "the drift gate failed"}${paths.length ? ` (still open: ${paths.join(", ")})` : ""}` };
         }
       } catch { /* no event log */ }
       if (drift?.verdict === "fail") missing.push("drift gate");

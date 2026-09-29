@@ -347,6 +347,7 @@ export function analyse({
   return {
     ok,
     resolver: resolver.kind,
+    considered,
     counts: {
       specs: specSet.size,
       changed: changedSet.size,
@@ -496,8 +497,14 @@ export function eventLines(report, { at, run = null, task = null, stage = "revie
     lines.push({ ...base, kind: "drift", level: "info",
       detail: `dismissed ${d.finding} on ${d.path}${d.by ? ` by ${d.by}` : ""}: ${d.reason}` });
   }
+  // Which paths this verdict is ABOUT (H-4, independent re-review): a later
+  // pass that checked only README.md cleared a fail on src/fee.js, because the
+  // latest event won whatever it looked at. `checked` is every governed path
+  // considered; `flagged`, on a fail, the paths that failed it.
+  const flagged = [...new Set([...report.drift.map((d) => d.path), ...report.conflicts.filter((c) => c.changed && !c.dismissed).map((c) => c.path)])].sort();
   lines.push({ ...base, kind: "gate", level: report.ok ? "info" : "error",
-    verdict: report.ok ? "pass" : "fail", detail: summary(report) });
+    verdict: report.ok ? "pass" : "fail", detail: summary(report),
+    checked: report.considered ?? [], ...(report.ok ? {} : { flagged }) });
   return lines;
 }
 
@@ -513,6 +520,43 @@ export function eventLines(report, { at, run = null, task = null, stage = "revie
 export function writeEvents(dir, lines) {
   const oneLine = lines.map((l) => ({ ...l, detail: String(l.detail).replace(/\s*[\r\n]+\s*/g, " ") }));
   return appendEvents(dir, oneLine)[0] ?? null;
+}
+
+/**
+ * H-4: the drift gate over ONE run's change, recorded against its task and
+ * run, so `done` sees it without anyone remembering to run a check
+ * (independent re-review: nothing ran the gate after a run). `changed` is
+ * the run's measured diff. The project's config decides the direction, the
+ * specs directory and where events go. Returns the report, and the file its
+ * events went to.
+ */
+export function gateForRun({ repo, changed, task, run = null, configPath = null }) {
+  const root = resolve(repo);
+  const cfgPath = configPath ?? join(root, "ops", "caretaker", "config.json");
+  let cfg = {};
+  try {
+    cfg = JSON.parse(readFileSync(cfgPath, "utf8"));
+  } catch {
+    cfg = {};
+  }
+  let taskRec = null;
+  try {
+    const board = JSON.parse(readFileSync(join(root, cfg.board ?? "docs/board.json"), "utf8"));
+    taskRec = (board.phases ?? []).flatMap((p) => p.tasks ?? []).find((t) => t.id === task) ?? null;
+  } catch {
+    taskRec = null;
+  }
+  const specsDir = cfg.specs ?? "specs";
+  const { specs } = loadSpecs(specsDir, { repo: root });
+  let tree = null;
+  try {
+    tree = treeFromGit(root);
+  } catch {
+    tree = null;
+  }
+  const report = gate({ specs, changed: changed.map(norm), tree, ignore: [`${norm(specsDir)}/**`], task, direction: directionFor(cfg, taskRec) });
+  const logged = writeEvents(join(root, cfg.events ?? "ops/caretaker/events"), eventLines(report, { run, task }));
+  return { report, logged };
 }
 
 /* --------------------------------------------------------------------- git */

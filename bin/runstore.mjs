@@ -362,6 +362,14 @@ if (isEntry) {
           : null,
       });
       console.log(`[runstore] ${out.verdict.runId} ${out.verdict.state} -> ${out.archived}`);
+      // H-4: a run for a task is checked by the drift gate on its own diff,
+      // so `done` refuses while the spec it drifted from is unchanged. Only a
+      // run whose diff was measured has a change set to check.
+      if (flags.task && out.diff?.measured) {
+        const { gateForRun } = await import("./drift.mjs");
+        const g = gateForRun({ repo: workspace, changed: out.diff.files.map((f) => f.path), task: flags.task, run: out.verdict.runId, configPath: flags.config ? resolve(flags.config) : null });
+        console.log(`[runstore] drift gate for ${flags.task}: ${g.report.ok ? "pass" : "FAIL"} on ${g.report.counts.considered} governed path(s)${g.logged ? ` -> ${g.logged}` : ""}`);
+      }
       process.exit(out.verdict.ok ? 0 : 1);
     } catch (e) {
       console.error(`[runstore] ${e.name}: ${e.message}`);

@@ -586,19 +586,45 @@ export function driftGateFailing(ctx, id) {
   } catch {
     return null;
   }
-  let last = null;
+  const evs = [];
   for (const f of names) {
     for (const line of fs.readFileSync(path.join(dir, f), "utf8").split("\n")) {
-      let e;
       try {
-        e = JSON.parse(line);
+        evs.push(JSON.parse(line));
       } catch {
-        continue;
+        /* a half-written line */
       }
-      if (e?.kind === "gate" && e.task === id && e.verdict && e.source === undefined && (!last || String(e.t) >= String(last.t))) last = e;
     }
   }
-  return last?.verdict === "fail" ? last.detail ?? "the drift gate failed" : null;
+  return driftOpen(evs, id);
+}
+
+/**
+ * The drift gate's open failure for a task, from its gate events, or null.
+ * A pass clears only the flagged paths it CHECKED: the latest event used to
+ * win whatever it looked at, so `drift check --path README.md` cleared a real
+ * fail on src/fee.js (H-4, independent re-review). An event from before paths
+ * were recorded falls back to the old rule: a fail with no `flagged` is
+ * cleared by any pass, and a pass with no `checked` clears everything.
+ */
+export function driftOpen(events, id) {
+  const gates = events
+    .filter((e) => e?.kind === "gate" && e.task === id && e.verdict && e.source === undefined)
+    .sort((a, b) => (String(a.t) < String(b.t) ? -1 : String(a.t) > String(b.t) ? 1 : 0));
+  const open = new Map(); // path (or "*" for a fail with no paths) -> the fail event
+  for (const e of gates) {
+    if (e.verdict === "fail") {
+      for (const p of Array.isArray(e.flagged) && e.flagged.length ? e.flagged : ["*"]) open.set(p, e);
+    } else if (!Array.isArray(e.checked)) open.clear();
+    else {
+      open.delete("*");
+      for (const p of e.checked) open.delete(p);
+    }
+  }
+  if (!open.size) return null;
+  const last = [...open.values()].sort((a, b) => (String(a.t) < String(b.t) ? 1 : -1))[0];
+  const paths = [...open.keys()].filter((p) => p !== "*");
+  return `${last.detail ?? "the drift gate failed"}${paths.length ? ` (still open: ${paths.join(", ")})` : ""}`;
 }
 
 export function transition(d, id, cmd, text = "", opts = {}) {

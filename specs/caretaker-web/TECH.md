@@ -704,7 +704,7 @@ To avoid a name collision, the API field is `lifecycle`, not `stage`.
 |---|---|---|---|
 | `question` | a `questions[]` entry has no `answer` | answered | `answer` |
 | `spec-approval` | rule 8 above holds | approved, or rejected with a reason | `spec-approve` / `spec-reject` |
-| `gate-failure` | the latest `security` verdict is `fail`; **or** the latest drift `gate` event for the task has `verdict:"fail"` and no later pass; **or** some required gate has at least `cfg.inbox.reworkThreshold` fails (default 2) | a later pass, or the task is dropped | open the work item; drift shows the CLI command |
+| `gate-failure` | the latest `security` verdict is `fail`; **or** the drift gate is open for the task: a `fail` whose flagged paths no later pass has checked (`board.driftOpen`, the same rule `done` uses; runstore records one after every run for a task); **or** some required gate has at least `cfg.inbox.reworkThreshold` fails (default 2) | a later pass that checked the flagged paths, or the task is dropped | open the work item; drift shows the CLI command |
 | `pr-review` | `lifecycle === "human"` and a `pr` is recorded | `done` (nothing records a merge yet) | review outside Caretaker, then `done` |
 | `decision` | an archived run's `harvest.json` has a decision with no `recordedIn`, and `harvest-decisions.jsonl` has no entry for it (`harvest.pending`) | kept (a draft ADR is written) or discarded with a reason | the `harvest.mjs keep` / `discard` command, shown as text |
 
