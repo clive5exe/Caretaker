@@ -125,7 +125,12 @@ export function createReadModel({ cfgPath, board, dash, now = () => new Date(), 
   // dashboard.mjs reads cfg.runs with no default; the server applies the one
   // every other reader here uses, so a config without it still finds the log.
   const runRows = () => (sources().runs === "present" ? dash.readRuns(root, { ...cfg, runs: cfg.runs ?? "ops/caretaker/runs.jsonl" }) : null);
-  const eventLog = () => (sources().events === "present" ? events.read(eventsDir).events : null);
+  // Redacted HERE, where every route that serves events gets them (/events,
+  // /snapshot, /work/:id, /runs/:id, /specs, /inbox). The stream redacted and
+  // these did not: a key in the event log came back verbatim from the REST
+  // routes (independent review). The replacement holds no quote or backslash
+  // (secrets.test asserts it), so the JSON round trip cannot break.
+  const eventLog = () => (sources().events === "present" ? events.read(eventsDir).events.map((e) => JSON.parse(redactShapes(JSON.stringify(e)))) : null);
 
   /* ------------------------------------------------------------------ runs */
   function archived() {

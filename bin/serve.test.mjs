@@ -363,6 +363,12 @@ const line = (n) => `${JSON.stringify({ t: `2026-09-29T10:00:0${n}Z`, kind: "sys
   await sleep(150);
   const last = logs(b).at(-1);
   ok("a key in a streamed event is redacted", last && !last.data.includes(KEY) && last.data.includes("[redacted:anthropic]"));
+  // The same event through the REST routes, which the stream's redaction
+  // never covered: every route that serves the event log gets it redacted.
+  for (const route of ["/api/v1/events", "/api/v1/snapshot"]) {
+    const body = (await get(route)).text;
+    ok(`…and on ${route}`, body.includes("[redacted:anthropic]") && !body.includes(KEY), body.slice(0, 200));
+  }
   const d = JSON.parse(readFileSync(boardFile, "utf8"));
   d.phases[0].tasks[1].note = "changed by the CLI";
   writeFileSync(boardFile, `${JSON.stringify(d, null, 2)}\n`);

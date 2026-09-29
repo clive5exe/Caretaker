@@ -360,6 +360,10 @@ POST a board mutation.
 - It applies `secrets.KEY_SHAPES` redaction as a best-effort second pass, on
   whole lines only, because a key can be split across read chunks.
 - Byte offsets used for resuming stay offsets into the file on disk.
+- The event log is written to disk unredacted, so the read model redacts every
+  event it loads, and every route that serves events (`/events`, `/snapshot`,
+  `/work/:id`, `/runs/:id`, `/specs`, `/inbox`) gets them redacted, not only
+  the stream.
 
 **Identity.** v1 is single-operator. `by` on a web mutation is the configured
 operator, recorded with `via: "web"` so the log can tell browser actions from
