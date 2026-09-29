@@ -301,13 +301,21 @@ rows: run log rows and gate verdicts. A figure with no dates behind it says
   - first-pass rate
   - estimate against elapsed time for closed tasks
   - tokens by agent and by model
+- **From `kpis.mjs`** (B-2, B-4), each "not recorded" with its reason when
+  its inputs were not:
+  - delivery from git: deploys per week (a deploy is a merge on main), lead
+    time, change failure rate (merges reverted after landing), time to restore
+  - tokens per closed task, tokens per merged diff line, and dollars per merged
+    line only when the config prices every model in the run log
+  - first-pass and rework rates, model mix, estimate calibration, and the
+    human intervention rate
+  - open work in tokens, re-estimated per task type from closed work
+  - the KPIs left out on purpose, each with why: lines of code, agents
+    spawned, unweighted tasks per day
 - **Not in v1:**
   - Cycle time per lifecycle stage. Stages are derived on every read, so how
     long an item sat in each one needs dated transitions from the event log
     (B-7).
-  - Cost in money. Caretaker records tokens, not dollars. A dollar figure
-    needs a price table per model, and subscription CLIs have no per-token
-    price at all.
 
 ### 9. Settings
 - The resolved config (read-only in v1), and which data sources exist on disk:

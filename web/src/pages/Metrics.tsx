@@ -7,7 +7,7 @@
 import { useState } from "react";
 import { gateLabel } from "../api/labels";
 import { useResource } from "../api/store";
-import type { GateStats, Metrics } from "../api/types";
+import type { GateStats, Kpis, Metrics } from "../api/types";
 import { BarChart, Failed, fmtTokens, LineChart, Loading, NotRecorded, PageHead, Provenance, Seg, shortDay } from "../components/ui";
 
 function Head({ title, source, range }: { title: string; source: string; range: string }) {
@@ -42,6 +42,87 @@ function GateBars({ stats }: { stats: GateStats }) {
         );
       })}
     </div>
+  );
+}
+
+const pct = (v: number | null) => (v === null ? null : `${Math.round(v * 100)}%`);
+const hrs = (v: number | null) => (v === null ? null : v < 48 ? `${v}h` : `${Math.round((v / 24) * 10) / 10}d`);
+
+/** One figure, or "not recorded" with the reason; never a zero standing in for nothing. */
+function Figure({ label, value, basis }: { label: string; value: string | number | null; basis?: string | null }) {
+  return (
+    <>
+      <dt>{label}</dt>
+      <dd>
+        {value === null ? <span className="dim">not recorded</span> : <strong>{value}</strong>}
+        {basis ? <span className="dim"> · {basis}</span> : null}
+      </dd>
+    </>
+  );
+}
+
+function KpiCards({ k, range }: { k: Kpis; range: string }) {
+  const d = k.delivery;
+  const a = k.ai;
+  const r = k.estimates.remaining;
+  return (
+    <>
+      <div className="grid g2">
+        <div className="card">
+          <Head title="Delivery" source="git: merges on main" range={range} />
+          <dl className="kv" style={{ marginTop: 8 }}>
+            <Figure label="Deploys per week" value={d.deploysPerWeek} basis={d.reason ?? `${d.deploys ?? 0} merge(s)`} />
+            <Figure label="Lead time" value={hrs(d.leadTimeHours)} basis="branch's first commit to merge, median" />
+            <Figure label="Change failure rate" value={pct(d.changeFailureRate)} basis="merges reverted after landing" />
+            <Figure label="Time to restore" value={hrs(d.timeToRestoreHours)} basis="merge to its revert, median" />
+          </dl>
+        </div>
+        <div className="card">
+          <Head title="AI" source="run log, board, git" range={range} />
+          <dl className="kv" style={{ marginTop: 8 }}>
+            <Figure label="Tokens per closed task" value={fmtTokens(a.tokensPerClosedTask)} basis={a.tokensPerClosedTaskBasis} />
+            <Figure label="Tokens per merged line" value={a.tokensPerMergedLine} basis={a.dollarsPerMergedLine === null ? a.costBasis : null} />
+            {a.dollarsPerMergedLine !== null ? <Figure label="Dollars per merged line" value={`$${a.dollarsPerMergedLine}`} basis={a.costBasis} /> : null}
+            <Figure label="First-pass rate" value={pct(a.firstPassRate)} basis={`${a.gatedTasks} gated task(s)`} />
+            <Figure label="Rework rate" value={pct(a.reworkRate)} />
+            <Figure label="Model mix" value={a.modelMix && a.modelMix.length ? a.modelMix.map((m) => `${m.model} ${pct(m.share)}`).join(", ") : null} />
+            <Figure label="Estimate calibration" value={a.estimateCalibration === null ? null : `x${a.estimateCalibration}`} basis="actual over estimated tokens, closed work" />
+            <Figure label="Human intervention" value={pct(a.humanInterventionRate)} basis={a.humanInterventionBasis} />
+          </dl>
+        </div>
+      </div>
+      <div className="grid g2">
+        <div className="card">
+          <Head title="Open work, in tokens" source="run log and estimates" range="all time" />
+          {r ? (
+            <p style={{ margin: "8px 0" }}>
+              <strong>{fmtTokens(r.tokens)}</strong> over {r.estimated} task(s){r.unestimated ? `; ${r.unestimated} with no basis to estimate` : ""}.
+            </p>
+          ) : (
+            <div style={{ marginTop: 10 }}>
+              <NotRecorded what="No basis to estimate in tokens yet." why="A closed task with token actuals in the run log calibrates the rest." />
+            </div>
+          )}
+          {k.estimates.calibration.filter((c) => c.type !== "*").length ? (
+            <dl className="kv">
+              {k.estimates.calibration
+                .filter((c) => c.type !== "*")
+                .map((c) => (
+                  <Figure key={c.type} label={c.type} value={c.factor === null ? null : `x${c.factor}`} basis={`${c.closed} closed${c.tokensPerHour !== null ? `, ${fmtTokens(c.tokensPerHour)}/h` : ""}`} />
+                ))}
+            </dl>
+          ) : null}
+        </div>
+        <div className="card">
+          <h3>Left out on purpose</h3>
+          <dl className="kv" style={{ marginTop: 8 }}>
+            {k.antiKpis.map((x) => (
+              <Figure key={x.name} label={x.name} value={null} basis={x.why} />
+            ))}
+          </dl>
+        </div>
+      </div>
+    </>
   );
 }
 
@@ -233,13 +314,15 @@ export function MetricsPage() {
         </div>
       </div>
 
+      <KpiCards k={m.kpis} range={range} />
+
       <div className="card">
         <h3>Not in v1</h3>
         <dl className="kv" style={{ marginTop: 8 }}>
           <dt>Cycle time per stage</dt>
           <dd>Stages are derived on every read, so time in each one needs dated transitions from the event log (B-7).</dd>
           <dt>Cost in money</dt>
-          <dd>Caretaker records tokens, not dollars. A dollar figure needs a price table per model, and subscription CLIs have no per-token price.</dd>
+          <dd>Caretaker records tokens. Dollars appear per merged line only when the config's <code>pricing</code> prices every model in the run log; subscription CLIs have no per-token price.</dd>
         </dl>
       </div>
     </>

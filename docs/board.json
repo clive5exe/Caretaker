@@ -443,12 +443,12 @@
           "title": "Estimate in tokens, not hours",
           "owner": "backend",
           "est": "1d",
-          "status": "todo",
+          "status": "doing",
           "deps": [
             "P-2"
           ],
           "ac": "a task's estimate is in tokens, actuals come from the run log automatically, and a calibration factor per task type re-estimates the open work with no human input",
-          "note": "Hours are what humans spend and require a human to report, so the calibration loop never closes. Tokens are measured exactly at the end of every run. Hours stay as a secondary display for people who think in days."
+          "note": "Hours are what humans spend and require a human to report, so the calibration loop never closes. Tokens are measured exactly at the end of every run. Hours stay as a secondary display for people who think in days. — Built: bin/kpis.mjs tokenEstimates. A task may carry estTokens (400k, 1.2m); actuals are the run log's rows for it. Per task type (owner), closed work gives a factor (actual/estimated tokens) and a tokens-per-hour rate; open work is re-estimated from them with no human input, each figure naming its basis, falling back to all closed work, and hour-only tasks converted at the rate. Shown on the web Metrics page. Checked by bin/kpis.test.mjs; mutations K2-K5 fail by name. Nothing here has token actuals yet, so the board shows 'no basis' until run.mjs rows accumulate. Gate verdicts not recorded."
         },
         {
           "id": "B-3",
@@ -467,13 +467,13 @@
           "title": "KPIs: delivery and AI, and the anti-KPIs left out on purpose",
           "owner": "backend",
           "est": "2d",
-          "status": "todo",
+          "status": "doing",
           "deps": [
             "B-2",
             "P-2"
           ],
           "ac": "the dashboard reports deploy frequency, lead time, change failure rate and time to restore from git and the board; and tokens per closed task, cost per merged diff line, first-pass gate rate, rework rate, model mix, estimate calibration and human intervention rate from the run log",
-          "note": "Lines of code, agents spawned and tasks-per-day without effort weighting are deliberately absent. Each rewards exactly the wrong behaviour."
+          "note": "Lines of code, agents spawned and tasks-per-day without effort weighting are deliberately absent. Each rewards exactly the wrong behaviour. — Built: bin/kpis.mjs. Delivery from git (a deploy is a first-parent merge; lead time branch-first-commit to merge; change failure = merge reverted after landing, a branch-internal revert is not one; time to restore merge to revert). AI: tokens per closed task, tokens per merged line (dollars only if cfg.pricing prices every model), first-pass and rework, model mix, estimate calibration, human intervention (questions, triage or spec not approved). Anti-KPIs listed with reasons. All null with a reason when not recorded. In the Metrics API and page, and node bin/kpis.mjs. Checked by bin/kpis.test.mjs on a scratch repo with dated merges and reverts, plus serve.test; mutations K1, K6-K12 fail by name. Gate verdicts not recorded."
         },
         {
           "id": "B-5",

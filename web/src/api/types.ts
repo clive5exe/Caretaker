@@ -334,6 +334,39 @@ export interface Metrics {
   closedByDay: number[];
   closedHoursByDay: number[];
   closedWindow: string[];
+  kpis: Kpis;
+}
+
+/** B-2 and B-4, from bin/kpis.mjs. null means not recorded, never zero. */
+export interface Kpis {
+  delivery: {
+    reason: string | null;
+    deploys?: number;
+    deploysPerWeek: number | null;
+    leadTimeHours: number | null;
+    changeFailureRate: number | null;
+    timeToRestoreHours: number | null;
+  };
+  ai: {
+    tokensPerClosedTask: number | null;
+    tokensPerClosedTaskBasis: string;
+    tokensPerMergedLine: number | null;
+    dollarsPerMergedLine: number | null;
+    costBasis: string;
+    firstPassRate: number | null;
+    reworkRate: number | null;
+    gatedTasks: number;
+    modelMix: { model: string; share: number; runs: number }[] | null;
+    estimateCalibration: number | null;
+    humanInterventionRate: number | null;
+    humanInterventionBasis: string;
+  };
+  estimates: {
+    calibration: { type: string; closed: number; factor: number | null; tokensPerHour: number | null }[];
+    open: { id: string; type: string; estimate: number | null; basis: string; hours: number | null; actualSoFar: number }[];
+    remaining: { tokens: number; estimated: number; unestimated: number } | null;
+  };
+  antiKpis: { name: string; why: string }[];
 }
 
 export interface Settings {

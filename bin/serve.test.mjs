@@ -290,6 +290,10 @@ const post = (path, obj, headers = WRITE()) => req("POST", path, { headers, body
   ok("the first-pass rate is dashboard.metrics' figure", JSON.stringify(snap.quality) === JSON.stringify(m.quality));
   ok("held is dashboard.metrics' figure", snap.held === m.heldTotal);
   ok("a missing run log is null, not zero", snap.sources.runs === "absent" && snap.tokensPerClosedTask === null && snap.legacyRunning === null);
+  const { kpis, gitFacts } = await import("./kpis.mjs");
+  const mk = (await get("/api/v1/metrics?days=30")).json.kpis;
+  const want = kpis({ board: d, runs: null, facts: gitFacts(root, { days: 30 }), cfg });
+  ok("the Metrics API's KPIs are kpis.mjs's, with no run log as null", JSON.stringify(mk) === JSON.stringify(want) && mk.ai.tokensPerClosedTask === null && mk.antiKpis.length === 3, JSON.stringify(mk).slice(0, 300));
   const work = (await get("/api/v1/work")).json;
   const t3 = work.tasks.find((t) => t.id === "T-3");
   ok("a closed task is in the done stage", t3.lifecycle === "done");

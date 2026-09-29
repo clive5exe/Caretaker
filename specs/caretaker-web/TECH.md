@@ -393,6 +393,7 @@ zero.
 | `GET /specs/ownership` | the ownership map, unowned, orphaned | `drift.buildOwnership`, `findOrphaned`, `treeFromGit` |
 | `GET /specs/drift` | recent drift and gate events, dismissals | the event log, `kind in (drift, gate)` |
 | `GET /settings` | read-only config, `stateDir`, sources, binding | config, server |
+| `GET /metrics?days=7\|14\|30` | the Metrics page's figures over the range, and `kpis`: delivery from git, AI figures, open work in tokens, the anti-KPIs; each null with a reason when not recorded | `dashboard.mjs` functions, `kpis.mjs` (B-2, B-4) |
 
 **Folding runs.**
 - `start` and `end` rows with the same `run` id become one run.

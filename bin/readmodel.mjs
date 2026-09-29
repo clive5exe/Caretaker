@@ -23,6 +23,7 @@ import { pathToFileURL, fileURLToPath } from "node:url";
 import * as drift from "./drift.mjs";
 import * as events from "./events.mjs";
 import { freshness as computeFreshness } from "./freshness.mjs";
+import { gitFacts as kpiGitFacts, kpis as computeKpis } from "./kpis.mjs";
 import { commandsFor, openQuestions, requiredGates, specApprovalNeeded, stageOf, STAGES } from "./lifecycle.mjs";
 import { KEY_SHAPES } from "./secrets.mjs";
 import { stateDirFor } from "./runstore.mjs";
@@ -668,6 +669,7 @@ export function createReadModel({ cfgPath, board, dash, now = () => new Date(), 
       closedByDay: m.closedByDay,
       closedHoursByDay: m.closedHoursByDay,
       closedWindow: m.WINDOW,
+      kpis: computeKpis({ board: d, runs: rows, facts: kpiGitFacts(root, { days, now: now() }), cfg }),
     };
   }
 
