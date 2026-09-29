@@ -1,0 +1,39 @@
+{
+  "cloud-factory": {
+    "commit": "ab21d0c5b70e38abe1a53ff6e2934d2637415c5b",
+    "files": {
+      ".agents/skills/implementation/SKILL.md": "a3f10beef048ad85d6663a71c70dc5f350ca54e3003fc2132161bafb4d23187a",
+      ".agents/skills/improve-review-pr/SKILL.md": "e1b4730c9ad178115c2e0c6b668229c4290dc2f0b9e5f55a68524018d4dd2cf8",
+      ".agents/skills/improve-review-pr/scripts/collect_review_feedback.py": "ef62da0d0f33a010d4f496f9c06fd8e33a5118242d45f1d1ef8aab181183bac0",
+      ".agents/skills/review-pr/SKILL.md": "d2e12c81e1a30c82a3d057686356ecd9df52a2fe21edac0c9b83ceaf43da7913",
+      ".agents/skills/review-pr/scripts/annotate_diff.py": "db6e6b97fc135f14385dbc79997ce285545d7d20af1692c41b9b4175929e2679",
+      ".agents/skills/review-pr/scripts/build_review_context.py": "773687a3c5075179c07fc8d05a7f00e23bf602ddacc4b10f81f1b755ffdc43bb",
+      ".agents/skills/review-pr/scripts/publish_review.py": "900bda5cf21a4905dd09724e8d35ff8e16e3ddf441a807522c13673b74c4685f",
+      ".agents/skills/review-pr/scripts/resolve_spec_context.py": "578168887012bbe87583669625abee8cfc33a1b9046895891229fb9f1f47eb7b",
+      ".agents/skills/review-pr/scripts/validate_review_json.py": "774622f8d69844ac15f44a4ff6d234de1ade12948a015b7265347277ec46ac04",
+      ".agents/skills/spec/SKILL.md": "11e74b4f474b756db9fc0edff97b8ffeaf92b062f11e92ee4cb85688d17cded9",
+      ".agents/skills/triage/SKILL.md": "53150703019d9698dc13fa2d4e4e6b747128191ed39d29494934b26f52704647",
+      ".agents/skills/triage/evals/evals.json": "77fe02f2591b8edd601c7f696762f2efe9ede8e9180961f92f0d1777a8a4e4a0",
+      ".agents/skills/verify-behavior/SKILL.md": "f37aa2cd762870dc1595fdfcbcce7363d97a5edfd96b98b346b9884becb1f350",
+      "LICENSE": "b6686c85488c50963919885a98bb86ad7e10fe1b60139b98149fe9fad488c7c8",
+      "README.md": "e36364db1f7efaa161153f7e985061f9f1e026cbea1fecf45a9e0289bbc495fa",
+      "roadmap.md": "4d77abfbcedaf1b601e7be1d195aeab0739433f8a641513629931ce69b0571ac",
+      "scripts/install-cloud-factory.sh": "c7797a4c21b6aff72494e7c67504666ebd9105e8a755ded9b08b2b0e1be6cb78",
+      "templates/github/workflows/implement-ready-issues.yml": "c4648975cb546887ad650186d4ec61b8c4516f0a1686e79cd3fc5a39a73a7f17",
+      "templates/github/workflows/improve-review-pr.yml": "e387c7b9f20601c8599877b5d2f3a920b78f161ac18030e3c481e38924461b2d",
+      "templates/github/workflows/review-pull-requests.yml": "3b4f2759c2503d0181a09c85c6886b257a155b2a34fbcf3c742a8700f3e6db04",
+      "templates/github/workflows/spec-ready-issues.yml": "7be0df6b0577be25bf0fc7aeee1fcc773356f2b52602434597e3092c71dd2724",
+      "templates/github/workflows/triage-issues.yml": "e3081bdb7900a99dc28bf17312f877e462dfb9c50c73d7ae31be2d3a16d6f423",
+      "vision.md": "2199ffb8944a630c9ac46102780dda5dc2f060f622f0ebb92130894e642c4543"
+    }
+  },
+  "common-skills": {
+    "commit": "69b4753651ab7fab518c82be087b9f1d5b966631",
+    "files": {
+      ".agents/skills/validate-changes-match-specs/SKILL.md": "52de2c86ab22776a45f54ef10a8b194b524a16e2e64b8454da31f87a55ffa629",
+      ".agents/skills/write-product-spec/SKILL.md": "c517e5d21063579cea112c01f81771bf60b6fb9819593e162474bd107b4292f9",
+      ".agents/skills/write-tech-spec/SKILL.md": "ead1a1aaad95822c9ca79428c909277e17ca627aa62f76946e128cf6eb111533",
+      "LICENSE": "9a10f320256635c6a2b58f9894b1f453e404142d07a6125ad788a3afbd7a7379"
+    }
+  }
+}

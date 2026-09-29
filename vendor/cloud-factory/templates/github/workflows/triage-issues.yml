@@ -1,0 +1,439 @@
+name: Triage New Issues
+
+# Triages a newly opened issue with an Oz cloud agent.
+#
+# The agent runs read-only (issues: read) and emits a structured JSON result;
+# the separate `apply` job (issues: write) applies the label and comment to the
+# triggering issue only.
+#
+# Cloud note: `warpdotdev/oz-agent-action` with `cloud: true` returns as soon as
+# the Oz run is spawned (`agent_output` is launch metadata, not the final
+# response). There is no action input to wait for completion (see action.yml on
+# v1.0.25–v1.0.27). The wait step below polls stable `oz run get` until the run
+# finishes and forwards the final status message to the apply job.
+#
+# Setup: the WARP_API_KEY repository secret must be set (the Oz API key).
+
+on:
+  issues:
+    types: [opened]
+
+# Avoid duplicate triage runs if the same issue fires overlapping events.
+concurrency:
+  group: triage-issue-${{ github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  triage:
+    name: Triage issue
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # let the agent inspect the checked-out codebase
+      issues: read # let the agent read the issue/comments/labels — never write
+    outputs:
+      triage_result: ${{ steps.wait_triage.outputs.agent_output }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Triage with Oz agent
+        uses: warpdotdev/oz-agent-action@v1.0.25
+        id: triage
+        env:
+          GH_TOKEN: ${{ github.token }}
+        with:
+          skill: "${{ github.repository }}:triage"
+          name: "Triage issue #${{ github.event.issue.number }}"
+          prompt: |
+            Triage GitHub issue #${{ github.event.issue.number }} in this
+            repository using the triage skill.
+
+            - Repository: ${{ github.repository }}
+            - Issue URL: ${{ github.event.issue.html_url }}
+
+            Follow the triage skill: use the `gh` CLI to fetch the full issue
+            (title, body, comments, existing labels) and related open issues,
+            read `roadmap.md` and `vision.md` if present, inspect this
+            checked-out codebase, then choose exactly one
+            implementation-readiness state.
+
+            If the issue is a UI/interactive bug (or mentions screenshots, video,
+            computer use, browser use, drag-and-drop, or verify-behavior), optionally
+            invoke `.agents/skills/verify-behavior` in `reproduce` mode with computer
+            use enabled before deciding. Prefer visual evidence when it materially
+            improves the readiness decision.
+
+            Return the JSON result the skill specifies as your final response;
+            the apply job applies the label and comment from it. Do not comment
+            on, label, or otherwise mutate the issue directly from this job.
+          warp_api_key: ${{ secrets.WARP_API_KEY }}
+          profile: ${{ vars.WARP_AGENT_PROFILE || '' }}
+          cloud: true
+          computer_use: true
+
+      # oz-agent-action@v1.0.25 sets agent_output to `oz agent run-cloud` stdout.
+      # For cloud runs that stdout is spawn metadata while the remote agent is
+      # still INPROGRESS. Poll until the run reaches a terminal state and expose
+      # the final triage JSON as agent_output for the apply job.
+      #
+      # Final output sources (in order):
+      # 1. Spawn stdout already containing triage JSON (local / future blocking action)
+      # 2. `oz run get` status_message.message when present
+      # 3. conversation via conversation_id + `oz run conversation get`, scanning
+      #    assistant text messages only for the last object with state+label
+      - name: Wait for cloud triage completion
+        id: wait_triage
+        env:
+          WARP_API_KEY: ${{ secrets.WARP_API_KEY }}
+          SPAWN_OUTPUT: ${{ steps.triage.outputs.agent_output }}
+          # Computer-use triage can take several minutes; allow headroom.
+          POLL_INTERVAL_SECONDS: "20"
+          POLL_TIMEOUT_SECONDS: "3600"
+        run: |
+          set -euo pipefail
+
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          import subprocess
+          import sys
+          import time
+          from pathlib import Path
+
+          spawn = os.environ.get("SPAWN_OUTPUT") or ""
+          Path("spawn_output.txt").write_text(spawn, encoding="utf-8")
+
+          def find_triage_json(text: str):
+              """Return the last JSON object in text that has both state and label."""
+              if not text:
+                  return None
+              decoder = json.JSONDecoder()
+              last = None
+              for i, ch in enumerate(text):
+                  if ch != "{":
+                      continue
+                  try:
+                      obj, _ = decoder.raw_decode(text[i:])
+                  except json.JSONDecodeError:
+                      continue
+                  if isinstance(obj, dict) and "state" in obj and "label" in obj:
+                      last = obj
+              return last
+
+          def write_output(text: str) -> None:
+              # Multiline GitHub Actions output via heredoc.
+              with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+                  fh.write("agent_output<<EOF_AGENT_OUTPUT\n")
+                  fh.write(text)
+                  if text and not text.endswith("\n"):
+                      fh.write("\n")
+                  fh.write("EOF_AGENT_OUTPUT\n")
+
+          def oz_json(args):
+              """Run an oz CLI command expecting JSON. Returns (raw, parsed, error)."""
+              try:
+                  raw = subprocess.check_output(
+                      args,
+                      text=True,
+                      stderr=subprocess.STDOUT,
+                  )
+              except FileNotFoundError:
+                  return "", None, "`oz` CLI not found on PATH after oz-agent-action install."
+              except subprocess.CalledProcessError as exc:
+                  return "", None, f"{' '.join(args)} failed: {exc.output}"
+              try:
+                  return raw, json.loads(raw), None
+              except json.JSONDecodeError:
+                  return raw, None, f"{' '.join(args)} returned non-JSON"
+
+          def status_message_text(payload):
+              if not isinstance(payload, dict):
+                  return ""
+              status_message = payload.get("status_message")
+              if isinstance(status_message, dict):
+                  return status_message.get("message") or ""
+              if isinstance(status_message, str):
+                  return status_message
+              return ""
+
+          def iter_role_messages(obj):
+              """Yield message dicts that have a role and content list."""
+              if isinstance(obj, dict):
+                  if obj.get("role") is not None and isinstance(obj.get("content"), list):
+                      yield obj
+                  for value in obj.values():
+                      yield from iter_role_messages(value)
+              elif isinstance(obj, list):
+                  for item in obj:
+                      yield from iter_role_messages(item)
+
+          def assistant_text_blobs(conversation):
+              """Collect text from assistant messages only (ignore tool/system logs)."""
+              blobs = []
+              for message in iter_role_messages(conversation):
+                  if str(message.get("role") or "").lower() != "assistant":
+                      continue
+                  for part in message.get("content") or []:
+                      if not isinstance(part, dict):
+                          continue
+                      text = part.get("text")
+                      if isinstance(text, str) and text.strip():
+                          blobs.append(text)
+              return blobs
+
+          def triage_from_conversation(conversation):
+              """
+              Prefer the last assistant-authored triage JSON.
+              Scan assistant texts in order; keep the last valid state/label object.
+              """
+              last = None
+              last_text = ""
+              for text in assistant_text_blobs(conversation):
+                  found = find_triage_json(text)
+                  if found is not None:
+                      last = found
+                      last_text = text
+              if last is None:
+                  return None, ""
+              # Forward a compact serialization of the validated object so apply
+              # does not need to re-scan a huge conversation dump.
+              return last, json.dumps(last, ensure_ascii=False)
+
+          def resolve_final_message(payload):
+              """
+              Resolve final triage agent_output text after a successful run.
+              Returns (message_or_none, source_label).
+              """
+              # 1) Prefer status_message when it already carries triage JSON.
+              message = status_message_text(payload)
+              if message and find_triage_json(message) is not None:
+                  return message, "status_message"
+
+              # 2) Conversation fallback via conversation_id.
+              conversation_id = None
+              if isinstance(payload, dict):
+                  conversation_id = payload.get("conversation_id") or payload.get(
+                      "conversationId"
+                  )
+              if conversation_id:
+                  print(
+                      f"status_message missing triage JSON; "
+                      f"fetching conversation {conversation_id}…"
+                  )
+                  convo_raw, conversation, err = oz_json(
+                      [
+                          "oz",
+                          "run",
+                          "conversation",
+                          "get",
+                          str(conversation_id),
+                          "--output-format",
+                          "json",
+                      ]
+                  )
+                  if err:
+                      print(f"conversation get failed: {err}", file=sys.stderr)
+                  else:
+                      Path("conversation_output.json").write_text(
+                          convo_raw, encoding="utf-8"
+                      )
+                      _obj, compact = triage_from_conversation(conversation)
+                      if compact and find_triage_json(compact) is not None:
+                          return compact, "conversation_assistant_text"
+
+
+              return None, "none"
+
+          # Fast path: action already returned final structured output (local run
+          # or a future action that blocks on cloud completion).
+          if find_triage_json(spawn) is not None:
+              print("Spawn output already contains triage JSON; skipping poll.")
+              write_output(spawn)
+              sys.exit(0)
+
+          run_id = None
+          for pattern in (
+              r"(?im)run ID:\s*([0-9a-fA-F-]{16,})",
+              r"(?im)oz\.warp\.dev/runs/([0-9a-fA-F-]{16,})",
+              r'(?im)"run_id"\s*:\s*"([0-9a-fA-F-]{16,})"',
+          ):
+              match = re.search(pattern, spawn)
+              if match:
+                  run_id = match.group(1)
+                  break
+
+          if not run_id:
+              print(
+                  "::error::Cloud triage produced neither triage JSON nor a parseable Oz run ID. Raw output:",
+                  file=sys.stderr,
+              )
+              print(spawn, file=sys.stderr)
+              sys.exit(1)
+
+          print(f"Polling Oz run {run_id} for final triage output…")
+          print(f"https://oz.warp.dev/runs/{run_id}")
+
+          interval = int(os.environ.get("POLL_INTERVAL_SECONDS", "20"))
+          timeout = int(os.environ.get("POLL_TIMEOUT_SECONDS", "3600"))
+          deadline = time.time() + timeout
+          terminal_success = {"SUCCEEDED", "SUCCESS", "COMPLETED", "FINISHED"}
+          terminal_failure = {
+              "FAILED",
+              "ERROR",
+              "CANCELLED",
+              "CANCELED",
+              "TERMINATED",
+              "TIMED_OUT",
+              "TIMEOUT",
+          }
+
+          last_state = ""
+          while time.time() < deadline:
+              raw, payload, err = oz_json(
+                  ["oz", "run", "get", run_id, "--output-format", "json"]
+              )
+              if err == "`oz` CLI not found on PATH after oz-agent-action install.":
+                  print(f"::error::{err}", file=sys.stderr)
+                  sys.exit(1)
+              if err or payload is None:
+                  print(f"oz run get failed (will retry): {err or 'unknown'}", file=sys.stderr)
+                  time.sleep(interval)
+                  continue
+
+              state = str(payload.get("state") or "").upper()
+              if state != last_state:
+                  print(f"Oz run state: {state or '(empty)'}")
+                  last_state = state
+
+              if state in terminal_success:
+                  message, source = resolve_final_message(payload)
+                  if message is None or find_triage_json(message) is None:
+                      print(
+                          "::error::Oz run succeeded but no triage JSON (state/label) "
+                          "was found in status_message or conversation assistant text.",
+                          file=sys.stderr,
+                      )
+                      print(f"resolution_source={source}", file=sys.stderr)
+                      print(raw[:4000], file=sys.stderr)
+                      sys.exit(1)
+                  Path("final_agent_output.txt").write_text(message, encoding="utf-8")
+                  write_output(message)
+                  print(
+                      f"Cloud triage completed; final output captured for apply job "
+                      f"(source={source})."
+                  )
+                  sys.exit(0)
+
+              if state in terminal_failure:
+                  print(
+                      f"::error::Oz triage run ended in terminal failure state: {state}",
+                      file=sys.stderr,
+                  )
+                  print(f"https://oz.warp.dev/runs/{run_id}", file=sys.stderr)
+                  status_message = payload.get("status_message") if isinstance(payload, dict) else None
+                  if status_message:
+                      print(status_message, file=sys.stderr)
+                  sys.exit(1)
+
+              time.sleep(interval)
+
+          print(
+              f"::error::Timed out after {timeout}s waiting for Oz run {run_id} "
+              f"(last state: {last_state or 'unknown'}).",
+              file=sys.stderr,
+          )
+          print(f"https://oz.warp.dev/runs/{run_id}", file=sys.stderr)
+          sys.exit(1)
+          PY
+
+  apply:
+    name: Apply triage result
+    needs: triage
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Apply label and comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          TRIAGE_RESULT: ${{ needs.triage.outputs.triage_result }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${TRIAGE_RESULT:-}" ]; then
+            echo "::error::Triage job produced no output; nothing to apply." >&2
+            exit 1
+          fi
+
+          # The wait step forwards the agent's final response, which may
+          # include prose around the JSON. Extract the last triage-result
+          # object (the one carrying "state"/"label") into triage_result.json.
+          printf '%s' "$TRIAGE_RESULT" > raw_output.txt
+          if ! python3 - raw_output.txt > triage_result.json <<'PY'
+          import json, sys
+
+          text = open(sys.argv[1], encoding="utf-8").read()
+          decoder = json.JSONDecoder()
+          last_obj = last_triage = None
+          for i, ch in enumerate(text):
+              if ch != "{":
+                  continue
+              try:
+                  obj, _ = decoder.raw_decode(text[i:])
+              except json.JSONDecodeError:
+                  continue
+              if isinstance(obj, dict):
+                  last_obj = obj
+                  if "state" in obj and "label" in obj:
+                      last_triage = obj
+          result = last_triage if last_triage is not None else last_obj
+          if result is None:
+              sys.exit(1)
+          json.dump(result, sys.stdout)
+          PY
+          then
+            echo "::error::Could not find a JSON object in the agent output. Raw output:" >&2
+            cat raw_output.txt >&2
+            exit 1
+          fi
+
+          STATE="$(jq -r '.state // ""' triage_result.json)"
+          LABEL="$(jq -r '.label // ""' triage_result.json)"
+
+          # Require the structured fields the apply step needs. The set of valid
+          # states/labels is owned by the triage skill, so it is intentionally
+          # not duplicated here.
+          if [ -z "$STATE" ]; then
+            echo "::error::Triage result is missing a 'state'." >&2
+            exit 1
+          fi
+
+          if [ -z "$LABEL" ]; then
+            echo "::error::Triage result is missing a 'label' to apply." >&2
+            exit 1
+          fi
+
+          echo "Triage state: $STATE"
+          echo "Applying label: $LABEL"
+
+          # Remove any superseded triage-state labels the agent listed. Failures
+          # (e.g. a label that is not present) are non-fatal.
+          while IFS= read -r remove_label; do
+            [ -z "$remove_label" ] && continue
+            echo "Removing label: $remove_label"
+            gh issue edit "$ISSUE_NUMBER" --repo "$REPO" --remove-label "$remove_label" || true
+          done < <(jq -r '(.remove_labels // [])[]' triage_result.json)
+
+          # Apply the chosen triage-state label to the triggering issue only.
+          gh issue edit "$ISSUE_NUMBER" --repo "$REPO" --add-label "$LABEL"
+
+          jq -r '.comment // ""' triage_result.json > comment.md
+          if [ -s comment.md ]; then
+            printf '\n\n---\n_Powered by [Oz](https://warp.dev/oz)_\n' >> comment.md
+            gh issue comment "$ISSUE_NUMBER" --repo "$REPO" --body-file comment.md
+          else
+            echo "No comment body provided by triage result; skipping comment."
+          fi

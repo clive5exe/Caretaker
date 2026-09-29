@@ -51,7 +51,7 @@ So the swap is one line per workflow:
 
 ```yaml
 - uses: ./.github/actions/caretaker-agent        # was warpdotdev/oz-agent-action
-  with: { skill, name, prompt, anthropic_api_key } # same inputs, your key
+  with: { skill, name, prompt, claude_code_oauth_token } # your subscription
   # output: agent_output                           # same output
 ```
 
@@ -100,14 +100,21 @@ The budget is 5 hours. Each step ends in a commit you can check.
 
 **What needs you, and only you:**
 
-- **A key** for the first real run, added as a repository secret:
-  - `CLAUDE_CODE_OAUTH_TOKEN` (your Claude subscription: run
-    `claude setup-token` once), **or**
-  - `ANTHROPIC_API_KEY`, **or**
-  - `OPENAI_API_KEY`.
+- **Your subscription login, once.** No API key is needed.
+  - Claude: run `claude setup-token`. It signs in with your Claude
+    subscription and prints a token. That token is not an API key: usage counts
+    against your plan.
+  - ChatGPT: `codex login` → "Sign in with ChatGPT".
 
-  Until one exists, everything is proven against a fake model. That proves the
-  plumbing, not the AI's work. I will say which is which every time.
+  Add it as a repository secret (`CLAUDE_CODE_OAUTH_TOKEN`) for the GitHub
+  workflows. On your own machine it is passed with
+  `--secret CLAUDE_CODE_OAUTH_TOKEN`. The sandbox cannot see your machine's
+  login, which is why it has to be handed in.
+- **API keys are optional.** `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` also
+  work, but nothing here needs one.
+- **Until a login token exists, everything is proven against a fake model.**
+  That proves the plumbing, not the AI's work. I will say which is which every
+  time.
 - **Merging.** Steps land on this branch and you merge. I don't merge.
 
 ## After the 5 hours (not in this window)
