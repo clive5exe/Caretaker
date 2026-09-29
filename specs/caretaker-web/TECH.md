@@ -274,8 +274,8 @@ after they exist and are tested in core.
 | `answer <id> <qid> "text"` | `answer {text, by, at}` on that question |
 | `triage <id> accept\|reject "why"` | `triage[] {decision, why, by, at}` |
 | `spec-approve <id>` / `spec-reject <id> "why"` | `specReview[] {path, blob, decision, why, by, at}`, keyed on the spec's git blob sha, so editing the spec reopens approval |
-| `pr <id> <url>` | `pr {url, by, at}` |
-| `drop <id> "why"` | `status: "dropped"` plus the reason. `dropped` already exists as a status (`board.mjs:49`), but no command sets it. |
+| `pr <id> <url>` | `pr {url, by, at, history?}`: a later pr is current, and the one it replaced moves to `history` with its by and at |
+| `drop <id> "why"` | `status: "dropped"` plus `dropped {why, by, at, history?}`; a task reopened and dropped again keeps the earlier drop in `history`. `dropped` already exists as a status (`board.mjs:49`), but no command sets it. |
 
 - All fields are optional and additive, so existing readers ignore them.
 - `ops/caretaker/prompt.txt` currently says to write a needed decision "into the

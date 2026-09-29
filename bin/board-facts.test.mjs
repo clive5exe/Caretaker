@@ -93,12 +93,22 @@ const ISO = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d+Z$/;
   ok("pr needs an http(s) url", f.cli("pr", "T-1", "not-a-url").status === 1);
   f.cli("pr", "T-1", "https://github.com/o/r/pull/9");
   ok("pr records the url", task(f, "T-1").pr.url === "https://github.com/o/r/pull/9");
+  const firstPr = task(f, "T-1").pr;
+  f.cli("pr", "T-1", "https://github.com/o/r/pull/10");
+  const pr = task(f, "T-1").pr;
+  // Independent QA: a second pr overwrote the first, and its by and at with it.
+  ok("a later pr is current, and the one it replaced is kept with its by and at", pr.url.endsWith("/10") && pr.history?.length === 1 && pr.history[0].url === firstPr.url && pr.history[0].by === "five" && pr.history[0].at === firstPr.at, JSON.stringify(pr));
 
   ok("drop needs a reason", f.cli("drop", "T-2").status === 1);
   r = f.cli("drop", "T-2", "out", "of", "scope");
   t = task(f, "T-2");
   ok("drop sets status dropped and records why", r.status === 0 && t.status === "dropped" && t.dropped.why === "out of scope");
   ok("a dropped task cannot be dropped again", f.cli("drop", "T-2", "again").status === 1);
+  const firstDrop = task(f, "T-2").dropped;
+  f.cli("todo", "T-2");
+  r = f.cli("drop", "T-2", "gone", "for", "good");
+  t = task(f, "T-2");
+  ok("a task reopened and dropped again keeps the earlier drop, with its by and at", r.status === 0 && t.dropped.why === "gone for good" && t.dropped.history?.[0]?.why === "out of scope" && t.dropped.history[0].at === firstDrop.at, JSON.stringify(t.dropped));
   ok("an unknown task is refused", f.cli("ask", "T-404", "x").status === 1);
   ok("the usage lists the new commands", /spec-approve/.test(f.cli("help").stdout));
   rmSync(f.root, { recursive: true, force: true });

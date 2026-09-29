@@ -728,21 +728,28 @@ export function specReview(d, id, decision, why, spec, opts) {
   return { ok: true, task: hit.t };
 }
 
-/** pr <id> <url>: pr {url, by, at}. A later pr replaces it; the url is the fact. */
+/**
+ * pr <id> <url>: pr {url, by, at}. A later pr becomes the current one, and the
+ * one it replaced goes to pr.history with its by and at, as gate verdicts do:
+ * an append-only fact is never overwritten (independent QA).
+ */
 export function recordPr(d, id, url, opts) {
   const hit = find(d, id);
   if (!hit) return noTask(id);
   if (!/^https?:\/\/\S+$/.test(String(url ?? ""))) return { ok: false, error: "pr needs an http(s) url" };
   const bad = closed(hit.t);
   if (bad) return bad;
-  hit.t.pr = { url: String(url), ...stamp(opts) };
+  const prev = hit.t.pr;
+  const history = prev ? [...(prev.history || []), { url: prev.url, by: prev.by, at: prev.at }] : [];
+  hit.t.pr = { url: String(url), ...stamp(opts), ...(history.length ? { history } : {}) };
   d.meta.updated = today();
   return { ok: true, task: hit.t };
 }
 
 /**
  * drop <id> "why": status "dropped" plus dropped {why, by, at}. `dropped` was
- * already a status (see STATUS) but nothing set it.
+ * already a status (see STATUS) but nothing set it. A task reopened and
+ * dropped again keeps the earlier drop in dropped.history.
  */
 export function drop(d, id, why, opts) {
   const hit = find(d, id);
@@ -750,7 +757,9 @@ export function drop(d, id, why, opts) {
   const bad = need(why, "a reason") ?? closed(hit.t);
   if (bad) return bad;
   hit.t.status = "dropped";
-  hit.t.dropped = { why: String(why), ...stamp(opts) };
+  const prev = hit.t.dropped;
+  const history = prev ? [...(prev.history || []), { why: prev.why, by: prev.by, at: prev.at }] : [];
+  hit.t.dropped = { why: String(why), ...stamp(opts), ...(history.length ? { history } : {}) };
   delete hit.t.completed;
   delete hit.t.blockedReason;
   d.meta.updated = today();
