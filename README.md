@@ -129,7 +129,8 @@ rather than silently weighing zero.
 - `reviewer`, always;
 - `qa`, unless the task is docs-only (owned by a docs role, with nothing in the
   title or criterion that names code);
-- `security`, when the title or note matches its money/auth/tenant keywords.
+- `security`, when the title or note matches its money/auth/tenant keywords,
+  unless the task is docs-only.
 
 Making `done` honour `gates` is a known, separate fix.
 
