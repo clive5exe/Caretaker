@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Four small defects in the board tooling, each pinned by a check that was
+ * Five small defects in the board tooling, each pinned by a check that was
  * watched go red against the unfixed code before the fix went in.
  *
  *   1. board.mjs `esc()` escaped & < > and not quotes. No user text sits in an
@@ -15,6 +15,9 @@
  *      stacks already fall back to system fonts.
  *   4. ops/foreman/ is this repo's installed copy of bin/ and had drifted
  *      (run.mjs lacked the token breakdown). The copies must be identical.
+ *   5. board.mjs assumed every phase had start, end and goal and the board had
+ *      a launch date. This repo's own board has none of them, so docs/board.md
+ *      printed "Invalid Date" and "undefined" into every phase header.
  *
  * Fixtures are built in a temp dir by copying the real scripts, because both
  * resolve their repo root from their own location.
@@ -36,7 +39,7 @@ const ok = (name, cond, detail = "") => {
   if (!cond) failures += 1;
 };
 
-function fixture({ withBuildHook = false } = {}) {
+function fixture({ withBuildHook = false, board } = {}) {
   const root = mkdtempSync(join(tmpdir(), "foreman-board-test-"));
   const ops = join(root, "ops", "foreman");
   mkdirSync(ops, { recursive: true });
@@ -59,7 +62,7 @@ function fixture({ withBuildHook = false } = {}) {
   );
   writeFileSync(
     join(root, "docs", "board.json"),
-    JSON.stringify({
+    JSON.stringify(board ?? {
       meta: { name: "Fixture", updated: "2026-01-01", launch: "2026-12-01" },
       phases: [
         {
@@ -138,6 +141,34 @@ for (const f of ["board.mjs", "dashboard.mjs", "run.mjs", "loop.sh"]) {
   const src = readFileSync(join(HERE, f), "utf8");
   const inst = readFileSync(join(REPO, "ops", "foreman", f), "utf8");
   ok(`ops/foreman/${f} is identical to bin/${f}`, src === inst);
+}
+
+
+/* 5. dates, goal and launch are optional ------------------------------------ */
+{
+  const { root, ops } = fixture({
+    board: {
+      meta: { name: "Fixture", updated: "2026-01-01" },
+      phases: [
+        { name: "Phase 1", tasks: [{ id: "T-001", title: "undated", owner: "you", est: "1h", status: "todo" }] },
+      ],
+    },
+  });
+  const r = node([join(ops, "board.mjs"), "build"], root);
+  const md = readFileSync(join(root, "docs", "board.md"), "utf8");
+  ok("an undated board builds", r.status === 0, r.stderr);
+  ok("an undated board prints no Invalid Date", !md.includes("Invalid Date"));
+  ok("a phase with no goal prints no undefined", !/undefined/.test(md));
+  ok("an undated board names no launch target", !md.includes("launch target"));
+  rmSync(root, { recursive: true, force: true });
+}
+{
+  const { root, ops } = fixture();
+  node([join(ops, "board.mjs"), "build"], root);
+  const md = readFileSync(join(root, "docs", "board.md"), "utf8");
+  ok("a dated phase still shows its date range", md.includes("1 Jan &rarr; 1 Feb"));
+  ok("a board with a launch date still shows it", md.includes("launch target <b>1 Dec</b>"));
+  rmSync(root, { recursive: true, force: true });
 }
 
 console.log(failures ? `\n[board] ${failures} FAILED` : "\n[board] all checks passed");

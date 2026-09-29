@@ -41,7 +41,9 @@ import {
   scanCommand,
   scanFiles,
   shimCommand,
+  supportsPreserveFd,
   walkFiles,
+  writeSecrets,
 } from "./secrets.mjs";
 
 let failures = 0;
@@ -309,6 +311,24 @@ try {
     );
   }
 
+  /* ------------------------------------- a runtime that never reads the pipe */
+
+  {
+    // podman 4.9.3 has no --preserve-fd, so it exits 125 without reading the
+    // secret's descriptor, and the pipe resets. That reset used to be an
+    // unhandled 'error' event which killed this process with a stack trace
+    // instead of reporting podman's own exit status. `sh -c 'exit 3'` stands
+    // in for podman here: it also exits without reading fd 3.
+    const plan = preserveFdPlan(["ANTHROPIC_API_KEY"]);
+    const child = spawn("sh", ["-c", "sleep 0.2; exit 3"], { stdio: plan.stdio });
+    child.stdout.resume();
+    child.stderr.resume();
+    writeSecrets(child, new Map([["ANTHROPIC_API_KEY", KEY]]), plan.fdOf);
+    const code = await new Promise((r) => child.on("exit", r));
+    await new Promise((r) => setTimeout(r, 300));
+    ok("a runtime that exits without reading its secret is reported by its exit status, not a crash", code === 3, `exit ${code}`);
+  }
+
   /* ------------------------------------------------- the delivery argv */
 
   {
@@ -424,6 +444,21 @@ try {
     skip("live: the secret crosses into a real container", "podman not on PATH");
   } else if (!haveImage) {
     skip("live: the secret crosses into a real container", `image ${IMAGE} not present locally`);
+  } else if (!supportsPreserveFd("podman")) {
+    const version = spawnSync("podman", ["--version"], { encoding: "utf8" }).stdout.trim();
+    skip("live: the secret crosses into a real container", `${version} has no --preserve-fd`);
+    // What CAN be checked on this podman: the CLI refuses by name, before any
+    // secret is read or any container starts, rather than crashing on the pipe.
+    const r = spawnSync(
+      "node",
+      [new URL("./secrets.mjs", import.meta.url).pathname, "exec", "--require", "ANTHROPIC_API_KEY", "--image", IMAGE, "--", "true"],
+      { encoding: "utf8", env: { ...process.env, ANTHROPIC_API_KEY: KEY } },
+    );
+    ok(
+      "live: on a podman without --preserve-fd, exec refuses by name instead of crashing",
+      r.status === 3 && /has no --preserve-fd/.test(r.stderr) && !/ECONNRESET|node:events/.test(r.stderr),
+      `exit ${r.status}: ${r.stderr.trim()}`,
+    );
   } else {
     /** Run `script` in a container with the secrets delivered over preserved fds. */
     const inside = (names, values, script, extraArgs = []) =>

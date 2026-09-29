@@ -497,13 +497,31 @@ export function shimCommand(fdOf, cmd) {
   return ["sh", "-c", `${sets}; exec "$@"`, "sh", ...cmd];
 }
 
-/** Write each value into its descriptor and close it. */
+/**
+ * Write each value into its descriptor and close it.
+ *
+ * A runtime that exits without reading its descriptor resets the pipe
+ * (ECONNRESET, or EPIPE on the write). The runtime's own exit status and
+ * stderr already report that failure, so the error is absorbed here: left
+ * unhandled it kills this process with a stack trace instead, which is what
+ * podman 4.9.3, lacking `--preserve-fd`, did (measured 2026-09-29).
+ */
 export function writeSecrets(child, values, fdOf) {
   for (const [name, fd] of fdOf) {
     const pipe = child.stdio[fd];
     if (!pipe) throw new SecretsError("SECRET_NO_PIPE", `no pipe on fd ${fd} for ${name}`, { secret: name });
+    pipe.on("error", () => {});
     pipe.end(String(values.get(name)));
   }
+}
+
+/**
+ * Whether `runtime run` accepts `--preserve-fd`. podman 4.9.3 (Ubuntu 24.04's
+ * package) does not: it exits 125 with "unknown flag: --preserve-fd".
+ */
+export function supportsPreserveFd(runtime = "podman") {
+  const r = spawnSync(runtime, ["run", "--help"], { encoding: "utf8" });
+  return r.status === 0 && /--preserve-fd\b/.test(r.stdout ?? "");
 }
 
 /**
@@ -711,6 +729,15 @@ if (isEntry) {
         `[secrets] REFUSING — ${runtime} has no --preserve-fd. Its nearest equivalents put the\n` +
           "  value in `docker inspect` (measured: see the header of this file). A credential\n" +
           "  channel that silently weakens on a different runtime is worse than none.",
+      );
+      process.exit(3);
+    }
+    if (!supportsPreserveFd(runtime)) {
+      const version = spawnSync(runtime, ["--version"], { encoding: "utf8" }).stdout?.trim() || runtime;
+      console.error(
+        `[secrets] REFUSING — ${version} has no --preserve-fd, which is the only channel this\n` +
+          "  file trusts to carry a secret into a container. Upgrade podman rather than fall\n" +
+          "  back to -e or --env-file, which put the value in `podman inspect`.",
       );
       process.exit(3);
     }

@@ -13,7 +13,7 @@ order: 2
   <div class="bignum">0<span>%</span></div>
   <div class="boardmeta">
     <b>Layer 2 — Harness &middot; 0 of 11 tasks closed through the full gate</b>
-    <span>0 more are built and waiting only on reviewer / qa / security verdicts &middot; launch target <b>Invalid Date</b></span>
+    <span>0 more are built and waiting only on reviewer / qa / security verdicts</span>
     <span>All phases ever, including pre-V1 scope: 1 of 37 (3%)</span>
   </div>
 </div>
@@ -35,9 +35,7 @@ order: 2
 
 ## Layer 0 — Spec format
 
-<div class="phasebar"><div class="phasemeta"><b>Invalid Date &rarr; Invalid Date</b> &middot; 0/5 done &middot; 4d remaining</div><div class="pbar "><div class="pfill" style="width:0%"></div></div></div>
-
-undefined
+<div class="phasebar"><div class="phasemeta">0/5 done &middot; 4d remaining</div><div class="pbar "><div class="pfill" style="width:0%"></div></div></div>
 
 <div class="task todo"><div class="taskhead"><code class="tid">P-1</code><span class="ttitle">A spec schema the environment can be derived from</span><span class="chip neutral">To do</span></div><div class="taskmeta"><span class="tmi"><b>architect</b></span><span class="tmi">1d</span> <span class="chip ok" title="first attempt">qa pass</span></div><div class="acc"><b>Accept:</b> a spec carries a structured block declaring runtime, services and external hosts, with prose below it, and a parser turns that block into an image spec and an egress allowlist without a human editing either</div><div class="tnote"><b>Latest:</b> FIRST, because everything downstream reads it. Free-text specs make environment derivation impossible, and the egress allowlist is the control that makes the sandbox real. This is also what turns allowlisting from a chore nobody maintains into a byproduct of writing the spec you were writing anyway.</div></div>
 <div class="task todo"><div class="taskhead"><code class="tid">P-2</code><span class="ttitle">Appended gate verdicts, before there is data to lose</span><span class="chip neutral">To do</span></div><div class="taskmeta"><span class="tmi"><b>backend</b></span><span class="tmi">2h</span> <span class="chip ok" title="first attempt">qa pass</span></div><div class="acc"><b>Accept:</b> a gate records every verdict rather than the latest, and rework rate and first-pass rate are computable from the board</div><div class="tnote"><b>Latest:</b> CHEAP NOW, IMPOSSIBLE RETROACTIVELY. The board keeps one verdict per gate, so a task that failed qa three times and passed once reads as a pass. Two of the KPIs that matter most are therefore unmeasurable, and the dashboard already prints a warning saying so.</div></div>
@@ -47,9 +45,7 @@ undefined
 
 ## Layer 3 — Dev environment
 
-<div class="phasebar"><div class="phasemeta"><b>Invalid Date &rarr; Invalid Date</b> &middot; 0/7 done &middot; 8d remaining</div><div class="pbar "><div class="pfill" style="width:0%"></div></div></div>
-
-undefined
+<div class="phasebar"><div class="phasemeta">0/7 done &middot; 8d remaining</div><div class="pbar "><div class="pfill" style="width:0%"></div></div></div>
 
 <div class="task todo"><div class="taskhead"><code class="tid">E-0</code><span class="ttitle">Podman is the assumption; missing means install it</span><span class="chip neutral">To do</span></div><div class="taskmeta"><span class="tmi"><b>devops</b></span><span class="tmi">4h</span> <span class="chip ok" title="first attempt">qa pass</span></div><div class="acc"><b>Accept:</b> the runner uses podman; if it is absent the tool offers the correct install command for the platform and runs it on confirmation; Docker is used ONLY when explicitly asked for, and that run prints what the weaker isolation means</div><div class="tnote"><b>Latest:</b> NOT A GRACEFUL FALLBACK. If the security claim is the product, the tool must not quietly accept a weaker runtime because it happened to find one on the box - that is how a guarantee becomes a default nobody checked. Rootless podman means an escape lands unprivileged; Docker&#39;s usual daemon runs as root and an escape ends the argument. Docker stays supported because someone&#39;s machine will only have it, but it is opt-in and it says what it costs. Install friction is real and is the reason this is its own task: Linux needs a package manager and probably sudo, macOS needs brew plus podman machine init, which is a VM. An installer that asks for sudo has to explain itself first.</div></div>
 <div class="task todo"><div class="taskhead"><code class="tid">E-1</code><span class="ttitle">Container runner: podman, resource limits, repo bind-mount</span><span class="chip neutral">To do</span></div><div class="taskmeta"><span class="tmi"><b>backend</b></span><span class="tmi">1d</span><span class="tmi">after P-1</span> <span class="chip ok" title="first attempt">qa pass</span></div><div class="acc"><b>Accept:</b> an agent runs inside a container with --memory, --cpus and --pids-limit enforced, a read-only root, the repo bind-mounted, and NO container socket; a test proves each limit actually binds rather than being passed and ignored</div><div class="tnote"><b>Latest:</b> Unblocked by ADR-0001: build rather than adopt. Fabro&#39;s container wrapper is 179 lines of create/inspect/list/delete; adopting it would mean taking their graph model and server to get something we can write, and it would not get us the egress control we actually need.</div></div>
@@ -63,9 +59,7 @@ REOPENED AFTER ITS QA PASS. Two bugs found by the H-0 agent in bin/egress.mjs, b
 
 ## Layer 2 — Harness
 
-<div class="phasebar"><div class="phasemeta"><b>Invalid Date &rarr; Invalid Date</b> &middot; 0/11 done &middot; 13d remaining</div><div class="pbar "><div class="pfill" style="width:0%"></div></div></div>
-
-undefined
+<div class="phasebar"><div class="phasemeta">0/11 done &middot; 13d remaining</div><div class="pbar "><div class="pfill" style="width:0%"></div></div></div>
 
 <div class="task todo"><div class="taskhead"><code class="tid">H-0</code><span class="ttitle">Secrets reach the harness without touching the repo, image or log</span><span class="chip neutral">To do</span></div><div class="taskmeta"><span class="tmi"><b>security</b></span><span class="tmi">4h</span> <span class="chip ok" title="first attempt">qa pass</span></div><div class="acc"><b>Accept:</b> an API key is available to the harness at run time, is never written into the image, the repo, the spec or the event log, and a test proves a key value cannot be found in any of them after a run</div><div class="tnote"><b>Latest:</b> In the skeleton and absent from the board until now. CORRECTION, and it is the defect class this project cares most about - a correct control defended with a wrong reason. This note previously said the model call happens above the dev environment &#39;so the key never needs to be inside the container at all&#39;. That is FALSE under the default path: H-10 makes the CLI adapter the default, precisely because subscription auth lives in the CLI, and the CLI runs INSIDE the container. The key must cross the boundary. Anyone designing from the old note would have built the wrong thing. Found by the agent implementing this task, which is the only reason it was caught before the code was written.</div></div>
 <div class="task todo"><div class="taskhead"><code class="tid">H-9</code><span class="ttitle">Timeouts, and killing a run that hangs</span><span class="chip neutral">To do</span></div><div class="taskmeta"><span class="tmi"><b>backend</b></span><span class="tmi">4h</span><span class="tmi">after H-1</span></div><div class="acc"><b>Accept:</b> a run has a wall-clock ceiling, exceeding it kills the process tree and the container, and the event log records that it was killed rather than that it finished</div><div class="tnote"><b>Latest:</b> Boring, essential, and it was missing. A hung agent holds the lock forever - which happened on this box today: four wait loops from a deploy sat spinning for sixteen hours because the condition they polled matched their own command line.</div></div>
@@ -89,18 +83,14 @@ STRUCTURE IS INFERRED, INTENT IS DECLARED. The graph owns what calls what, which
 
 ## Layer 2b — Skills
 
-<div class="phasebar"><div class="phasemeta"><b>Invalid Date &rarr; Invalid Date</b> &middot; 0/2 done &middot; 6d remaining</div><div class="pbar "><div class="pfill" style="width:0%"></div></div></div>
-
-undefined
+<div class="phasebar"><div class="phasemeta">0/2 done &middot; 6d remaining</div><div class="pbar "><div class="pfill" style="width:0%"></div></div></div>
 
 <div class="task todo"><div class="taskhead"><code class="tid">S-1</code><span class="ttitle">Consume the existing skills standard</span><span class="chip neutral">To do</span></div><div class="taskmeta"><span class="tmi"><b>backend</b></span><span class="tmi">4h</span><span class="tmi">after H-1</span></div><div class="acc"><b>Accept:</b> a project can point at any repo following skills/&lt;category&gt;/&lt;name&gt;/SKILL.md and have those skills available to a run; no second format is invented</div></div>
 <div class="task todo"><div class="taskhead"><code class="tid">S-2</code><span class="ttitle">Derive skills from the project rather than installing them</span><span class="chip neutral">To do</span></div><div class="taskmeta"><span class="tmi"><b>architect</b></span><span class="tmi">1w</span><span class="tmi">after S-1, P-2</span></div><div class="acc"><b>Accept:</b> after a run of closed tasks, the tool can emit a skill describing how THIS repo does a recurring thing, citing the incident that made the rule, and a human can accept or reject it</div><div class="tnote"><b>Latest:</b> The version of &#39;your own skills&#39; that is not just rewriting someone else&#39;s in your voice. A generic migration skill is worth less than one that says how migrations work HERE and what went wrong the day the rule was written. It cannot be sold to you; it can only be grown.</div></div>
 
 ## Layer 1 — Control plane
 
-<div class="phasebar"><div class="phasemeta"><b>Invalid Date &rarr; Invalid Date</b> &middot; 1/8 done &middot; 9d remaining</div><div class="pbar "><div class="pfill" style="width:13%"></div></div></div>
-
-undefined
+<div class="phasebar"><div class="phasemeta">1/8 done &middot; 9d remaining</div><div class="pbar "><div class="pfill" style="width:13%"></div></div></div>
 
 <div class="task todo"><div class="taskhead"><code class="tid">B-2</code><span class="ttitle">Estimate in tokens, not hours</span><span class="chip neutral">To do</span></div><div class="taskmeta"><span class="tmi"><b>backend</b></span><span class="tmi">1d</span><span class="tmi">after P-2</span></div><div class="acc"><b>Accept:</b> a task&#39;s estimate is in tokens, actuals come from the run log automatically, and a calibration factor per task type re-estimates the open work with no human input</div><div class="tnote"><b>Latest:</b> Hours are what humans spend and require a human to report, so the calibration loop never closes. Tokens are measured exactly at the end of every run. Hours stay as a secondary display for people who think in days.</div></div>
 <div class="task todo"><div class="taskhead"><code class="tid">B-3</code><span class="ttitle">A task points at its spec, and a stale doc is visible</span><span class="chip neutral">To do</span></div><div class="taskmeta"><span class="tmi"><b>backend</b></span><span class="tmi">4h</span><span class="tmi">after P-1</span></div><div class="acc"><b>Accept:</b> a task carries a spec path rendered as a link on its card, and a check compares each doc&#39;s claimed updated: date against the last commit that touched it and names the ones that lie</div></div>
@@ -115,18 +105,14 @@ Rework spend is the one number that bought nothing, and it only became computabl
 
 ## Layer 1b — TUI
 
-<div class="phasebar"><div class="phasemeta"><b>Invalid Date &rarr; Invalid Date</b> &middot; 0/2 done &middot; 8d remaining</div><div class="pbar "><div class="pfill" style="width:0%"></div></div></div>
-
-undefined
+<div class="phasebar"><div class="phasemeta">0/2 done &middot; 8d remaining</div><div class="pbar "><div class="pfill" style="width:0%"></div></div></div>
 
 <div class="task blocked"><div class="taskhead"><code class="tid">U-1</code><span class="ttitle">The walkthrough: folder, spec, environment, harness, repo, loop</span><span class="chip bad">Blocked</span></div><div class="taskmeta"><span class="tmi"><b>frontend</b></span><span class="tmi">1w</span><span class="tmi">after H-1, P-1</span></div><div class="acc"><b>Accept:</b> starting in an empty or existing folder, a person is walked through writing the spec, standing up the environment derived from it, choosing a harness, and starting the loop, without editing a config file by hand</div></div>
 <div class="task blocked"><div class="taskhead"><code class="tid">U-2</code><span class="ttitle">Watch a run and steer it mid-flight</span><span class="chip bad">Blocked</span></div><div class="taskmeta"><span class="tmi"><b>frontend</b></span><span class="tmi">3d</span><span class="tmi">after U-1</span></div><div class="acc"><b>Accept:</b> a running agent&#39;s output streams to the terminal and a person can interrupt or redirect it without killing the run</div><div class="tnote"><b>Latest:</b> TUI rather than a web UI on purpose: no daemon, no auth, no port, and it works over SSH. The static HTML dashboard is not a competitor to this, it is the artifact you send to someone who is not in a terminal.</div></div>
 
 ## Layer 4 — Infra and graduate
 
-<div class="phasebar"><div class="phasemeta"><b>Invalid Date &rarr; Invalid Date</b> &middot; 0/2 done &middot; 6d remaining</div><div class="pbar "><div class="pfill" style="width:0%"></div></div></div>
-
-undefined
+<div class="phasebar"><div class="phasemeta">0/2 done &middot; 6d remaining</div><div class="pbar "><div class="pfill" style="width:0%"></div></div></div>
 
 <div class="task todo"><div class="taskhead"><code class="tid">G-1</code><span class="ttitle">Generate CI and docs from what actually happened</span><span class="chip neutral">To do</span></div><div class="taskmeta"><span class="tmi"><b>devops</b></span><span class="tmi">3d</span><span class="tmi">after B-3, E-4</span></div><div class="acc"><b>Accept:</b> a graduate command emits a workflow file built from the commands the gates really ran, a docs site from the specs really written, and a decision index from the ADRs really recorded; nothing in the output is a template placeholder</div><div class="tnote"><b>Latest:</b> Every scaffolder emits CI at init, when it knows nothing about the project. During a build CI is friction; at handoff its absence is what makes a project unmaintainable.</div></div>
 <div class="task todo"><div class="taskhead"><code class="tid">G-2</code><span class="ttitle">Emit infrastructure as code, do not depend on it</span><span class="chip neutral">To do</span></div><div class="taskmeta"><span class="tmi"><b>devops</b></span><span class="tmi">3d</span><span class="tmi">after G-1, E-4</span></div><div class="acc"><b>Accept:</b> graduate emits a Terraform module and an Ansible playbook derived from the spec and from what was actually deployed, and the tool itself runs with neither installed</div><div class="tnote"><b>Latest:</b> Terraform and Ansible are right for LONG-LIVED infrastructure and wrong for an ephemeral sandbox, so they belong here rather than in Layer 1. Emitting them at graduate beats emitting them at init for the same reason CI does: at init a scaffolder knows nothing about the project. EMITTER, NOT DEPENDENCY - some teams use Pulumi, some use plain bash, some use Nix, and making one of them a hard requirement contradicts the whole thesis.</div></div>
