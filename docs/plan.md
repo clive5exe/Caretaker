@@ -126,6 +126,8 @@ The budget is 5 hours. Each step ends in a commit you can check.
 | 2 the Oz stand-in | done with a **fake model**. Warp's own validator accepts its `review.json`. Not yet proven: a real model, and the podman path, which can't run on the build machine | 88997cf |
 | 3 workflows | **done: all 5 on Caretaker**, actionlint clean. Review and triage only read. Implement, spec and improve-review-pr use option A (below) | this commit |
 
+| 4 review → gate | done: `bin/review-gate.mjs` records `reviewer` pass/fail from Warp's `review.json` (`by: review-pr`), only after **Warp's own validator** accepts it. It runs from your machine (step 5 calls it). Recording it from inside GitHub's review job is **not** done: that job is read-only on purpose (it reviews untrusted PRs), and giving it write access is your call | this commit |
+
 ### How the agent's work becomes a PR (option A, chosen 2026-09-29)
 
 The agent never pushes. Caretaker's sandbox mounts `.git` read-only, because a
