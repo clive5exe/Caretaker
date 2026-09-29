@@ -43,7 +43,7 @@ let dirN = 0;
 const freshDir = () => join(TMP, `d${dirN++}`);
 
 const T = "2026-08-30T14:22:01Z";
-const base = { t: T, run: "r_8f2c", task: "T-001", stage: "review", kind: "gate", level: "warn", verdict: "fail", detail: "pricing.ts changed, pricing.md did not", tokens: 1240 };
+const base = { t: T, run: "r_8f2c", task: "T-001", stage: "review", kind: "gate", level: "warn", verdict: "fail", detail: "upload.ts changed, upload.md did not", tokens: 1240 };
 
 /* ============================================================ the fields */
 
@@ -133,6 +133,8 @@ ok("extra fields are kept, because the keys are fields", normalise({ ...base, pr
       { ...base, detail: "a" },
       { t: T, run: "r_other", kind: "agent", level: "debug", detail: "b" },
       { t: T, run: "r_8f2c", task: "T-002", kind: "gate", level: "info", verdict: "pass", detail: "c" },
+      // A run that errored: no verdict, and it still broke (independent QA).
+      { t: T, run: "r_err", kind: "agent", level: "error", detail: "d" },
     ]);
     const file = fileFor(dir, T);
     appendFileSync(file, '{"t":"2026-08-30T14:2');
@@ -144,10 +146,12 @@ ok("extra fields are kept, because the keys are fields", normalise({ ...base, pr
     const views = {
       'select(.task=="T-001")': "a",
       'select(.run=="r_8f2c")': "ac",
-      'select(.verdict=="fail")': "a",
-      'select(.level!="debug")': "ac",
-      ".": "abc",
+      'select(.verdict=="fail" or .level=="error")': "ad",
+      'select(.level!="debug")': "acd",
+      ".": "abcd",
     };
+    const documented = [...readFileSync(join(HERE, "..", "docs", "events.md"), "utf8").matchAll(/jq -cR 'fromjson\? \| (.+?)'/g)].map((m) => m[1]);
+    ok("the views tested are the views docs/events.md documents", documented.length > 0 && documented.every((f) => f in views), JSON.stringify(documented));
     const got = Object.fromEntries(Object.keys(views).map((f) => [f, jq(f)]));
     ok("the documented jq views read a file with a fragment in it",
       Object.entries(views).every(([f, want]) => got[f].status === 0 && got[f].details === want),
