@@ -18,13 +18,13 @@
  * this checkout; none of them is installed into target repos.
  */
 import { existsSync, readFileSync, readdirSync, realpathSync, statSync, openSync, readSync, closeSync } from "node:fs";
-import { homedir } from "node:os";
-import { basename, dirname, join, resolve, sep } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import * as drift from "./drift.mjs";
 import * as events from "./events.mjs";
 import { commandsFor, openQuestions, requiredGates, specApprovalNeeded, stageOf, STAGES } from "./lifecycle.mjs";
 import { KEY_SHAPES } from "./secrets.mjs";
+import { stateDirFor } from "./runstore.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -83,9 +83,8 @@ export function createReadModel({ cfgPath, board, dash, now = () => new Date(), 
   const GATES = cfg.gates ?? ["reviewer", "qa", "security"];
   const eventsDir = at(cfg.events ?? "ops/foreman/events");
   const specsDir = cfg.specs ?? "specs";
-  const stateDir = resolve(
-    stateOverride ?? cfg.stateDir ?? join(process.env.XDG_STATE_HOME || join(homedir(), ".local", "state"), "foreman", basename(root)),
-  );
+  // One definition of where runs live, shared with the writer (runstore.mjs).
+  const stateDir = stateOverride ? resolve(stateOverride) : stateDirFor(root, cfg);
   const archiveDir = join(stateDir, "runs");
   const staleMs = (cfg.staleRunHours ?? 24) * 3600 * 1000;
   const reworkThreshold = cfg.inbox?.reworkThreshold ?? 2;

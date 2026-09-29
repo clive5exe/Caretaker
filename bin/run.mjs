@@ -26,6 +26,7 @@
  *   node ops/foreman/run.mjs end   --name qa --task T-277 --state failed --note "OOM"
  *
  * Flags: --name (required), --task, --tokens, --state, --note, --src, --at,
+ *        --run r_…, --parent r_…, --adapter, --cli,
  *        --config (defaults to config.json beside this file).
  */
 import { readFileSync, appendFileSync, mkdirSync } from "node:fs";
@@ -65,6 +66,9 @@ if (!kind || !["start", "end"].includes(kind)) {
 const KNOWN = new Set([
   "name", "task", "tokens", "state", "note", "src", "at", "config",
   "in", "cached", "write", "out", "turns", "model",
+  // C-4: a row can name its run and the run it examines, so the read model can
+  // fold start/end rows into one run instead of pairing them by guesswork.
+  "run", "parent", "adapter", "cli",
 ]);
 const NUMERIC = new Set(["tokens", "in", "cached", "write", "out", "turns"]);
 const flags = {};
@@ -83,6 +87,14 @@ for (let i = 1; i < argv.length; i++) {
 if (!flags.name) {
   console.error("run.mjs: --name is required (which agent or job this was)");
   process.exit(2);
+}
+// The shape the harness mints (`r_` + 8 hex). Anything else would be written,
+// then silently dropped by the read model as legacy, which is worse than a no.
+for (const k of ["run", "parent"]) {
+  if (flags[k] !== undefined && !/^r_[0-9a-f]{8}$/.test(flags[k])) {
+    console.error(`run.mjs: --${k} must be a run id like r_0a1b2c3d, got ${flags[k]}`);
+    process.exit(2);
+  }
 }
 
 /*
@@ -156,6 +168,10 @@ const row = {
   name: flags.name,
   // `start` implies running; `end` defaults to done unless told otherwise.
   state: flags.state ?? (kind === "start" ? "running" : "done"),
+  ...(flags.run ? { run: flags.run } : {}),
+  ...(flags.parent ? { parent: flags.parent } : {}),
+  ...(flags.adapter ? { adapter: flags.adapter } : {}),
+  ...(flags.cli ? { cli: flags.cli } : {}),
   ...(flags.task ? { task: flags.task } : {}),
   ...(tokens !== undefined ? { tokens } : {}),
   ...Object.fromEntries(
