@@ -268,7 +268,7 @@ export function renderMetrics(d, st, W, H, p) {
       out.push(`  ${fit(g, 9)} ${p.dim("no attempts in range")}`);
       continue;
     }
-    const pct = Math.round((v.pass / n) * 100);
+    const pct = v.passPct;
     const fill = Math.round((pct / 100) * bw);
     const bar = (pct >= 80 ? p.pass : pct < 50 ? p.fail : p.warn)("█".repeat(fill)) + p.faint("░".repeat(bw - fill));
     out.push(`  ${fit(g, 9)} ${bar} ${pct}% ${p.dim(`${v.pass}/${n}`)}`);

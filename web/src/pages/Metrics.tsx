@@ -23,12 +23,12 @@ function Head({ title, source, range }: { title: string; source: string; range: 
 }
 
 function GateBars({ stats }: { stats: GateStats }) {
-  const rows = stats.filter(([, s]) => s.pass + s.fail > 0);
+  const rows = stats.filter(([, s]) => s.passPct !== null);
   if (!rows.length) return <p className="dim" style={{ margin: "8px 0 0" }}>No verdict recorded in this range.</p>;
   return (
     <div className="hbar" style={{ marginTop: 12 }}>
       {rows.map(([g, s]) => {
-        const pct = Math.round((s.pass / (s.pass + s.fail)) * 100);
+        const pct = s.passPct ?? 0; // computed by core, never here
         return (
           <div key={g} style={{ display: "contents" }}>
             <span>{gateLabel(g)}</span>
@@ -207,7 +207,16 @@ export function MetricsPage() {
         <div className="card">
           <Head title="Pass rate per gate" source="board.json verdicts" range={range} />
           <GateBars stats={m.gateStats} />
-          <p className="ft">Every attempt counts, from the appended verdict history.</p>
+          <p className="ft">
+            All time:{" "}
+            {m.allTime.gateStats.some(([, s]) => s.passPct !== null)
+              ? m.allTime.gateStats
+                  .filter(([, s]) => s.passPct !== null)
+                  .map(([g, s]) => `${gateLabel(g)} ${s.passPct}% of ${s.pass + s.fail}`)
+                  .join(" · ")
+              : "no verdict recorded"}
+            . Every attempt counts, from the appended verdict history; the range applies to each verdict's date.
+          </p>
         </div>
         <div className="card">
           <Head title="First-pass rate" source="board.json verdicts" range={range} />

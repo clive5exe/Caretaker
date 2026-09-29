@@ -307,7 +307,9 @@ rows: run log rows and gate verdicts. A figure with no dates behind it says
   - context churn: the share of context the cache could not match
   - rework spend: a failed task's tokens up to the day of its last failed gate
     verdict (the attempts sent back, not the run that passed)
-  - pass rate per gate, counting every attempt from the verdict history
+  - pass rate per gate, counting every attempt from the verdict history, in
+    the range and all time. Core computes pass% and fail% (fail is 100 minus
+    pass), so the page, board.html and the terminal show the same figures
   - first-pass rate
   - estimate against elapsed time for closed tasks
   - tokens by agent and by model

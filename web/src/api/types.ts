@@ -312,7 +312,7 @@ export interface TokenStats {
   perTurn: number | null;
 }
 
-export type GateStats = [string, { pass: number; fail: number }][];
+export type GateStats = [string, { pass: number; fail: number; passPct: number | null; failPct: number | null }][];
 
 export interface CycleRow {
   id: string;

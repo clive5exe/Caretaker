@@ -186,6 +186,14 @@ export function gateStats(phases, GATES) {
       }
     }
   }
+  // The percentages are computed HERE, once, and fail is 100 minus pass:
+  // rounding each on its own let the page's fail% and the web's pass% sum to
+  // 101 (independent review), and a browser computing its own is a second copy.
+  for (const v of m.values()) {
+    const n = v.pass + v.fail;
+    v.passPct = n ? Math.round((v.pass / n) * 100) : null;
+    v.failPct = n ? 100 - v.passPct : null;
+  }
   return [...m.entries()];
 }
 
@@ -760,7 +768,7 @@ const gateRows = gateStats
       `<tr><td>${esc(g)}</td><td class="num">${v.pass}</td><td class="num ${
         v.fail ? "worse" : ""
       }">${v.fail}</td><td class="num">${
-        v.pass + v.fail ? Math.round((v.fail / (v.pass + v.fail)) * 100) : 0
+        v.failPct ?? 0
       }%</td></tr>`,
   )
   .join("");

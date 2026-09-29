@@ -697,7 +697,8 @@ const gateRows = gateStats
       `<tr><td>${esc(g)}</td><td class="num">${v.pass}</td><td class="num ${
         v.fail ? "worse" : ""
       }">${v.fail}</td><td class="num">${
-        v.pass + v.fail ? Math.round((v.fail / (v.pass + v.fail)) * 100) : 0
+        // W-15, mirrored: fail% is 100 minus the rounded pass%, as core computes it.
+        v.pass + v.fail ? 100 - Math.round((v.pass / (v.pass + v.fail)) * 100) : 0
       }%</td></tr>`,
   )
   .join("");
