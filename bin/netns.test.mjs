@@ -255,8 +255,8 @@ if (podmanAvailable !== "true") {
         ok(`live attack: ${r.name}`, r.passed, `$ ${r.command}\n       -> ${r.stdout || r.stderr}`);
       }
       ok(
-        "live attack: exactly six attacks were run (the five this task named, and the raw-IP bypass)",
-        results.length === 6,
+        "live attack: exactly eight attacks were run (E-3's five, the raw-IP bypass, and E-2's two POSTs out)",
+        results.length === 8,
         `ran ${results.length}: ${results.map((r) => r.name).join(" | ")}`,
       );
 

@@ -37,7 +37,7 @@ import { spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { buildArgs, checkLimits, delegatedControllers } from "./sandbox.mjs";
 import { HOST, readDevcontainer, toEgress, toLimits } from "./spec.mjs";
@@ -147,7 +147,9 @@ export const tagVersion = (image) => {
   const s = String(image ?? "");
   const tag = /:([^/:@]+)(@|$)/.exec(s)?.[1] ?? "";
   const nums = tag.split("-").filter((p) => /^v?\d+(\.\d+)*$/.test(p)).map((p) => p.replace(/^v/, ""));
-  const pick = /\/devcontainers\//.test(s) && nums.length > 1 ? nums[1] : nums[0];
+  // A devcontainers tag's first number is the image's own version, so with
+  // only that one ("1-bookworm") no toolchain version is named: any.
+  const pick = /\/devcontainers\//.test(s) ? (nums.length > 1 ? nums[1] : undefined) : nums[0];
   return pick ?? "latest";
 };
 
@@ -169,6 +171,7 @@ export function composeServices(text) {
   const start = lines.findIndex((l) => /^services:\s*(#.*)?$/.test(l));
   if (start === -1) return null;
   let indent = null;
+  let child = null;
   let cur = null;
   for (const l of lines.slice(start + 1)) {
     if (!l.trim() || /^\s*#/.test(l)) continue;
@@ -179,12 +182,33 @@ export function composeServices(text) {
     if (svc) {
       cur = svc[1];
       out[cur] = { image: null };
+      child = null;
     } else if (cur && lead > indent) {
-      const img = /^\s*image:\s*["']?([^"'\s#]+)/.exec(l);
+      // The service's own `image:`, one level in: an `image:` nested deeper
+      // (under environment:, labels:, …) is not the service's image
+      // (independent re-review).
+      child ??= lead;
+      const img = lead === child && /^\s*image:\s*["']?([^"'\s#]+)/.exec(l);
       if (img) out[cur].image = img[1];
     }
   }
   return out;
+}
+
+/**
+ * The compose project names a running service of THIS stack can carry: the
+ * file's top-level `name:` if it has one; else the compose directory's name,
+ * and the `<folder>_devcontainer` name a dev container tool gives it. A
+ * service found under any other project is another stack's (independent
+ * re-review: a stopped db here was "running" because another project's was).
+ */
+export function composeProjects(text, composePath, workspaceRoot = null) {
+  const norm = (s) => String(s).toLowerCase().replace(/[^a-z0-9_-]/g, "");
+  const named = /^name:\s*["']?([^"'\s#]+)/m.exec(String(text))?.[1];
+  if (named) return [norm(named)];
+  const out = [norm(basename(dirname(resolve(composePath))))];
+  if (workspaceRoot) out.push(`${norm(basename(resolve(workspaceRoot)))}_devcontainer`);
+  return [...new Set(out)];
 }
 
 /** What the spec and devcontainer declare. */
@@ -209,12 +233,16 @@ export function declared({ dev, specs = [], devcontainerPath = null }) {
   // not a service it needs.
   let compose = null;
   let composeError = null;
+  let projects = null;
   const files = [dev?.dockerComposeFile ?? []].flat();
   if (files.length && devcontainerPath) {
     compose = {};
     for (const f of files) {
       try {
-        const got = composeServices(readFileSync(resolve(dirname(devcontainerPath), f), "utf8"));
+        const file = resolve(dirname(devcontainerPath), f);
+        const text = readFileSync(file, "utf8");
+        projects ??= composeProjects(text, file, resolve(dirname(devcontainerPath), ".."));
+        const got = composeServices(text);
         if (!got) composeError = `${f} has no services: map`;
         else Object.assign(compose, got);
       } catch (e) {
@@ -229,7 +257,7 @@ export function declared({ dev, specs = [], devcontainerPath = null }) {
   });
   const merged = { hosts: [...new Set(specs.flatMap((s) => s.hosts ?? []))] };
   const egress = toEgress(merged, dev);
-  return { image: dev?.image ?? (dev?.build?.dockerfile ? `build: ${dev.build.dockerfile}` : null), tools, unknownFeatures, services, hosts: egress.allow };
+  return { image: dev?.image ?? (dev?.build?.dockerfile ? `build: ${dev.build.dockerfile}` : null), tools, unknownFeatures, services, composeProjects: projects, hosts: egress.allow };
 }
 
 const shq = (s) => `'${String(s).replace(/'/g, "'\\''")}'`;
@@ -353,13 +381,14 @@ export function canaryFor(hosts) {
  * runtime puts on its container: "" when none runs, absent when the runtime
  * cannot be asked.
  */
-export function runningServices(services, run) {
+export function runningServices(services, run, projects = null) {
   const out = {};
   for (const s of services) {
     if (!s.image) continue;
-    const r = run(["ps", "--filter", `label=com.docker.compose.service=${s.name}`, "--format", "{{.Image}}"]);
+    const r = run(["ps", "--filter", `label=com.docker.compose.service=${s.name}`, "--format", '{{.Image}}\t{{index .Labels "com.docker.compose.project"}}']);
     if (r.status !== 0) return null;
-    out[s.name] = String(r.stdout ?? "").trim().split("\n")[0] ?? "";
+    const rows = String(r.stdout ?? "").split("\n").filter(Boolean).map((l) => l.split("\t"));
+    out[s.name] = rows.find(([, p]) => !projects || projects.includes(String(p ?? "").trim()))?.[0] ?? "";
   }
   return out;
 }
@@ -371,7 +400,7 @@ export async function check({ devcontainerPath, specs, image = null, sandbox = "
   const canary = canaryFor(decl.hosts);
   const script = probeScript({ hosts: decl.hosts, canary });
   const run = exec ?? defaultExec(runtime);
-  const running = decl.services.some((s) => s.image) ? runningServices(decl.services, run) : null;
+  const running = decl.services.some((s) => s.image) ? runningServices(decl.services, run, decl.composeProjects) : null;
 
   if (sandbox === "none") {
     // On the host, "reachable" is this machine's network, not a sandbox's.

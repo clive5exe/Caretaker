@@ -13,10 +13,10 @@
 import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  EnvironmentError, buildArgv, buildTag, canaryFor, check, compare, composeServices, declared, parseProbe, probeScript, resolveImage, runningServices, tagVersion, versionMatches,
+  EnvironmentError, buildArgv, buildTag, canaryFor, check, compare, composeProjects, composeServices, declared, parseProbe, probeScript, resolveImage, runningServices, tagVersion, versionMatches,
 } from "./environment.mjs";
 import { HarnessError, imageFor, run } from "./harness.mjs";
 import { detect } from "./sandbox.mjs";
@@ -211,8 +211,14 @@ const probe = (curlBody, extra = {}) => {
   ok("…a declared service with no container running is named", k({ db: "" }) === "service-not-running");
   ok("…and when the runtime cannot be asked, it says nothing checked it", k(null) === "service-not-run");
   const asked = [];
-  const got = runningServices(d.services, (a) => (asked.push(a.join(" ")), { status: 0, stdout: "docker.io/library/postgres:15\n" }));
-  ok("running services are found by the compose label on their container", got.db === "docker.io/library/postgres:15" && asked[0] === "ps --filter label=com.docker.compose.service=db --format {{.Image}}", asked.join());
+  const got = runningServices(d.services, (a) => (asked.push(a.join(" ")), { status: 0, stdout: "docker.io/library/postgres:15\tcompose-dev\n" }), d.composeProjects);
+  ok("running services are found by the compose label on their container", got.db === "docker.io/library/postgres:15" && asked[0].startsWith("ps --filter label=com.docker.compose.service=db --format {{.Image}}"), asked.join());
+  // Independent re-review: another project's db counted as this one's.
+  ok("the compose project is the file's directory, or the dev container's <folder>_devcontainer", JSON.stringify(d.composeProjects) === JSON.stringify(["compose-dev", `${basename(TMP).toLowerCase().replace(/[^a-z0-9_-]/g, "")}_devcontainer`]), JSON.stringify(d.composeProjects));
+  const other = runningServices(d.services, () => ({ status: 0, stdout: "docker.io/library/postgres:16\tsomeone-else\n" }), d.composeProjects);
+  ok("a service running under ANOTHER compose project is not this stack's: it reads as not running", other.db === "", JSON.stringify(other));
+  ok("a compose file's own name: is its project", JSON.stringify(composeProjects("name: shop\nservices:\n  db:\n    image: x\n", "/a/b/compose.yml")) === '["shop"]');
+  ok("an image: nested under a service's environment is not its image", composeServices("services:\n  db:\n    environment:\n      image: evil:1\n    image: postgres:16\n").db.image === "postgres:16" && composeServices("services:\n  db:\n    environment:\n      image: evil:1\n").db.image === null);
   ok("a compose file with no services map is unread, not guessed at", composeServices("version: 3\n") === null);
 }
 {
@@ -227,6 +233,7 @@ const probe = (curlBody, extra = {}) => {
   ok("…a feature's own version wins over the tag", declared({ dev: { image: "node:20", features: { "ghcr.io/devcontainers/features/node:1": { version: "22" } } } }).tools.map((t) => t.version).join() === "22");
   ok("tag versions", tagVersion("python:3.12-slim") === "3.12" && tagVersion("node") === "latest" && tagVersion("reg:5000/node:22@sha256:ab") === "22" && tagVersion("golang:1.23") === "1.23");
   // Independent review: the last number was taken, so node:22-alpine3.20 read as node 3.20.
+  ok("a devcontainers tag naming only the image's own version names no toolchain version", tagVersion("mcr.microsoft.com/devcontainers/javascript-node:1-bookworm") === "latest" && tagVersion("mcr.microsoft.com/devcontainers/javascript-node:1") === "latest");
   ok("the toolchain's number, not the base OS release", tagVersion("node:22-alpine3.20") === "22" && tagVersion("postgres:16-alpine3.20") === "16" && tagVersion("mcr.microsoft.com/devcontainers/python:1-3.12-bookworm") === "3.12" && tagVersion("x:v1.2") === "1.2");
 }
 {

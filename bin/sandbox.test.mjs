@@ -247,6 +247,20 @@ if (runtime.chosen !== "podman") {
   }
 }
 
+{
+  // Independent re-review: an image name from devcontainer.json, which the
+  // agent can edit, starting with "-" would reach podman as a flag.
+  const refused = (image) => {
+    try {
+      buildArgs({ image, limits: LIMITS, workdir: "/w", cmd: ["true"] });
+      return false;
+    } catch {
+      return true;
+    }
+  };
+  ok("an image name that starts with - or holds whitespace is refused before podman sees it", refused("--privileged") && refused("-v") && refused("img --privileged") && refused("") && !refused("docker.io/library/node:22"));
+}
+
 /* E-0: the install command is offered, and run only on a yes (independent review: only printed). */
 {
   const ran = [];

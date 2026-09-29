@@ -157,6 +157,13 @@ export const delegationFix = (uid = process.getuid?.() ?? 1000) =>
  * test that only checks "it ran" proves nothing about them.
  */
 export function buildArgs({ image, limits, workdir, net = "none", cmd, runtime = "podman" }) {
+  // The image name can come from devcontainer.json, which the agent can edit.
+  // One starting with "-" would be read by podman as a flag, not a name
+  // (independent re-review), so it is refused here, where every run's
+  // arguments are built.
+  if (typeof image !== "string" || !image || image.startsWith("-") || /\s/.test(image)) {
+    throw new Error(`refusing image name ${JSON.stringify(image)}: an image name never starts with "-" or holds whitespace`);
+  }
   const args = [
     "run",
     "--rm",
