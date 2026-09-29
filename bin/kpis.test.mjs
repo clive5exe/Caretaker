@@ -47,10 +47,10 @@ const BOARD = {
   }],
 };
 const RUNS = [
-  { task: "B1", tokens: 100_000, model: "big", in: 10_000, cached: 80_000, write: 0, out: 10_000 },
-  { task: "B1", tokens: 50_000, model: "small", in: 5_000, cached: 40_000, write: 0, out: 5_000 },
-  { task: "D1", tokens: 100_000, model: "big", in: 10_000, cached: 80_000, write: 0, out: 10_000 },
-  { task: "B2", tokens: 5_000, model: "big", in: 1_000, cached: 3_000, write: 0, out: 1_000 },
+  { t: "2026-09-02T09:00:00Z", task: "B1", tokens: 100_000, model: "big", in: 10_000, cached: 80_000, write: 0, out: 10_000 },
+  { t: "2026-09-02T09:30:00Z", task: "B1", tokens: 50_000, model: "small", in: 5_000, cached: 40_000, write: 0, out: 5_000 },
+  { t: "2026-09-03T09:00:00Z", task: "D1", tokens: 100_000, model: "big", in: 10_000, cached: 80_000, write: 0, out: 10_000 },
+  { t: "2026-09-03T10:00:00Z", task: "B2", tokens: 5_000, model: "big", in: 1_000, cached: 3_000, write: 0, out: 1_000 },
 ];
 {
   const e = tokenEstimates(BOARD, RUNS);
@@ -140,13 +140,42 @@ git("2026-09-03T22:00:00Z", "revert", "--no-edit", bad);
   ok("prices for only some models give no dollar figure, rather than a partial one", partly.dollarsPerMergedLine === null);
   const priced = ai(gated, RUNS, facts, { gates: ["qa"], pricing: { big: { in: 3, cached: 0.3, write: 3.75, out: 15 }, small: { in: 1, cached: 0.1, write: 1.25, out: 5 } } });
   const spend = RUNS.reduce((n, r) => n + dollars(r, { big: { in: 3, cached: 0.3, write: 3.75, out: 15 }, small: { in: 1, cached: 0.1, write: 1.25, out: 5 } }), 0);
-  ok("with prices for every model, dollars per merged line", priced.dollarsPerMergedLine === Math.round((spend / 3) * 1e4) / 1e4 && priced.costBasis === "cfg.pricing", String(priced.dollarsPerMergedLine));
+  ok("with prices for every model, dollars per merged line", priced.dollarsPerMergedLine === Math.round((spend / 3) * 1e4) / 1e4 && /^cfg\.pricing;/.test(priced.costBasis), `${priced.dollarsPerMergedLine} ${priced.costBasis}`);
+  // Independent review: all-time tokens were divided by the window's lines, and
+  // a start row (no tokens) made every real log unpriceable.
+  const prices = { big: { in: 3, cached: 0.3, write: 3.75, out: 15 }, small: { in: 1, cached: 0.1, write: 1.25, out: 5 } };
+  const log = [
+    ...RUNS,
+    { t: "2026-06-01T00:00:00Z", task: "OLD", tokens: 9_000_000, model: "unpriced", in: 9_000_000, cached: 0, write: 0, out: 0 },
+    { task: "OLD", tokens: 7_000_000, model: "unpriced" },
+    { t: "2026-09-02T08:59:00Z", ev: "start", task: "B1", name: "builder", model: "big" },
+  ];
+  const w = ai(gated, log, facts, { gates: ["qa"], pricing: prices });
+  ok("tokens per merged line count only runs inside the window the lines came from", w.tokensPerMergedLine === a.tokensPerMergedLine, String(w.tokensPerMergedLine));
+  ok("a run before the window, in a model with no price, does not stop the window being priced", w.dollarsPerMergedLine === priced.dollarsPerMergedLine, `${w.dollarsPerMergedLine} ${w.costBasis}`);
+  ok("…nor does a start row, which spent no tokens", w.dollarsPerMergedLine !== null);
+  ok("the basis says how many runs fell in the window, and how many carry no time", /4 of 6 run\(s\) with tokens fall in the 30-day window; 1 carry no time/.test(w.costBasis), w.costBasis);
+  const later = ai(gated, RUNS, gitFacts(R, { days: 3, now: new Date("2026-09-06T11:00:00Z") }), { gates: ["qa"] });
+  ok("merges in the window but no run with tokens in it gives no per-line figure, and says so", later.tokensPerMergedLine === null && /no run with tokens in the window/.test(later.costBasis), later.costBasis);
   const empty = ai({ phases: [] }, null, null);
   ok("with nothing recorded, every AI number is null rather than 0", empty.tokensPerClosedTask === null && empty.tokensPerMergedLine === null && empty.firstPassRate === null && empty.modelMix === null && empty.humanInterventionRate === null);
 }
 {
   const k = kpis({ board: BOARD, runs: RUNS, facts: null });
   ok("the anti-KPIs are listed as left out, each with its reason", k.antiKpis === ANTI_KPIS && ["lines of code", "agents spawned", "tasks per day, unweighted"].every((n) => k.antiKpis.some((x) => x.name === n && x.why)));
+}
+
+/* ---------------------------------------------------------- B-4: firstAt */
+{
+  // Author dates keep their own offsets. The first commit here is 07:30Z,
+  // written as 09:30+02:00, which sorts AFTER the second's "08:00Z" as text.
+  git("2026-09-04T07:00:00Z", "checkout", "-qb", "f3");
+  commit("2026-09-04T09:30:00+02:00", "d.txt", "d\n", "written in Berlin");
+  commit("2026-09-04T08:00:00Z", "e.txt", "e\n", "written in London");
+  git("2026-09-04T10:00:00Z", "checkout", "-q", "main");
+  git("2026-09-04T10:00:00Z", "merge", "-q", "--no-ff", "-m", "Merge f3", "f3");
+  const m = gitFacts(R, { days: 30, now: new Date("2026-09-10T00:00:00Z") }).merges.find((x) => x.shas.length === 2 && x.at.startsWith("2026-09-04"));
+  ok("a branch's first commit is the earliest in time, not in text", Date.parse(m?.firstAt) === Date.parse("2026-09-04T07:30:00Z"), m?.firstAt);
 }
 
 /* -------------------------------------------------------------------- cli */

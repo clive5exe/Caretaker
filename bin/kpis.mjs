@@ -143,13 +143,16 @@ export function gitFacts(repo, { days = 30, now = new Date() } = {}) {
     const brought = git("log", "--format=%H%x09%aI", `${p1}..${p2}`).stdout.split("\n").filter(Boolean).map((x) => x.split("\t"));
     const stat = git("diff", "--shortstat", p1, sha).stdout;
     const lines = [...stat.matchAll(/(\d+) (insertion|deletion)/g)].reduce((n, m) => n + Number(m[1]), 0);
-    return { sha, at, shas: brought.map((b) => b[0]), firstAt: brought.map((b) => b[1]).sort()[0] ?? at, lines };
+    // By time, not by string: author dates carry their own offsets, and
+    // "10:00+02:00" sorts after "09:00Z" though it is an hour earlier.
+    const firstAt = brought.map((b) => b[1]).reduce((a, b) => (Date.parse(b) < Date.parse(a) ? b : a), at);
+    return { sha, at, shas: brought.map((b) => b[0]), firstAt, lines };
   });
   const reverts = git("log", "--format=%H%x09%cI%x09%B%x00", `--since=${since}`, "--grep=This reverts commit").stdout.split("\0").map((c) => c.trim()).filter(Boolean).map((c) => {
     const [sha, at, ...body] = c.split("\t");
     return { sha, at, reverts: [...body.join("\t").matchAll(/This reverts commit ([0-9a-f]{7,40})/g)].map((m) => m[1]) };
   });
-  return { days, merges, reverts };
+  return { days, since, until: now.toISOString(), merges, reverts };
 }
 
 export function delivery(facts) {
@@ -191,10 +194,20 @@ export function ai(board, runs, facts, { gates = ["reviewer", "qa", "security"],
   const closedWith = closed.filter((t) => actual.get(t.id));
   const q = quality(board.phases ?? [], gates);
   const ts = runs ? tokenStats(runs) : null;
-  const tokensTotal = ts?.total ?? null;
   const mergedLines = facts ? facts.merges.reduce((n, m) => n + m.lines, 0) : null;
-  const priced = (runs ?? []).map((r) => dollars(r, pricing));
-  const allPriced = runs?.length && priced.every((d) => d !== null);
+  // Per merged line compares like with like: the runs inside the same window
+  // as the merges (independent review: all-time tokens over 30 days of lines).
+  // A row with no time cannot be placed in the window and is left out, and
+  // the basis says how many.
+  const inWindow = (r) => facts && Date.parse(r.t) >= Date.parse(facts.since) && Date.parse(r.t) <= Date.parse(facts.until);
+  const spent = (runs ?? []).filter((r) => Number.isFinite(r.tokens));
+  const windowed = spent.filter(inWindow);
+  const untimed = spent.filter((r) => !Number.isFinite(Date.parse(r.t))).length;
+  const tokensInWindow = windowed.length ? windowed.reduce((n, r) => n + r.tokens, 0) : null;
+  // Only rows that spent tokens are priced: a start row has none, and would
+  // otherwise make every real log unpriceable.
+  const priced = windowed.map((r) => dollars(r, pricing));
+  const allPriced = priced.length > 0 && priced.every((d) => d !== null);
   const est = tokenEstimates(board, runs ?? []);
   const cal = est.calibration.find((c) => c.type === "*");
   const intervened = (t) =>
@@ -202,9 +215,12 @@ export function ai(board, runs, facts, { gates = ["reviewer", "qa", "security"],
   return {
     tokensPerClosedTask: closedWith.length ? Math.round(closedWith.reduce((n, t) => n + actual.get(t.id), 0) / closedWith.length) : null,
     tokensPerClosedTaskBasis: `${closedWith.length} of ${closed.length} closed task(s) have token actuals`,
-    tokensPerMergedLine: tokensTotal !== null && mergedLines ? round(tokensTotal / mergedLines, 1) : null,
+    tokensPerMergedLine: tokensInWindow !== null && mergedLines ? round(tokensInWindow / mergedLines, 1) : null,
     dollarsPerMergedLine: allPriced && mergedLines ? round(priced.reduce((n, d) => n + d, 0) / mergedLines, 4) : null,
-    costBasis: !runs ? "no run log" : !mergedLines ? "no merged lines in the window" : allPriced ? "cfg.pricing" : "tokens only: no cfg.pricing for every model in the run log",
+    costBasis: [
+      !runs ? "no run log" : !mergedLines ? "no merged lines in the window" : !windowed.length ? "no run with tokens in the window" : allPriced ? "cfg.pricing" : "tokens only: no cfg.pricing (or no token breakdown) for every run in the window",
+      runs && facts ? `${windowed.length} of ${spent.length} run(s) with tokens fall in the ${facts.days}-day window${untimed ? `; ${untimed} carry no time and are left out` : ""}` : null,
+    ].filter(Boolean).join("; "),
     firstPassRate: q.gated ? round(q.firstPass / q.gated, 2) : null,
     reworkRate: q.gated ? round(q.reworked / q.gated, 2) : null,
     gatedTasks: q.gated,
