@@ -7,7 +7,8 @@
  *      the same fixture board, every command and every refusal path, and after
  *      each step stdout, stderr, the exit code, board.json and board.md must be
  *      identical. Two things are normalised, and only these: today's date
- *      (a run that crosses midnight) and the fixture's absolute path.
+ *      (a run that crosses midnight) and the fixture's absolute path. The
+ *      usage text may only grow: C-6 appends lines for its commands.
  *   2. IMPORT. Importing board.mjs reads nothing and prints nothing, and the
  *      exported domain returns results instead of exiting.
  *   3. LOCK. Parallel writers do not lose each other's updates. Proven able to
@@ -145,6 +146,9 @@ const SCRIPT = [
     for (const f of [old, neu]) if (!existsSync(join(f.root, "docs", "board.md"))) writeFileSync(join(f.root, "docs", "board.md"), "");
     const a = run(old);
     const b = run(neu);
+    // Usage text is the one additive change: C-6 appends lines for its new
+    // commands, and the old lines must still come first, unchanged.
+    if (args[0] === "nonsense" && b.stdout.startsWith(a.stdout) && b.stdout.length > a.stdout.length) b.stdout = a.stdout;
     for (const k of Object.keys(a)) {
       if (a[k] !== b[k]) {
         diverged += 1;

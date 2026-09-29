@@ -202,7 +202,7 @@ flowchart LR
 ## The task lifecycle
 
 A task has one of five statuses. Every move goes through `board.mjs`, except
-`dropped`, which you set by editing `board.json`.
+`dropped`, which `drop` sets with a reason.
 
 ```mermaid
 stateDiagram-v2
@@ -219,8 +219,8 @@ stateDiagram-v2
   blocked --> done: done, only if gates pass
   done --> todo: todo reopens it
   done --> doing: start reopens it
-  todo --> dropped: edit board.json
-  doing --> dropped: edit board.json
+  todo --> dropped: drop "why"
+  doing --> dropped: drop "why"
   done --> [*]
   dropped --> [*]
 ```
@@ -234,6 +234,23 @@ node ops/foreman/board.mjs note  T-012 "text"     append to the note
 node ops/foreman/board.mjs status                 show the board
 node ops/foreman/board.mjs build                  rebuild docs/board.md
 ```
+
+Seven more commands record facts a human acts on. Each appends a record with
+`by` (the config's `operator`, or your OS user) and a full ISO `at`:
+
+```
+node ops/foreman/board.mjs ask    T-012 "question"          questions[]; the Inbox shows it until answered
+node ops/foreman/board.mjs answer T-012 q1 "text"           the answer, on that question
+node ops/foreman/board.mjs triage T-012 accept|reject "why" triage[]
+node ops/foreman/board.mjs spec-approve T-012               specReview[], keyed on the spec's git blob
+node ops/foreman/board.mjs spec-reject  T-012 "why"
+node ops/foreman/board.mjs pr     T-012 https://…           the PR link
+node ops/foreman/board.mjs drop   T-012 "why"               -> dropped, with the reason
+```
+
+Spec approval is tied to the spec's content: edit the spec and the approval no
+longer matches it. Only a spec with a ```` ```spec ```` block governs anything,
+so only those can be approved.
 
 A few details matter:
 
@@ -705,6 +722,9 @@ more.
   than silently weighing zero.
 - `gate.<name>` is always the latest verdict, and earlier attempts sit in its
   `history`, oldest first.
+- `questions`, `triage`, `specReview`, `pr` and `dropped` are written by the
+  commands above. They are optional and additive: an older `board.mjs` reads a
+  board that carries them and keeps them when it writes.
 
 ## Configuration
 
@@ -731,6 +751,8 @@ more.
   read it yet; see [Gates and verdicts](#gates-and-verdicts) for what `done`
   actually demands.
 - `agentsDir` is optional. Point it anywhere, or leave it out.
+- `operator` is optional: the name recorded as `by` on questions, answers and
+  reviews. It defaults to your OS user.
 - `FACTORY_CONFIG` in the environment points `board.mjs` at a different config
   file.
 

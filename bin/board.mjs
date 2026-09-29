@@ -10,6 +10,14 @@
 //   node ops/foreman/board.mjs note  T-012 "text"    append a note
 //   node ops/foreman/board.mjs build                 regenerate the HTML page
 //
+//   node ops/foreman/board.mjs ask T-012 "question"          record a question
+//   node ops/foreman/board.mjs answer T-012 q1 "text"        answer it
+//   node ops/foreman/board.mjs triage T-012 accept|reject "why"
+//   node ops/foreman/board.mjs spec-approve T-012            approve the spec as it is now
+//   node ops/foreman/board.mjs spec-reject T-012 "why"
+//   node ops/foreman/board.mjs pr T-012 https://…            record the PR
+//   node ops/foreman/board.mjs drop T-012 "why"              drop it from scope
+//
 // Any mutating command rebuilds the page automatically, so the docs site is
 // never stale relative to the data.
 //
@@ -23,6 +31,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
+import os from "node:os";
 
 /** Bumped when an export changes shape. The server refuses a board.mjs without it. */
 export const API_VERSION = 1;
@@ -79,26 +88,56 @@ const LOCK_WAIT_MS = 5000;
 const LOCK_STALE_MS = 30000;
 const sleepSync = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
-function lockIsStale(lockPath) {
-  let info;
+// The lock's inode if it is stale (its holder is dead, or it is older than any
+// board command runs), else null. null too if it vanished meanwhile: that is a
+// release, and the caller simply tries again.
+function staleLockIno(lockPath) {
+  let st;
+  try {
+    st = fs.statSync(lockPath);
+  } catch {
+    return null;
+  }
+  let info = null;
   try {
     info = JSON.parse(fs.readFileSync(lockPath, "utf8"));
   } catch {
-    // Unreadable or half-written: the holder may be between open and write.
-    // Only its age can tell, so fall through to the mtime check.
-    info = null;
+    // Empty or half-written: the holder is between open and write. Only its
+    // age can tell, so fall through to the mtime check.
   }
   if (info?.pid) {
     try {
       process.kill(info.pid, 0);
     } catch (e) {
-      if (e.code === "ESRCH") return true; // the holder is gone
+      if (e.code === "ESRCH") return st.ino; // the holder is gone
     }
   }
+  return Date.now() - st.mtimeMs > LOCK_STALE_MS ? st.ino : null;
+}
+
+// Remove a stale lock without removing a fresh one that replaced it. Renaming
+// is atomic, so we hold whatever we renamed; if it is not the inode we judged
+// stale, another writer took the lock in between and it goes straight back.
+// linkSync never overwrites, so putting it back cannot clobber a third
+// writer. What is NOT covered: that third writer acquiring in the instant the
+// fresh lock is moved aside. That needs a crash and three writers at once.
+function breakStaleLock(lockPath, ino) {
+  const aside = `${lockPath}.${process.pid}.stale`;
   try {
-    return Date.now() - fs.statSync(lockPath).mtimeMs > LOCK_STALE_MS;
+    fs.renameSync(lockPath, aside);
   } catch {
-    return true; // released between our failed open and this stat
+    return; // already gone
+  }
+  try {
+    if (fs.statSync(aside).ino !== ino) {
+      try {
+        fs.linkSync(aside, lockPath);
+      } catch {
+        /* see above */
+      }
+    }
+  } finally {
+    fs.rmSync(aside, { force: true });
   }
 }
 
@@ -113,8 +152,9 @@ export function withLock(ctx, fn) {
       break;
     } catch (e) {
       if (e.code !== "EEXIST") throw e;
-      if (lockIsStale(lockPath)) {
-        fs.rmSync(lockPath, { force: true });
+      const ino = staleLockIno(lockPath);
+      if (ino !== null) {
+        breakStaleLock(lockPath, ino);
         continue;
       }
       if (Date.now() > deadline) {
@@ -532,6 +572,183 @@ export function recordVerdict(d, id, gate, verdict, note) {
   return { ok: true, task: hit.t };
 }
 
+/* ------------------------------------------------------ new facts (C-6) */
+// Questions, triage, spec review, PR links and drops, as append-only records on
+// the task. Every field is optional and additive, so a board carrying them is
+// still read correctly by an older board.mjs, which ignores them.
+//
+// Every record carries `by` and `at`. `at` is a full ISO instant: verdicts
+// carry a date only, and two facts on the same day cannot be ordered by a date.
+
+export const FACT_CMDS = ["ask", "answer", "triage", "spec-approve", "spec-reject", "pr", "drop"];
+
+/** Who is acting: the config's `operator`, else the OS user. */
+export function operator(cfg = {}) {
+  if (cfg.operator) return String(cfg.operator);
+  try {
+    return os.userInfo().username;
+  } catch {
+    return "unknown";
+  }
+}
+
+const stamp = (opts = {}) => ({
+  by: opts.by ?? "unknown",
+  at: opts.at ?? new Date().toISOString(),
+  ...(opts.via ? { via: opts.via } : {}),
+});
+const need = (v, what) => (String(v ?? "").trim() ? null : { ok: false, error: `${what} is required` });
+const closed = (t) => (t.status === "done" || t.status === "dropped" ? { ok: false, error: `${t.id} is ${t.status}` } : null);
+
+/** ask <id> "question": questions[] {id, q, by, at}. Ids are q1, q2, … per task. */
+export function ask(d, id, q, opts) {
+  const hit = find(d, id);
+  if (!hit) return noTask(id);
+  const bad = need(q, "a question") ?? closed(hit.t);
+  if (bad) return bad;
+  const t = hit.t;
+  t.questions = t.questions || [];
+  const qid = `q${t.questions.length + 1}`;
+  t.questions.push({ id: qid, q: String(q), ...stamp(opts) });
+  d.meta.updated = today();
+  return { ok: true, task: t, qid };
+}
+
+/** answer <id> <qid> "text": answer {text, by, at} on that question, once. */
+export function answer(d, id, qid, text, opts) {
+  const hit = find(d, id);
+  if (!hit) return noTask(id);
+  const q = (hit.t.questions || []).find((x) => x.id === qid);
+  if (!q) return { ok: false, error: `${hit.t.id} has no question ${qid}` };
+  if (q.answer) return { ok: false, error: `${hit.t.id} ${qid} is already answered` };
+  const bad = need(text, "an answer");
+  if (bad) return bad;
+  q.answer = { text: String(text), ...stamp(opts) };
+  d.meta.updated = today();
+  return { ok: true, task: hit.t };
+}
+
+/** triage <id> accept|reject "why": triage[] {decision, why, by, at}. */
+export function triage(d, id, decision, why, opts) {
+  const hit = find(d, id);
+  if (!hit) return noTask(id);
+  if (!["accept", "reject"].includes(decision)) return { ok: false, error: "triage decision must be accept or reject" };
+  const bad = (decision === "reject" ? need(why, "a reason") : null) ?? closed(hit.t);
+  if (bad) return bad;
+  hit.t.triage = hit.t.triage || [];
+  hit.t.triage.push({ decision, ...(why ? { why: String(why) } : {}), ...stamp(opts) });
+  d.meta.updated = today();
+  return { ok: true, task: hit.t };
+}
+
+/**
+ * The task's spec file, whether it GOVERNS (contains a ```spec block), and the
+ * git blob sha of its current content. Approval is keyed on that sha, so an
+ * edit to the spec reopens it. A shared doc with no ```spec block is context,
+ * not a governing spec, and never needs approval (TECH.md §Lifecycle).
+ */
+export function specInfo(root, t) {
+  if (!t.spec) return null;
+  const rel = String(t.spec);
+  const abs = path.resolve(root, rel);
+  if (!abs.startsWith(path.resolve(root) + path.sep)) return { path: rel, exists: false, governing: false, blob: null };
+  let text;
+  try {
+    text = fs.readFileSync(abs, "utf8");
+  } catch {
+    return { path: rel, exists: false, governing: false, blob: null };
+  }
+  let blob = null;
+  try {
+    blob = execFileSync("git", ["hash-object", "--", abs], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+  } catch {
+    blob = null; // not a git checkout, or no git: approval cannot be keyed
+  }
+  return { path: rel, exists: true, governing: /^```spec\s*$/m.test(text), blob };
+}
+
+/**
+ * spec-approve <id> | spec-reject <id> "why": specReview[] {path, blob,
+ * decision, why, by, at}. `spec` is specInfo() for the task, passed in so this
+ * stays a pure function of the board; the CLI and the server both compute it.
+ */
+export function specReview(d, id, decision, why, spec, opts) {
+  const hit = find(d, id);
+  if (!hit) return noTask(id);
+  if (!["approve", "reject"].includes(decision)) return { ok: false, error: "spec decision must be approve or reject" };
+  if (!spec?.exists) return { ok: false, error: `${hit.t.id} has no spec file to review` };
+  if (!spec.governing) return { ok: false, error: `${spec.path} has no \`\`\`spec block, so it governs nothing and needs no approval` };
+  if (!spec.blob) return { ok: false, error: `cannot hash ${spec.path}; approval is keyed on its git blob` };
+  const bad = (decision === "reject" ? need(why, "a reason") : null) ?? closed(hit.t);
+  if (bad) return bad;
+  hit.t.specReview = hit.t.specReview || [];
+  hit.t.specReview.push({ path: spec.path, blob: spec.blob, decision, ...(why ? { why: String(why) } : {}), ...stamp(opts) });
+  d.meta.updated = today();
+  return { ok: true, task: hit.t };
+}
+
+/** pr <id> <url>: pr {url, by, at}. A later pr replaces it; the url is the fact. */
+export function recordPr(d, id, url, opts) {
+  const hit = find(d, id);
+  if (!hit) return noTask(id);
+  if (!/^https?:\/\/\S+$/.test(String(url ?? ""))) return { ok: false, error: "pr needs an http(s) url" };
+  const bad = closed(hit.t);
+  if (bad) return bad;
+  hit.t.pr = { url: String(url), ...stamp(opts) };
+  d.meta.updated = today();
+  return { ok: true, task: hit.t };
+}
+
+/**
+ * drop <id> "why": status "dropped" plus dropped {why, by, at}. `dropped` was
+ * already a status (see STATUS) but nothing set it.
+ */
+export function drop(d, id, why, opts) {
+  const hit = find(d, id);
+  if (!hit) return noTask(id);
+  const bad = need(why, "a reason") ?? closed(hit.t);
+  if (bad) return bad;
+  hit.t.status = "dropped";
+  hit.t.dropped = { why: String(why), ...stamp(opts) };
+  delete hit.t.completed;
+  delete hit.t.blockedReason;
+  d.meta.updated = today();
+  return { ok: true, task: hit.t };
+}
+
+/**
+ * One entry point for every command a second caller may issue, so a server
+ * routes to this and nothing else. Verdicts are not here on purpose: they come
+ * from gate runs and the CLI, never from a browser (ADR-0001, TECH.md §2).
+ */
+export function command(d, id, cmd, args = {}, opts = {}) {
+  switch (cmd) {
+    case "start":
+    case "todo":
+    case "done":
+      return transition(d, id, cmd);
+    case "block":
+    case "note":
+      return transition(d, id, cmd, String(args.text ?? ""));
+    case "ask":
+      return ask(d, id, args.text, opts);
+    case "answer":
+      return answer(d, id, args.qid, args.text, opts);
+    case "triage":
+      return triage(d, id, args.decision, args.text, opts);
+    case "spec-approve":
+      return specReview(d, id, "approve", undefined, opts.spec, opts);
+    case "spec-reject":
+      return specReview(d, id, "reject", args.text, opts.spec, opts);
+    case "pr":
+      return recordPr(d, id, args.url, opts);
+    case "drop":
+      return drop(d, id, args.text, opts);
+    default:
+      return { ok: false, error: `unknown command: ${cmd}` };
+  }
+}
+
 /* ------------------------------------------------------------------ cli */
 function cli(argv) {
   const [cmd, id, ...rest] = argv;
@@ -609,9 +826,31 @@ function cli(argv) {
     const t = res.task;
     const o = build(ctx);
     console.log(`${t.id} → ${t.status}${t.completed ? ` (${t.completed})` : ""}   ${o.currentName} now ${o.currentPct}% (${o.currentDone}/${o.currentTotal})`);
+  } else if (FACT_CMDS.includes(cmd)) {
+    if (!id) { console.error(`need a task id, e.g. ${cmd} T-012`); process.exit(1); }
+    const ctx = loadConfig();
+    const opts = { by: operator(ctx.cfg), via: "cli" };
+    const args =
+      cmd === "answer" ? { qid: rest[0], text: rest.slice(1).join(" ") }
+      : cmd === "triage" ? { decision: rest[0], text: rest.slice(1).join(" ") }
+      : cmd === "pr" ? { url: rest[0] }
+      : { text };
+    const res = mutate(ctx, (d) => {
+      if (cmd.startsWith("spec-")) {
+        const hit = find(d, id);
+        if (hit) opts.spec = specInfo(ctx.root, hit.t);
+      }
+      return command(d, id, cmd, args, opts);
+    });
+    if (!res.ok) { console.error(res.error); process.exit(1); }
+    const o = build(ctx);
+    const what = cmd === "ask" ? `asked ${res.qid}` : cmd === "drop" ? "dropped" : `${cmd} recorded`;
+    console.log(`${res.task.id} · ${what}   ${o.currentName} now ${o.currentPct}% (${o.currentDone}/${o.currentTotal})`);
   } else {
     console.log("usage: node ops/foreman/board.mjs [status|build|start|done|block|todo|note] [T-012] [text]");
     console.log("       node ops/foreman/board.mjs [reviewer|qa|security] T-012 [pass|fail] [note]");
+    console.log("       node ops/foreman/board.mjs ask T-012 \"question\" | answer T-012 q1 \"text\" | triage T-012 accept|reject [\"why\"]");
+    console.log("       node ops/foreman/board.mjs spec-approve T-012 | spec-reject T-012 \"why\" | pr T-012 <url> | drop T-012 \"why\"");
   }
 }
 
