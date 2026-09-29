@@ -370,11 +370,42 @@ export function analyse({
   };
 }
 
+/* -------------------------------------------------------------- direction */
+
+/**
+ * H-7: WHICH WAY DRIFT POINTS is a project decision, overridable per task.
+ * `docs/memory.md` names three ways people work, and they want the same
+ * machinery pointed differently:
+ *
+ *   spec       the spec is the authority. Drift means the CODE is wrong. Blocks.
+ *   code       the code leads. Drift means the SPEC is behind. Does not block;
+ *              the drifted specs are listed as `harvest`, to be proposed with
+ *              `reconcile.mjs propose` and accepted by a human (H-5).
+ *   reconcile  neither is the authority. Drift blocks until the two are made to
+ *              agree, in whichever direction a human decides.
+ *
+ * `spec` is the default because it is the direction that refuses. A project
+ * that wants drift waved through has to say so, in config, where it is visible.
+ * Conflicts and unparseable specs block in every direction: they are defects in
+ * the spec set, not a disagreement between a spec and its code.
+ */
+export const DIRECTIONS = ["spec", "code", "reconcile"];
+
+/** The direction for a task: its own `driftDirection`, else the project's, else `spec`. */
+export function directionFor(cfg = {}, task = null) {
+  const d = task?.driftDirection ?? cfg?.drift?.direction ?? "spec";
+  if (!DIRECTIONS.includes(d)) {
+    throw new Error(`drift direction must be one of ${DIRECTIONS.join(", ")}, got ${JSON.stringify(d)}${task?.driftDirection ? ` on ${task.id}` : " in config"}`);
+  }
+  return d;
+}
+
 /**
  * The whole gate in one call, for anything that already has the specs in hand.
  * The CLI and the tests both go through here so they cannot drift apart.
  */
-export function gate({ specs, changed = [], tree = null, dismissals = [], ignore = [], task = null }) {
+export function gate({ specs, changed = [], tree = null, dismissals = [], ignore = [], task = null, direction = "spec" }) {
+  if (!DIRECTIONS.includes(direction)) throw new Error(`unknown drift direction ${JSON.stringify(direction)}`);
   const ownership = buildOwnership(specs);
   const resolver = createGlobResolver(ownership);
   const report = analyse({
@@ -388,6 +419,25 @@ export function gate({ specs, changed = [], tree = null, dismissals = [], ignore
     specErrors: ownership.errors,
   });
   report.orphaned = findOrphaned(ownership, tree);
+  report.direction = direction;
+  report.harvest = [];
+  if (direction === "code" && report.drift.length) {
+    // The drift is not a failure here; it is the spec falling behind, which is
+    // expected when the code leads. It is still listed, never dropped: a spec
+    // nobody updates is how "code leads" turns into "nothing is written down".
+    report.harvest = [...new Set(report.drift.map((d) => d.spec))].sort();
+    const blocking = report.conflicts.filter((c) => c.changed && !c.dismissed).length;
+    report.ok = blocking === 0 && report.specErrors.length === 0;
+    report.notes.push(
+      `direction "code": ${report.drift.length} drifted path(s) mean ${report.harvest.join(", ")} ` +
+        "is behind. Propose the update with reconcile.mjs propose; a human accepts or rejects it.",
+    );
+  } else if (direction === "reconcile" && report.drift.length) {
+    report.notes.push(
+      'direction "reconcile": neither side is the authority. A human decides which one changes, ' +
+        "with reconcile.mjs propose, before this can close.",
+    );
+  }
   return report;
 }
 
@@ -429,9 +479,10 @@ export function eventLines(report, { at, run = null, task = null, stage = "revie
     stage,
   };
   const lines = [];
+  const behind = report.direction === "code";
   for (const d of report.drift) {
-    lines.push({ ...base, kind: "drift", level: "warn",
-      detail: `${d.path} changed, ${d.spec} did not` });
+    lines.push({ ...base, kind: "drift", level: behind ? "info" : "warn",
+      detail: `${d.path} changed, ${d.spec} did not${behind ? " — the spec is behind (direction: code)" : ""}` });
   }
   for (const c of report.conflicts.filter((x) => x.changed && !x.dismissed)) {
     lines.push({ ...base, kind: "drift", level: "error",
@@ -495,6 +546,7 @@ const isEntry =
 if (isEntry) {
   const USAGE = `usage:
   drift.mjs check   [--specs DIR] [--repo DIR] [--git REF] [--diff FILE|-] [--path P ...]
+                    [--direction spec|code|reconcile | --config ops/caretaker/config.json]
                     [--dismiss GLOB --reason TEXT [--by WHO] [--dismiss-task T-1]]
                     [--dismiss-file F] [--events DIR | --no-events] [--task T-1] [--run r_x]
                     [--tree-file F | --no-tree] [--ignore GLOB ...] [--quiet]
@@ -513,6 +565,7 @@ if (isEntry) {
   const VALUE = new Set([
     "specs", "repo", "git", "diff", "path", "task", "run", "events",
     "dismiss", "reason", "by", "dismiss-task", "dismiss-file", "tree-file", "ignore",
+    "direction", "config",
   ]);
   const BOOL = new Set(["no-events", "no-tree", "quiet", "staged"]);
 
@@ -616,6 +669,34 @@ if (isEntry) {
     die("a dismissal must be recorded, so --no-events cannot be combined with --dismiss");
   }
 
+  // The direction: --direction wins; otherwise the project's config, with the
+  // task's own override read from the board that config names.
+  let direction = opt.direction ?? "spec";
+  if (!opt.direction && opt.config) {
+    let cfg;
+    try {
+      cfg = JSON.parse(readFileSync(opt.config, "utf8"));
+    } catch (e) {
+      die(`--config ${opt.config}: ${e.message}`);
+    }
+    let taskRec = null;
+    if (opt.task && cfg.board) {
+      try {
+        const root = resolve(dirname(resolve(opt.config)), "..", "..", cfg.repo ?? ".");
+        const board = JSON.parse(readFileSync(join(root, cfg.board), "utf8"));
+        taskRec = (board.phases ?? []).flatMap((p) => p.tasks ?? []).find((t) => t.id === opt.task) ?? null;
+      } catch {
+        taskRec = null; // no board, no override: the project default applies
+      }
+    }
+    try {
+      direction = directionFor(cfg, taskRec);
+    } catch (e) {
+      die(e.message);
+    }
+  }
+  if (!DIRECTIONS.includes(direction)) die(`--direction must be one of ${DIRECTIONS.join(", ")}`);
+
   const report = gate({
     specs,
     changed,
@@ -623,6 +704,7 @@ if (isEntry) {
     dismissals,
     ignore: [...opt.ignore, `${norm(specsDir)}/**`],
     task: opt.task ?? null,
+    direction,
   });
   report.skippedFiles = skipped;
 

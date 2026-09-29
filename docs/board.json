@@ -334,12 +334,12 @@
           "title": "Reconciliation run: propose the spec change, do not make it",
           "owner": "backend",
           "est": "1d",
-          "status": "todo",
+          "status": "doing",
           "deps": [
             "H-4"
           ],
           "ac": "a reconciliation run receives the diff and the governing spec and returns a PROPOSED spec diff plus a stated direction, which a human accepts or rejects; nothing is committed to a spec without that acceptance",
-          "note": "THE DIRECTION IS THE POINT AND MUST BE RECORDED. 'We learned something, the spec should change' and 'the code drifted from what we decided' are opposite events with opposite fixes, and the tool must not guess which. Forcing the answer is where the value is; auto-applying either one destroys it."
+          "note": "THE DIRECTION IS THE POINT AND MUST BE RECORDED. 'We learned something, the spec should change' and 'the code drifted from what we decided' are opposite events with opposite fixes, and the tool must not guess which. Forcing the answer is where the value is; auto-applying either one destroys it. — Built in bin/reconcile.mjs (propose, accept, reject, show), checked by bin/reconcile.test.mjs and mutation-checked. The reconciler must state SPEC-BEHIND or CODE-DRIFTED; a SPEC-BEHIND diff is stored at propose time and applied only by accept, never committed; a diff touching anything but the drifted spec is invalid. Gate verdicts not recorded."
         },
         {
           "id": "H-6",
@@ -358,14 +358,14 @@
           "title": "Drift direction is a project default, overridable per task",
           "owner": "architect",
           "est": "1d",
-          "status": "todo",
+          "status": "doing",
           "deps": [
             "H-4",
             "H-5"
           ],
           "spec": "docs/memory.md",
           "ac": "a project declares whether the spec or the code is the authority, the drift gate blocks or harvests accordingly, and a single task can override it",
-          "note": "The three ways people actually work want the SAME machinery pointed in different directions. Spec-first: drift means the code is wrong, block. Build-as-you-go: drift means the spec is behind, harvest and propose. Handoff: reconcile before anyone inherits it. Two of those are one code path with the arrow reversed, which is the reason not to build three products."
+          "note": "The three ways people actually work want the SAME machinery pointed in different directions. Spec-first: drift means the code is wrong, block. Build-as-you-go: drift means the spec is behind, harvest and propose. Handoff: reconcile before anyone inherits it. Two of those are one code path with the arrow reversed, which is the reason not to build three products. — Built: drift.mjs directionFor and gate({direction}), --direction or --config with a task's driftDirection override. spec blocks, code harvests without blocking, reconcile blocks until a human decides. Checked in bin/reconcile.test.mjs. Gate verdicts not recorded."
         },
         {
           "id": "H-8",
