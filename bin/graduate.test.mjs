@@ -109,6 +109,38 @@ commit("2026-02-03", "round half even"); // an accepted decision rewritten in pl
   ok("a BODY line starting 'updated:' is text: editing it is an edit", problems.some((p) => /^ADR-0003 was edited after it was decided \(accepted\): [0-9a-f]{8} 2026-03-01 "log field"/.test(p)), JSON.stringify(problems));
 }
 
+{
+  // Independent re-review: deleting the LAST decision, and moving one out of
+  // the record, were both silent; and nothing checked specs for history.
+  for (const [name, move] of [["last", null], ["flat", "docs/decisions/cache.md"], ["archive", "docs/decisions/archive/0001-cache.md"]]) {
+    const S = join(TMP, `third-${name}`);
+    // archive/ only where it is the destination: an empty one left behind
+    // would keep the directory alive, and hide the case being tested.
+    mkdirSync(join(S, move?.includes("archive/") ? "docs/decisions/archive" : "docs/decisions"), { recursive: true });
+    const g = (...a) => spawnSync("git", ["-C", S, ...a], { encoding: "utf8" });
+    g("init", "-q");
+    writeFileSync(join(S, "docs/decisions/0001-cache.md"), "---\ntitle: Cache\nstatus: accepted\n---\n\nCache for one hour.\nWarm it at start.\nRead it on every request.\n");
+    g("add", "-A");
+    g("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init");
+    if (move) g("mv", "docs/decisions/0001-cache.md", move);
+    else g("rm", "-q", "docs/decisions/0001-cache.md");
+    g("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", `gone ${name}`);
+    const { problems } = decisions(S);
+    ok(
+      move ? `a decision moved out of the record (${move}) is named, with where it went` : "deleting the only decision is named, though the directory went with it",
+      problems.some((p) => (move ? new RegExp(`^docs/decisions/0001-cache\\.md was MOVED OUT of the decision record \\(to ${move.replace(/[./]/g, "\\$&")}\\)`) : /^docs\/decisions\/0001-cache\.md was DELETED/).test(p)),
+      JSON.stringify(problems),
+    );
+  }
+  const H = join(TMP, "history");
+  mkdirSync(join(H, "specs"), { recursive: true });
+  writeFileSync(join(H, "specs", "a.md"), "# A\n\nWhat is true.\n\n## Changelog\n\n- 2026-01-02: added retries\n\n```\n## History inside a fence is code, not a section\n```\n");
+  writeFileSync(join(H, "specs", "b.md"), "# B\n\nThe fee is 2%.\n");
+  const hp = decisions(H).problems;
+  ok("a spec carrying a changelog or dated entries is named, by line", hp.some((p) => /^specs\/a\.md:5 carries history/.test(p)) && hp.some((p) => /^specs\/a\.md:7 carries history/.test(p)), JSON.stringify(hp));
+  ok("…text in a code fence, and a spec with none, are not", !hp.some((p) => /a\.md:10|specs\/b\.md/.test(p)));
+}
+
 /* -------------------------------------------------------------------- why */
 {
   const w = why(R, "src/fees/calc.js");
@@ -128,19 +160,26 @@ commit("2026-02-03", "round half even"); // an accepted decision rewritten in pl
   mkdirSync(join(R, "bin"), { recursive: true });
   write("bin/a.test.mjs", "");
   write("bin/b.test.mjs", "");
+  write("bin/c.test.mjs", "");
   // Independent QA: steps came from file presence. None of this is evidence yet.
   ok("a test script or test files that no gate was seen to run are not evidence", evidence(R).length === 0, JSON.stringify(evidence(R)));
   write("ops/caretaker/config.json", JSON.stringify({ board: "docs/board.json", events: "ops/caretaker/events" }));
   const note = (t, gate, text, at = "2026-02-01") => ({ id: t, title: t, status: "doing", gate: { [gate]: { verdict: "pass", at, note: text } } });
   write("docs/board.json", JSON.stringify({ phases: [{ name: "P", tasks: [
-    note("T-1", "qa", "ran node bin/a.test.mjs and npm test; also node bin/gone.test.mjs"),
-    { id: "T-2", title: "T-2", status: "doing", gate: { reviewer: { verdict: "pass", at: "2026-02-03", note: "fine", history: [{ verdict: "fail", at: "2026-02-02", note: "npm run lint failed" }] } } },
+    note("T-1", "qa", "ran node bin/a.test.mjs and npm test; node bin/gone.test.mjs passed too"),
+    { id: "T-2", title: "T-2", status: "doing", gate: { reviewer: { verdict: "pass", at: "2026-02-03", note: "fine", history: [{ verdict: "pass", at: "2026-02-02", note: "npm run lint passed" }] } } },
+    // Independent re-review: a mention is not a run. None of these may become a step.
+    { id: "T-3", title: "T-3", status: "doing", gate: { qa: { verdict: "fail", at: "2026-02-04", note: "ran node bin/b.test.mjs, which passed" } } },
+    note("T-4", "reviewer", "I did not run node bin/b.test.mjs. npm run build was never tried; do not run npm run deploy. Looks right."),
+    note("T-5", "qa", "Independent QA (fresh agent, not the builder): node bin/c.test.mjs green."),
   ] }] }));
   const skipped = [];
   const ev = evidence(R, { skipped });
   const tests = ev.find((s) => s.name === "tests");
-  ok("a test file a gate note names as run is a step, with where it was named", tests?.run === "node bin/a.test.mjs" && /T-1 qa 2026-02-01/.test(tests.evidence), JSON.stringify(ev));
+  ok("a test file a gate note names as run is a step, with where it was named", tests?.run === "node bin/a.test.mjs && node bin/c.test.mjs" && /T-1 qa 2026-02-01/.test(tests.evidence), JSON.stringify(ev));
   ok("…and one that is only present is not", !/b\.test/.test(tests?.run ?? ""));
+  ok("…and a negative word about something else in the sentence does not hide a run", /node bin\/c\.test\.mjs/.test(tests?.run ?? ""), tests?.run);
+  ok("a command named in a FAILING verdict, or in a sentence that says it did not run, is not a step", !/b\.test/.test(tests?.run ?? "") && !ev.some((x) => /build|deploy/.test(x.name)), JSON.stringify(ev.map((x) => x.run)));
   ok("a named test file the repo does not have is skipped, and said", skipped.some((x) => /node bin\/gone\.test\.mjs.*not in this repo/.test(x)) && !/gone/.test(tests?.run ?? ""), JSON.stringify(skipped));
   ok("an npm script a gate note names is a step, with the script it runs", ev.some((s) => s.name === "npm test" && /scripts\.test: node --test; named as run in 1 gate/.test(s.evidence)));
   ok("…including one named in an earlier verdict", ev.some((s) => s.name === "npm run lint" && /T-2 reviewer 2026-02-02/.test(s.evidence)), JSON.stringify(ev.map((s) => s.name)));
@@ -161,6 +200,16 @@ commit("2026-02-03", "round half even"); // an accepted decision rewritten in pl
   const drift = ev2.find((s) => s.name === "drift gate");
   ok("a drift gate that RAN is included, counting only its own gate events", drift && /1 drift gate run\(s\)/.test(drift.evidence), JSON.stringify(ev2));
   ok("…and run with the drift.mjs the repo has", drift?.run.startsWith("node bin/drift.mjs check"));
+  // Independent re-review: every npm step began with `npm ci`, which fails
+  // with no lockfile, so a repo without one got a CI red on every push.
+  ok("with no lockfile and no dependencies, an npm step installs nothing first", ev2.find((x) => x.name === "npm test")?.run === "npm test", JSON.stringify(ev2.find((x) => x.name === "npm test")));
+  write("package.json", JSON.stringify({ scripts: { test: "node --test", lint: "eslint ." }, devDependencies: { eslint: "9" } }));
+  ok("…with dependencies and no lockfile, it installs with npm install", evidence(R).find((x) => x.name === "npm test")?.run === "npm install && npm test");
+  write("package-lock.json", "{}");
+  ok("…and with a lockfile, npm ci", evidence(R).find((x) => x.name === "npm test")?.run === "npm ci && npm test");
+  rmSync(join(R, "package-lock.json"));
+  write("package.json", JSON.stringify({ scripts: { test: "node --test", lint: "eslint ." } }));
+  ok("the workflow runs on the branch it is given, not a fixed main", /branches: \["trunk"\]/.test(ciWorkflow(evidence(R), { branch: "trunk" }) ?? ""));
   const wf = ciWorkflow(ev2);
   ok("every step in the workflow carries its evidence line", (wf?.match(/# evidence:/g) ?? []).length === ev2.length && ev2.length >= 3);
   ok("no step calls a file the repo does not have", ev2.every((s) => [...s.run.matchAll(/node (\S+\.m?js)/g)].every((m) => existsSync(join(R, m[1])))));
@@ -196,6 +245,7 @@ commit("2026-02-03", "round half even"); // an accepted decision rewritten in pl
   ok("…and so is a directory above it", refused("..") === "OUT_IS_PROJECT");
   ok("a directory holding files graduate did not write is refused", refused("docs") === "OUT_NOT_OURS" && refused("bin") === "OUT_NOT_OURS");
   ok("a directory graduate wrote before is written again", refused("graduate") === null);
+  ok("--out naming a file is refused by name, not a stack trace", existsSync(join(R, "src/other.js")) && refused("src/other.js") === "OUT_NOT_DIR");
   const cli = spawnSync("node", [join(HERE, "graduate.mjs"), "all", "--repo", R, "--out", "."], { encoding: "utf8" });
   ok("the CLI refuses --out . by name, and writes nothing", cli.status === 2 && /is the project/.test(cli.stderr) && !existsSync(join(R, ".graduate")), cli.stderr);
 }

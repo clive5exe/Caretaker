@@ -56,15 +56,31 @@ export function lastCommit(repo, paths) {
 }
 
 /**
- * The last commit touching anything a spec's GLOBS govern, asked of git with
- * glob pathspecs rather than the files that exist now: a governed file that
- * was DELETED is a change the spec should know about, and listing today's
- * files could not see it (independent review). Also one argument per glob,
- * not per file.
+ * The last commit touching anything each spec governs, from the WHOLE history
+ * and matched with the SAME resolver ownership uses. History, because a
+ * governed file that was deleted is a change the spec should know about.
+ * The same resolver, because git's own glob pathspecs matched differently:
+ * `src/**.js` owned src/a/b.js yet never made its spec stale, and a directory
+ * glob read as both orphaned and stale (independent re-review).
+ * Returns Map(specId -> { day, sha, subject }).
  */
-export function lastCommitForGlobs(repo, globs) {
-  if (!globs.length) return null;
-  return lastCommit(repo, globs.map((g) => `:(glob)${g}`));
+export function lastCommitsBySpec(repo, specIds, resolver) {
+  const want = new Set(specIds);
+  const out = new Map();
+  if (!want.size) return out;
+  const log = gitOut(repo, ["log", "--no-renames", "--name-only", "--format=%x00%cs%x09%h%x09%s"]);
+  for (const chunk of log.split("\0")) {
+    if (!chunk.trim()) continue;
+    const [head, ...files] = chunk.split("\n");
+    const [day, sha, ...subject] = head.split("\t");
+    for (const f of files.map((x) => x.trim()).filter(Boolean)) {
+      for (const m of resolver.matches(f)) {
+        if (want.has(m.spec) && !out.has(m.spec)) out.set(m.spec, { day, sha, subject: subject.join("\t") });
+      }
+    }
+    if (out.size === want.size) break;
+  }
+  return out;
 }
 
 /**
@@ -80,12 +96,13 @@ export function freshness({ repo = ".", specsDir = "specs", docDirs = ["docs", "
 
   const stale = [];
   const governed = [];
+  const lastBySpec = lastCommitsBySpec(root, specs.filter((s) => s.governs?.length).map((s) => s.id), resolver);
   for (const s of specs) {
     if (!s.governs?.length) continue;
     const paths = tree.filter((p) => resolver.matches(p).some((m) => m.spec === s.id));
     const text = readFileSync(resolve(root, s.id), "utf8");
     const updated = claimedUpdated(text);
-    const last = lastCommitForGlobs(root, s.governs);
+    const last = lastBySpec.get(s.id) ?? null;
     const row = { spec: s.id, updated, lastGoverned: last, governedPaths: paths.length };
     governed.push(row);
     if (updated && last && last.day > updated) stale.push(row);

@@ -12,7 +12,8 @@
  *   why <path> the specs that govern a path and the decisions that explain it —
  *              answered from the decision record, without reading the log.
  *   ci         a workflow built from the checks this repo was SEEN to run
- *              (named in gate verdict notes, or the drift gate's own events),
+ *              (a passing verdict's note that says it ran, or the drift
+ *              gate's own events),
  *              each step carrying the evidence it was taken from. If there is no
  *              evidence of any check, no workflow is written: an empty or
  *              placeholder CI file claims a gate that does not exist.
@@ -30,7 +31,7 @@
  *   node bin/graduate.mjs decisions [--repo .]
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { buildOwnership, createGlobResolver, loadSpecs, norm } from "./drift.mjs";
@@ -53,10 +54,55 @@ function frontmatter(text) {
 
 /* ------------------------------------------------------------ decisions */
 
+/**
+ * P-4's other tier rule: a SPEC carries current state only. A changelog, a
+ * history section or a dated list of changes in a spec is the log leaking
+ * into it, and a spec that grows one stops being read (docs/memory.md).
+ * Declared shapes only: a heading named for history, or list items that
+ * start with a date. [{ file, line, text }].
+ */
+const HISTORY_HEADING = /^#{1,6}\s*(change ?log|history|revision history|revisions?|changes)\b/i;
+const DATED_ITEM = /^\s*[-*]\s*\**\d{4}-\d{2}-\d{2}\b/;
+export function specHistory(root, specsDir = "specs") {
+  const out = [];
+  const walk = (d) => {
+    let names = [];
+    try {
+      names = readdirSync(join(root, d), { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const n of names) {
+      const rel = `${d}/${n.name}`;
+      if (n.isDirectory()) walk(rel);
+      else if (/\.mdx?$/.test(n.name)) {
+        const lines = readFileSync(join(root, rel), "utf8").split(/\r?\n/);
+        let fence = false;
+        lines.forEach((l, i) => {
+          if (/^\s*```/.test(l)) fence = !fence;
+          if (!fence && (HISTORY_HEADING.test(l) || DATED_ITEM.test(l))) out.push({ file: rel, line: i + 1, text: l.trim() });
+        });
+      }
+    }
+  };
+  walk(specsDir);
+  return out;
+}
+
 /** Every ADR, with what supersedes it computed from the others, and problems named. */
-export function decisions(root) {
+export function decisions(root, { specsDir = "specs" } = {}) {
   const dir = join(root, DECISIONS_DIR);
-  if (!existsSync(dir)) return { list: [], problems: [] };
+  // Removals first: deleting the LAST decision takes the directory with it,
+  // and returning early on that hid the deletion (independent re-review).
+  const removed = deletedDecisions(root).map((g) =>
+    g.movedTo
+      ? `${g.file} was MOVED OUT of the decision record (to ${g.movedTo}) after it was decided (${g.status}): ${g.sha.slice(0, 8)} ${g.day} "${g.subject}". A decision is superseded, never removed`
+      : `${g.file} was DELETED after it was decided (${g.status}): ${g.sha.slice(0, 8)} ${g.day} "${g.subject}". A decision is superseded, never removed`,
+  );
+  // A spec that carries history belongs in the same report: both are one
+  // tier holding what another tier should (independent re-review).
+  for (const h of specHistory(root, specsDir)) removed.push(`${h.file}:${h.line} carries history ("${h.text.slice(0, 60)}"). A spec says what is true now; what changed belongs in the log or a decision`);
+  if (!existsSync(dir)) return { list: [], problems: removed };
   const list = readdirSync(dir)
     .filter((f) => /^\d{4}-.*\.md$/.test(f))
     .sort()
@@ -84,7 +130,7 @@ export function decisions(root) {
     if (says && !byId.has(says[1])) problems.push(`${d.id} says it is superseded by ${says[1]}, which does not exist`);
     if (says && !d.supersededBy.includes(says[1])) problems.push(`${d.id} says it is superseded by ${says[1]}, but ${says[1]} does not say it supersedes ${d.id}`);
   }
-  for (const g of deletedDecisions(root)) problems.push(`${g.file} was DELETED after it was decided (${g.status}): ${g.sha.slice(0, 8)} ${g.day} "${g.subject}". A decision is superseded, never removed`);
+  problems.push(...removed);
   for (const d of list) {
     for (const e of editsAfterDecided(root, d.file) ?? []) problems.push(`${d.id} was edited after it was decided (${e.status}): ${e.sha ? `${e.sha.slice(0, 8)} ${e.day} "${e.subject}"` : "uncommitted change in the working tree"}. Write a new decision that supersedes it instead`);
   }
@@ -100,22 +146,31 @@ const UNDECIDED = /^(draft|proposed)$/;
 const decidedText = (text) =>
   String(text).replace(/^---\r?\n[\s\S]*?\r?\n---/, (fm) => fm.replace(/^(status|updated):.*$/gm, ""));
 
-/** Decision records deleted from git history after they were decided. [] outside git. */
+/**
+ * Decision records deleted after they were decided, or renamed to a path that
+ * is no longer a decision record (docs/decisions/x.md, or a subdirectory like
+ * archive/), which drops them from the index as surely as deleting them.
+ * [] outside git.
+ */
 export function deletedDecisions(root) {
   const git = (...a) => spawnSync("git", ["-C", root, ...a], { encoding: "utf8" });
   if (git("rev-parse", "--is-inside-work-tree").stdout.trim() !== "true") return [];
   // -M: a rename is not a deletion, even where a person's config turns
   // rename detection off. A rewrite past git's rename threshold still reads
   // as a deletion, and is reported as one.
-  const log = git("log", "-M", "--diff-filter=D", "--name-only", "--format=%x00%H%x09%cs%x09%s", "--", DECISIONS_DIR);
+  const log = git("log", "-M", "--diff-filter=DR", "--name-status", "--format=%x00%H%x09%cs%x09%s", "--", DECISIONS_DIR);
+  const RECORD = /^docs\/decisions\/\d{4}-[^/]*\.md$/;
   const out = [];
   for (const chunk of log.stdout.split("\0").filter((c) => c.trim())) {
     const [head, ...rest] = chunk.split("\n");
     const [sha, day, ...subject] = head.split("\t");
-    for (const file of rest.map((l) => l.trim()).filter((l) => /^docs\/decisions\/\d{4}-.*\.md$/.test(l))) {
+    for (const line of rest.map((l) => l.trim()).filter(Boolean)) {
+      const [kind, file, to] = line.split("\t");
+      if (!RECORD.test(file ?? "")) continue;
+      if (kind.startsWith("R") && RECORD.test(to ?? "")) continue; // still a record; --follow checks its text
       const before = git("show", `${sha}^:${file}`).stdout;
       const status = frontmatter(before).status ?? "";
-      if (status && !UNDECIDED.test(status)) out.push({ file, sha, day, subject: subject.join("\t"), status });
+      if (status && !UNDECIDED.test(status)) out.push({ file, sha, day, subject: subject.join("\t"), status, ...(kind.startsWith("R") ? { movedTo: to } : {}) });
     }
   }
   return out;
@@ -216,14 +271,25 @@ export function why(root, path, { specsDir = "specs" } = {}) {
 const DRIFT_SUMMARY = /^drift \d+, dismissed \d+, blocking conflicts \d+, spec errors \d+, unowned \d+ of \d+ governed-code path\(s\) changed$/;
 const NAMED = /\bnode\s+([\w./-]+\.test\.m?js)\b|\bnpm\s+(?:run\s+)?(test|[\w:-]+)\b/g;
 
-/** Commands named in gate verdict notes, current and past: [{cmd, file?, script?, where}]. */
+// A mention is not a run (independent re-review: "I did not run node x.test.mjs"
+// became a CI step citing that note as evidence). So a command counts only in
+// a PASSING verdict's note, in a sentence that says it ran or passed, and says
+// nothing that negates it.
+const RAN = /\b(ran|runs|run:|passe[sd]|pass(ing)?|green|exit(s|ed)? 0|all checks passed|succeed(s|ed)?)\b/i;
+// Negation of the RUN, not any negative word: every independent note says
+// "(fresh agent, not the builder)", and that is not a claim about a command.
+const NEGATED = /\b(not|n't|never)\s+(been\s+)?(run|ran|tried|executed|pass(ed)?)\b|\bnever\b|\bfail(s|ed|ing)?\b|\bred\b/i;
+const sentences = (note) => String(note ?? "").split(/(?<=[.;!?])\s+|\n+/);
+
+/** Commands a passing gate verdict's note says were run: Map(cmd -> {file?, script?, where}). */
 function namedInGates(board) {
   const out = new Map();
   for (const ph of board?.phases ?? []) {
     for (const t of ph.tasks ?? []) {
       for (const [gate, rec] of Object.entries(t.gate ?? {})) {
         for (const v of [...(rec.history ?? []), rec]) {
-          for (const m of String(v.note ?? "").matchAll(NAMED)) {
+          if (v.verdict !== "pass") continue;
+          for (const m of sentences(v.note).filter((x) => RAN.test(x) && !NEGATED.test(x)).flatMap((x) => [...x.matchAll(NAMED)])) {
             const script = m[2] === "t" ? "test" : (m[2] ?? null);
             const key = m[1] ? `node ${m[1]}` : `npm ${script === "test" ? "test" : `run ${script}`}`;
             const cur = out.get(key) ?? { file: m[1] ?? null, script, where: [] };
@@ -263,7 +329,12 @@ export function evidence(root, { specsDir = "specs", skipped = [] } = {}) {
       if (n.script === "test" || n.script in scripts) skipped.push(`ci: \`${cmd}\` is named in a gate note, but package.json has no real ${n.script} script`);
       continue;
     }
-    steps.push({ name: cmd, run: `npm ci && ${cmd}`, evidence: `package.json scripts.${n.script}: ${scripts[n.script]}; named as run in ${seen(n.where)}` });
+    // Install only the way the repo can: `npm ci` needs a lockfile, and
+    // without one it fails every build (independent re-review).
+    const pkg = read("package.json");
+    const deps = Object.keys({ ...pkg.dependencies, ...pkg.devDependencies }).length > 0;
+    const install = has("package-lock.json") ? "npm ci && " : deps ? "npm install && " : "";
+    steps.push({ name: cmd, run: `${install}${cmd}`, evidence: `package.json scripts.${n.script}: ${scripts[n.script]}; named as run in ${seen(n.where)}${install ? `; installed with ${install.slice(0, -4)}` : ""}` });
   }
 
   // The drift gate counts only if it has RUN here: its own gate event, whose
@@ -278,7 +349,16 @@ export function evidence(root, { specsDir = "specs", skipped = [] } = {}) {
   return steps;
 }
 
-export function ciWorkflow(steps) {
+/** The branch pushes are checked on: the remote's default, else the one checked out, else main. */
+export function defaultBranch(root) {
+  const git = (...a) => spawnSync("git", ["-C", root, ...a], { encoding: "utf8" });
+  const remote = git("symbolic-ref", "--short", "refs/remotes/origin/HEAD").stdout.trim().replace(/^origin\//, "");
+  if (remote) return remote;
+  const here = git("rev-parse", "--abbrev-ref", "HEAD").stdout.trim();
+  return here && here !== "HEAD" ? here : "main";
+}
+
+export function ciWorkflow(steps, { branch = "main" } = {}) {
   if (!steps.length) return null;
   const lines = [
     "# Generated by bin/graduate.mjs from what this repository was seen to run.",
@@ -286,7 +366,7 @@ export function ciWorkflow(steps) {
     "name: ci",
     "on:",
     "  push:",
-    "    branches: [main]",
+    `    branches: [${JSON.stringify(branch)}]`,
     "  pull_request:",
     "jobs:",
     "  check:",
@@ -411,6 +491,7 @@ export function graduate(root, { out = "graduate", specsDir = "specs" } = {}) {
   // over .github/workflows/ci.yml). The output is the repo itself or above it,
   // or a directory with something in it that graduate did not write: refused.
   if (dir === top || top.startsWith(dir + sep)) throw new GraduateError("OUT_IS_PROJECT", `--out ${out} is the project (or holds it); graduate writes beside the project's files, never over them`);
+  if (existsSync(dir) && !statSync(dir).isDirectory()) throw new GraduateError("OUT_NOT_DIR", `--out ${out} is a file, not a directory`);
   if (existsSync(dir) && readdirSync(dir).length && !existsSync(join(dir, MARK))) {
     throw new GraduateError("OUT_NOT_OURS", `${out} already holds files graduate did not write; choose an empty or new directory`);
   }
@@ -418,7 +499,7 @@ export function graduate(root, { out = "graduate", specsDir = "specs" } = {}) {
   const skipped = [];
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, MARK), "written by bin/graduate.mjs; delete the directory to regenerate it elsewhere\n");
-  const wf = ciWorkflow(evidence(root, { specsDir, skipped }));
+  const wf = ciWorkflow(evidence(root, { specsDir, skipped }), { branch: defaultBranch(root) });
   if (wf) {
     mkdirSync(join(dir, ".github", "workflows"), { recursive: true });
     writeFileSync(join(dir, ".github", "workflows", "ci.yml"), wf);
