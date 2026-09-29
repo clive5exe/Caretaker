@@ -20,6 +20,14 @@
 # and if the upgraded board cannot read the repo's own board, the old files go
 # back and it exits 1. An upgrade that leaves a repo with a board it cannot
 # read is the same lost work the refusal exists to prevent.
+#
+# AN INSTALL FROM BEFORE THE RENAME is moved, not refused. The project was
+# called something else, and its installs live at ops/<old name>/. Upgrade
+# moves that directory to ops/caretaker/ (git mv when it is tracked, so history
+# follows) and rewrites the ops/<old name>/ paths inside config.json and
+# prompt.txt — those paths and nothing else, with the originals kept in the
+# backup. If the upgraded board then cannot read the repo's board, all of it is
+# undone: the files, the two edits and the move.
 
 set -uo pipefail
 
@@ -30,10 +38,32 @@ if [ "${1:-}" = "--upgrade" ]; then
   TARGET="${2:-}"
   [ -n "$TARGET" ] || { echo "usage: bash install.sh --upgrade /path/to/repo"; exit 2; }
   DEST="$TARGET/ops/caretaker"
+  # The project's name before the rename. It appears here only so an old
+  # install can be found and moved; nothing new is ever written under it.
+  OLD_NAME="foreman"
+  OLD="$TARGET/ops/$OLD_NAME"
+  moved=""
+  if [ ! -e "$DEST" ] && [ -f "$OLD/config.json" ]; then
+    if git -C "$TARGET" ls-files --error-unmatch "ops/$OLD_NAME/config.json" >/dev/null 2>&1; then
+      git -C "$TARGET" mv "ops/$OLD_NAME" "ops/caretaker" || { echo "FAILED moving ops/$OLD_NAME to ops/caretaker"; exit 1; }
+      moved="git"
+    else
+      mv "$OLD" "$DEST" || { echo "FAILED moving $OLD to $DEST"; exit 1; }
+      moved="mv"
+    fi
+  fi
   [ -f "$DEST/config.json" ] || { echo "REFUSING — no install at $DEST (no config.json). Install first."; exit 1; }
   BACKUP="$DEST/.upgrade-backup-$(date -u +%Y%m%dT%H%M%SZ)"
   mkdir -p "$BACKUP"
   changed=""
+  if [ -n "$moved" ]; then
+    for f in config.json prompt.txt; do
+      [ -f "$DEST/$f" ] || continue
+      cp -p "$DEST/$f" "$BACKUP/$f"
+      sed -i "s#ops/$OLD_NAME/#ops/caretaker/#g" "$DEST/$f"
+    done
+    changed=" (moved ops/$OLD_NAME to ops/caretaker)"
+  fi
   for f in $TOOLS; do
     if [ -e "$DEST/$f" ] && cmp -s "$HERE/bin/$f" "$DEST/$f"; then continue; fi
     [ -e "$DEST/$f" ] && cp -p "$DEST/$f" "$BACKUP/$f"
@@ -49,8 +79,9 @@ if [ "${1:-}" = "--upgrade" ]; then
   # The check is a READ: `status` loads the repo's board through the new code
   # and writes nothing, so a failed upgrade is undone without a board rebuild.
   if ! ( cd "$TARGET" && node ops/caretaker/board.mjs status >/dev/null 2>&1 ); then
-    for f in $TOOLS RULES.md; do [ -e "$BACKUP/$f" ] && cp -p "$BACKUP/$f" "$DEST/$f"; done
-    echo "ROLLED BACK — the upgraded board.mjs could not read $TARGET's board. The previous files are restored."
+    for f in $TOOLS RULES.md config.json prompt.txt; do [ -e "$BACKUP/$f" ] && cp -p "$BACKUP/$f" "$DEST/$f"; done
+    if [ "$moved" = "git" ]; then git -C "$TARGET" mv "ops/caretaker" "ops/$OLD_NAME"; elif [ "$moved" = "mv" ]; then mv "$DEST" "$OLD"; fi
+    echo "ROLLED BACK — the upgraded board.mjs could not read $TARGET's board. The previous files are restored${moved:+, and the install is back at ops/$OLD_NAME}."
     exit 1
   fi
   if [ -z "$changed" ]; then
@@ -59,8 +90,17 @@ if [ "${1:-}" = "--upgrade" ]; then
   else
     echo "upgraded$changed in $DEST"
     echo "previous files kept in $BACKUP"
-    echo "config.json, prompt.txt and the board were not touched."
+    if [ -n "$moved" ]; then
+      echo "config.json and prompt.txt: only their ops/$OLD_NAME/ paths were rewritten. The board was not touched."
+      echo "If cron runs the loop, point it at the new path:  $DEST/loop.sh"
+    else
+      echo "config.json, prompt.txt and the board were not touched."
+    fi
   fi
+  # Things outside the repo that the old name owned. Reported, never moved:
+  # one is a secrets file, and moving secrets is the owner's call.
+  [ -e "$HOME/.config/$OLD_NAME/secrets.env" ] && echo "note: move $HOME/.config/$OLD_NAME/secrets.env to $HOME/.config/caretaker/secrets.env — the old path is no longer read."
+  [ -d "${XDG_STATE_HOME:-$HOME/.local/state}/$OLD_NAME" ] && echo "note: archived runs under ${XDG_STATE_HOME:-$HOME/.local/state}/$OLD_NAME are no longer read; move them to .../caretaker to keep them."
   exit 0
 fi
 
