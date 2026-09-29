@@ -77,9 +77,16 @@
               ]
             },
             "reviewer": {
-              "verdict": "fail",
+              "verdict": "pass",
               "at": "2026-09-29",
-              "note": "Independent review (fresh agent, not the builder): spec.mjs:192-198 globToRegExp turns **/ into .*/? rather than (?:.*/)?, so a/**/b matches a/xb and src/**/foo.ts claims src/xfoo.ts (reproduced); drift.mjs and freshness.mjs both use it, so 'which spec governs this file' answers wrongly for any **/ glob with a suffix."
+              "note": "Independent re-review (fresh agent, not the builder): fixed. spec.mjs:224 now emits (?:.*/)? for **/. Scratch matrix of 21 cases: a/**/b rejects a/xb, ax/b, a/x/yb; src/**/foo.ts rejects src/xfoo.ts, accepts src/foo.ts and src/x/y/foo.ts; **/foo.ts, a/**/**/b, a/**/b/**/c all correct. End to end in a scratch repo, drift.mjs explain says src/xfoo.ts unowned (exit 1), src/foo.ts and src/x/foo.ts owned by the spec. Mutating :224 back to .*/? fails spec.test 'a/**/b does NOT match a/xb' by name; restored, sha256 checked. spec, drift, freshness tests green.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent review (fresh agent, not the builder): spec.mjs:192-198 globToRegExp turns **/ into .*/? rather than (?:.*/)?, so a/**/b matches a/xb and src/**/foo.ts claims src/xfoo.ts (reproduced); drift.mjs and freshness.mjs both use it, so 'which spec governs this file' answers wrongly for any **/ glob with a suffix."
+                }
+              ]
             }
           }
         },
@@ -99,7 +106,14 @@
             "qa": {
               "verdict": "fail",
               "at": "2026-09-29",
-              "note": "Independent QA (fresh agent, not the builder): immutability check misses real edits: in a scratch repo, renaming an accepted ADR while rewriting its body (git mv 0001-x.md 0001-x-renamed.md, 'podman'->'docker'), deleting an accepted ADR, and editing a body line starting 'updated:' all give 'node bin/graduate.mjs decisions --repo <scratch>' exit 0 with no problem (git log without --follow; decidedText strips status/updated lines anywhere); nothing checks 'specs carry current state only'; and on this repo the check exits 1 (ADR-0001, ADR-0002 edited after acceptance) and is not in CI, so decisions here are not in fact immutable."
+              "note": "Independent re-QA (fresh agent, not the builder): the three old repros are fixed (rename+body edit, delete with another ADR present, body 'updated:' line each exit 1, named). Still silent, exit 0, in scratch repos: (1) deleting the only/last ADR: graduate.mjs:59 returns no problems once docs/decisions is gone, so deleteDecisions is never asked; (2) git mv 0001-x.md to docs/decisions/x.md or docs/decisions/archive/0001-x.md plus podman->docker: -M sees a rename so it is not a deletion (:110), and the :61 filter / non-recursive readdir drops it from the list, so no edit check runs. An accepted decision can be rewritten or removed with no report. 'Specs carry current state only' is still unchecked. Tests green.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent QA (fresh agent, not the builder): immutability check misses real edits: in a scratch repo, renaming an accepted ADR while rewriting its body (git mv 0001-x.md 0001-x-renamed.md, 'podman'->'docker'), deleting an accepted ADR, and editing a body line starting 'updated:' all give 'node bin/graduate.mjs decisions --repo <scratch>' exit 0 with no problem (git log without --follow; decidedText strips status/updated lines anywhere); nothing checks 'specs carry current state only'; and on this repo the check exits 1 (ADR-0001, ADR-0002 edited after acceptance) and is not in CI, so decisions here are not in fact immutable."
+                }
+              ]
             },
             "reviewer": {
               "verdict": "pass",
@@ -124,7 +138,14 @@
             "qa": {
               "verdict": "fail",
               "at": "2026-09-29",
-              "note": "Independent QA (fresh agent, not the builder): stale misses a governed file being deleted: scratch repo with spec updated: 2026-01-10 governing src/fees/**, then 'git rm src/fees/b.js' committed 2026-02-01, and 'node bin/freshness.mjs --repo <scratch>' reports 0 stale, exit 0, because lastCommit is asked only about paths still in git ls-files rather than the governs globs; the tests (19 PASS) and my mutation (stale measured against the spec's own commit, fails 2 checks by name) cover only modified files; orphaned/unowned and no-manual-flag hold."
+              "note": "Independent re-QA (fresh agent, not the builder): the old repro is fixed: git rm of a governed file (and a git mv out of the governed dir) now reports STALE, exit 1; reverting freshness.mjs:88 to existing paths fails 'deleting a governed file makes its spec stale' by name (restored, sha256 checked). New defect: stale asks git with :(glob) pathspecs (:67) while ownership/orphaned use globToRegExp, and they disagree. Scratch repos: governs src/**.js, drift explain says src/a/b.js is owned by it, edit it -> 0 stale, exit 0. governs src/fees (a directory): the same run reports the spec both ORPHAN (matches nothing) and STALE (code it governs changed). One matcher should decide both.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent QA (fresh agent, not the builder): stale misses a governed file being deleted: scratch repo with spec updated: 2026-01-10 governing src/fees/**, then 'git rm src/fees/b.js' committed 2026-02-01, and 'node bin/freshness.mjs --repo <scratch>' reports 0 stale, exit 0, because lastCommit is asked only about paths still in git ls-files rather than the governs globs; the tests (19 PASS) and my mutation (stale measured against the spec's own commit, fails 2 checks by name) cover only modified files; orphaned/unowned and no-manual-flag hold."
+                }
+              ]
             },
             "reviewer": {
               "verdict": "pass",
@@ -155,9 +176,16 @@
               "note": "detect reports podman 5.8.2 rootless; docker is never chosen implicitly; install hints are printed and never run"
             },
             "reviewer": {
-              "verdict": "fail",
+              "verdict": "pass",
               "at": "2026-09-29",
-              "note": "Independent review (fresh agent, not the builder): sandbox.mjs:227-236 'run --runtime docker' prints nothing about the weaker isolation (reproduced with a stub docker: silent, exit 0), which the ac requires. The install command is never run on confirmation, only printed; run proceeds on rootful podman without a word; and :74 is a no-op line that reads as a check."
+              "note": "Independent re-review (fresh agent, not the builder): all old points fixed. Stub docker/rootful-podman on PATH: 'run --runtime docker' prints the root-daemon WARNING (sandbox.mjs:257), rootful podman warns (:258), --net host says no allowlist applies. The :74 no-op is gone. install (:298-314) refuses without a TTY and offerInstall runs only on /^y(es)?$/. Scratch-copy mutations each fail sandbox.test by name: TTY check removed (fake-sh PATH catches the run), docker warning, rootful warning, yes-regex; restored, sha256 checked. CI 115620f log 1183-1187 green. Minor: a broken-but-installed podman is offered as 'not installed'.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent review (fresh agent, not the builder): sandbox.mjs:227-236 'run --runtime docker' prints nothing about the weaker isolation (reproduced with a stub docker: silent, exit 0), which the ac requires. The install command is never run on confirmation, only printed; run proceeds on rootful podman without a word; and :74 is a no-op line that reads as a check."
+                }
+              ]
             }
           }
         },
@@ -182,7 +210,14 @@
             "reviewer": {
               "verdict": "fail",
               "at": "2026-09-29",
-              "note": "Independent review (fresh agent, not the builder): sandbox.mjs:201 parses flags by stepping two at a time, the bug egress.mjs:142-148 documents: with 'run --allow-missing-limits --workdir R', R is silently dropped and the cwd is bind-mounted read-write with :Z instead (reproduced). No live test proves --cpus binds (only memory.max and pids.max are read), and the warning at :251-253 still says no egress allowlist exists."
+              "note": "Independent re-review (fresh agent, not the builder): the mechanics are fixed: parseFlags by name (reverting to pairs in a scratch copy fails 6 checks by name; CLI refuses '--workdir --allow-missing-limits', '--workdir=', stray args, exit 2), and CI 115620f log:1170 'live: the cpu ceiling is real (200000 100000)'. But the old note's third point still stands in the file: sandbox.mjs:11-15 still says egress is not done, '--network none is the only network setting' and 'E-2 puts an allowlist proxy in that gap. Until then'. And :19's usage advertises 'run [--spec F]', which the new parser refuses ('unknown flag --spec', exit 2, reproduced). Fix those two comment blocks.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent review (fresh agent, not the builder): sandbox.mjs:201 parses flags by stepping two at a time, the bug egress.mjs:142-148 documents: with 'run --allow-missing-limits --workdir R', R is silently dropped and the cwd is bind-mounted read-write with :Z instead (reproduced). No live test proves --cpus binds (only memory.max and pids.max are read), and the warning at :251-253 still says no egress allowlist exists."
+                }
+              ]
             }
           }
         },
@@ -232,7 +267,14 @@
             "reviewer": {
               "verdict": "fail",
               "at": "2026-09-29",
-              "note": "Independent review (fresh agent, not the builder): ac attacks (b) exhaust memory and (d) reach the container socket are never attempted: there is only a read of memory.max and argv string checks for '.sock'. Attack 3 (netns.mjs:384-388) dials a hostname and passes on 'Could not resolve host', which proves DNS is off, not that there is no route; the raw-IP proof is in a comment only, and no output is recorded beyond stdout."
+              "note": "Independent re-review (fresh agent, not the builder): (b), (d), raw IP now attacked for real: CI 115620f log:1174-1176 memory attack EXIT=137/oom_kill 1; 1177-1180 socket hunt finds none, and its control finds a mounted one; 964-966 raw-IP curl fails 'Failed to connect to 1.1.1.1:443', not DNS; netns commands/output are printed and in the JSON. Still standing: attack (a), write outside the repo mount (sandbox.test.mjs:164-171), goes through inside()+ok, not attackRun. Its command and output are in neither the report nor the log (log:1172 is a bare PASS). The ac and specs/sandbox.md say otherwise. Also, :215's /^OK$/m can never match a live _ping (reproduced: stdout is 'OKDONE'), so that clause does nothing.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent review (fresh agent, not the builder): ac attacks (b) exhaust memory and (d) reach the container socket are never attempted: there is only a read of memory.max and argv string checks for '.sock'. Attack 3 (netns.mjs:384-388) dials a hostname and passes on 'Could not resolve host', which proves DNS is off, not that there is no route; the raw-IP proof is in a comment only, and no output is recorded beyond stdout."
+                }
+              ]
             }
           }
         },
@@ -290,12 +332,26 @@
             "qa": {
               "verdict": "fail",
               "at": "2026-09-29",
-              "note": "Independent QA (fresh agent, not the builder): service versions are never compared: with a compose devcontainer (db: postgres:16, runServices [app, db]) 'node bin/environment.mjs check --sandbox none --devcontainer .devcontainer/devcontainer.json' only prints 'service db is declared ... nothing checked it', the compose file is never read (so no declared version exists to compare), and the dev container 'app' itself is misreported as an unstarted service; toolchain versions and host reachability (curl through a real egress.mjs proxy: allowed host yes, canary refused) do hold."
+              "note": "Independent re-QA (fresh agent, not the builder): the old scenario is fixed. With compose (app, db: postgres:16, cache: build), runServices [app,db,cache] and service app, 'check --sandbox none' names db as not running and cache as having no image, and no longer lists app. Toolchains and the direct canary ('reached DIRECTLY') hold. But service drift is missed for common tags: declared postgres:16-alpine3.20 against running postgres:17-alpine3.20 gives 0 differences, because tagVersion reads both as 3.20. And declared postgres:16 against running redis:16 gives 0 differences, because the image name is never compared (compare() at environment.mjs:305-311, reproduced). The ac says every difference is named.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent QA (fresh agent, not the builder): service versions are never compared: with a compose devcontainer (db: postgres:16, runServices [app, db]) 'node bin/environment.mjs check --sandbox none --devcontainer .devcontainer/devcontainer.json' only prints 'service db is declared ... nothing checked it', the compose file is never read (so no declared version exists to compare), and the dev container 'app' itself is misreported as an unstarted service; toolchain versions and host reachability (curl through a real egress.mjs proxy: allowed host yes, canary refused) do hold."
+                }
+              ]
             },
             "reviewer": {
               "verdict": "fail",
               "at": "2026-09-29",
-              "note": "Independent review (fresh agent, not the builder): environment.mjs:152-159 interpolates spec hosts unquoted into echo \"host ${h} $r\", and with --sandbox none the script runs via sh -c on the HOST, so a spec with hosts: $(touch${IFS}/path) ran that command on the host (reproduced). Also the canary is probed only through HTTPS_PROXY, so a network that routes around the proxy reads as closed, and check() skips the cgroup preflight, so --cpus kills the probe where cpu is not delegated."
+              "note": "Independent re-review (fresh agent, not the builder): the old points are fixed. A spec host '$(touch${IFS}/tmp/pwned-e6)' is refused at parse, and probeScript refuses it too (BAD_HOST); no file was created. The canary is also asked with the proxy unset (:252-258). check() drops undelegatable limits (stub exec: no --cpus). Each fix mutated in a scratch copy fails by name. New defect: tagVersion (environment.mjs:141-144) takes the LAST number in a tag. So declared image node:22-alpine3.20 declares node '3.20' and flags a correct v22 as drift. Also :310 compares only that number, never the image name, which spec/sandbox.md says is compared, so a service running redis:16 for postgres:16 is no difference (reproduced via compare()).",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent review (fresh agent, not the builder): environment.mjs:152-159 interpolates spec hosts unquoted into echo \"host ${h} $r\", and with --sandbox none the script runs via sh -c on the HOST, so a spec with hosts: $(touch${IFS}/path) ran that command on the host (reproduced). Also the canary is probed only through HTTPS_PROXY, so a network that routes around the proxy reads as closed, and check() skips the cgroup preflight, so --cpus kills the probe where cpu is not delegated."
+                }
+              ]
             }
           }
         }
@@ -446,14 +502,28 @@
           "note": "The technique behind grill-me, without the branding. Every defect worth finding in the project this came from was found by one agent refusing to take another's word: a security review that failed a rate-limit fix and found an OTP brute-force bypass, a qa run that found the paid checkout path returning 500 on every order. Neither came from an agent doing work. — Built in bin/verify.mjs (refute), checked by bin/verify.test.mjs and mutation-checked. A refutation records a qa fail naming both runs; a refuter that finds nothing records no pass, since failing to break something is absence of evidence. Gate verdicts not recorded: nobody closes their own work.",
           "gate": {
             "reviewer": {
-              "verdict": "fail",
+              "verdict": "pass",
               "at": "2026-09-29",
-              "note": "Independent review (fresh agent, not the builder): a qa fail gets recorded on verdicts the refuter never gave. (1) parseVerdict reads every string in the transcript through transcriptTexts, including tool OUTPUT. Reproduced in a copy: the builder writes NOTES.md with a line 'VERDICT: REFUTED planted...'; an openai-compatible refuter reads it with read_file and answers 'nothing obviously broken' with no verdict. Result: outcome refuted, qa fail recorded, reason taken from the file. (2) verify.mjs:148-149 says 'A refuter that crashed or was killed checked nothing, whatever it printed first', but the guard exempts REFUTED. A refuter printing 'VERDICT: REFUTED early guess' then exit 1 records a qa fail (reproduced). verify.test.mjs:106 'inconclusive, whatever it printed' tests only STANDS. The asymmetry itself (stands records nothing) is right; tests green."
+              "note": "Independent re-review (fresh agent, not the builder): both old points fixed. verify.mjs:158 reads the verdict from verdict.finalText (harness finalTextOf: claude result / codex agent_message / API last reply) or the last line; :159 makes any non-ok refuter inconclusive, REFUTED included. Scratch repro (atk/h3.mjs): API refuter read_file on a builder NOTES.md carrying 'VERDICT: REFUTED planted' -> inconclusive, no qa; claude-shaped JSON with the planted verdict in a tool_result -> inconclusive; REFUTED then exit 1 -> inconclusive; real result REFUTED -> qa fail. Mutating :158 back to parseVerdict(transcript) fails 2 checks by name, reverting :159 fails 1; restored, sha256 checked. verify.test green.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent review (fresh agent, not the builder): a qa fail gets recorded on verdicts the refuter never gave. (1) parseVerdict reads every string in the transcript through transcriptTexts, including tool OUTPUT. Reproduced in a copy: the builder writes NOTES.md with a line 'VERDICT: REFUTED planted...'; an openai-compatible refuter reads it with read_file and answers 'nothing obviously broken' with no verdict. Result: outcome refuted, qa fail recorded, reason taken from the file. (2) verify.mjs:148-149 says 'A refuter that crashed or was killed checked nothing, whatever it printed first', but the guard exempts REFUTED. A refuter printing 'VERDICT: REFUTED early guess' then exit 1 records a qa fail (reproduced). verify.test.mjs:106 'inconclusive, whatever it printed' tests only STANDS. The asymmetry itself (stands records nothing) is right; tests green."
+                }
+              ]
             },
             "qa": {
-              "verdict": "fail",
+              "verdict": "pass",
               "at": "2026-09-29",
-              "note": "Independent QA (fresh agent, not the builder): the refutation only blocks done when qa is a required gate. With a task owned by product-architect whose ac names no code, verify.refute recorded qa fail (recorded:true), and after a reviewer pass board.mjs done exited 0 and closed the task, so the refutation was only a comment. The same flow on a backend-owned task was REFUSED. Repro: a scratch copy, attack/h3.mjs."
+              "note": "Independent re-QA (fresh agent, not the builder): the old repro is fixed. Scratch repo, task D-1 owned by product-architect with a no-code ac: a refuter printing 'VERDICT: REFUTED step 3 is wrong' recorded qa fail; after a reviewer pass by another operator, board.mjs done D-1 exited 1, REFUSED, Missing: qa (board.mjs:559). Deleting that line fails board-lib 'a qa FAIL recorded on it (a refutation) still blocks done' by name; restored, sha256 checked. Edge cases held: planted verdict in a read file (API and claude-shaped) -> inconclusive; crashed REFUTED -> inconclusive; backend task still refused. verify, board-lib, board tests green.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent QA (fresh agent, not the builder): the refutation only blocks done when qa is a required gate. With a task owned by product-architect whose ac names no code, verify.refute recorded qa fail (recorded:true), and after a reviewer pass board.mjs done exited 0 and closed the task, so the refutation was only a comment. The same flow on a backend-owned task was REFUSED. Repro: a scratch copy, attack/h3.mjs."
+                }
+              ]
             }
           }
         },
@@ -478,7 +548,14 @@
             "reviewer": {
               "verdict": "fail",
               "at": "2026-09-29",
-              "note": "Independent review (fresh agent, not the builder): detection is sound (drift.mjs analyse/gate are pure and deterministic, reasons are mandatory, a dismissal is refused if it cannot be logged; drift.test.mjs green). But the AC's 'a task cannot close while a governed path has changed ...' is not enforced. board.mjs transition('done') -> missingGates (bin/board.mjs:498-515) checks only reviewer/qa/security verdicts and never reads the drift gate. Nothing runs the gate after a run: runstore.mjs, verify.mjs, run.mjs and loop.sh never call drift.mjs. So a drift fail is an exit code plus an Inbox line (readmodel.mjs:371), and 'board.mjs done' still closes the task."
+              "note": "Independent re-review (fresh agent, not the builder): half fixed. done now consults driftGateFailing (bin/board.mjs:577-598, :611) and the tests fail by name without it. But the old note's second point stands: nothing runs the gate after a run (runstore, run.mjs, loop.sh, verify never call drift.mjs; only drift.mjs:499 emits the event). Scratch repo (atk/h4.mjs): spec governs src/fee.js, an archived run for T-1 changes only src/fee.js, reviewer+qa pass, board.mjs done T-1 exits 0; drift check afterwards says FAIL drift 1. Also, after a real fail, 'drift check --task T-1 --path README.md' records a pass and driftGateFailing returns null: the latest event wins whatever paths it checked.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent review (fresh agent, not the builder): detection is sound (drift.mjs analyse/gate are pure and deterministic, reasons are mandatory, a dismissal is refused if it cannot be logged; drift.test.mjs green). But the AC's 'a task cannot close while a governed path has changed ...' is not enforced. board.mjs transition('done') -> missingGates (bin/board.mjs:498-515) checks only reviewer/qa/security verdicts and never reads the drift gate. Nothing runs the gate after a run: runstore.mjs, verify.mjs, run.mjs and loop.sh never call drift.mjs. So a drift fail is an exit code plus an Inbox line (readmodel.mjs:371), and 'board.mjs done' still closes the task."
+                }
+              ]
             }
           }
         },
@@ -495,14 +572,28 @@
           "note": "THE DIRECTION IS THE POINT AND MUST BE RECORDED. 'We learned something, the spec should change' and 'the code drifted from what we decided' are opposite events with opposite fixes, and the tool must not guess which. Forcing the answer is where the value is; auto-applying either one destroys it. — Built in bin/reconcile.mjs (propose, accept, reject, show), checked by bin/reconcile.test.mjs and mutation-checked. The reconciler must state SPEC-BEHIND or CODE-DRIFTED; a SPEC-BEHIND diff is stored at propose time and applied only by accept, never committed; a diff touching anything but the drifted spec is invalid. Gate verdicts not recorded.",
           "gate": {
             "reviewer": {
-              "verdict": "fail",
+              "verdict": "pass",
               "at": "2026-09-29",
-              "note": "Independent review (fresh agent, not the builder): the only-the-drifted-spec control is bypassable, and so is propose-not-apply. (1) patchTargets (reconcile.mjs:76-83) strips a/ b/ only if present, but git apply always strips one component (-p1). Reproduced: '--- specs/pricing.md / +++ specs/pricing.md' validates as targets [specs/pricing.md], valid; accept then reports applied [specs/pricing.md] while git modified pricing.md at the repo root. (2) propose never looks at out.diff (:171-192). A reconciler that edits the spec in the working tree itself (sed on specs/pricing.md) and prints 'DIRECTION: CODE-DRIFTED' gives valid:true with no warning, and the spec is changed with no acceptance (reproduced). That defeats 'nothing reaches a spec without that acceptance'. Use git apply --numstat/--summary for targets, and refuse a proposal whose run changed files."
+              "note": "Independent re-review (fresh agent, not the builder): both old points fixed. patchTargets (reconcile.mjs:86-106) asks git apply --numstat -z (same -p1 as accept) plus rename/copy from lines; propose (:209-210) marks invalid any proposal whose run changed workspace files. Scratch repo (atk/h5.mjs): '--- specs/pricing.md' headers -> target pricing.md, stray, invalid; reconciler sed on the spec -> invalid naming specs/pricing.md, also when it git-commits the edit (shadow-tree diff); a mode-only change on src/run.sh behind a spec hunk -> stray, invalid; legit SPEC-BEHIND leaves the spec untouched until accept. Mutating :210 or the rename-from loop fails reconcile.test by name; restored, sha256 checked. Note: the reconciler's edit is flagged, not reverted.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent review (fresh agent, not the builder): the only-the-drifted-spec control is bypassable, and so is propose-not-apply. (1) patchTargets (reconcile.mjs:76-83) strips a/ b/ only if present, but git apply always strips one component (-p1). Reproduced: '--- specs/pricing.md / +++ specs/pricing.md' validates as targets [specs/pricing.md], valid; accept then reports applied [specs/pricing.md] while git modified pricing.md at the repo root. (2) propose never looks at out.diff (:171-192). A reconciler that edits the spec in the working tree itself (sed on specs/pricing.md) and prints 'DIRECTION: CODE-DRIFTED' gives valid:true with no warning, and the spec is changed with no acceptance (reproduced). That defeats 'nothing reaches a spec without that acceptance'. Use git apply --numstat/--summary for targets, and refuse a proposal whose run changed files."
+                }
+              ]
             },
             "qa": {
-              "verdict": "fail",
+              "verdict": "pass",
               "at": "2026-09-29",
-              "note": "Independent QA (fresh agent, not the builder): a spec changes without acceptance. (1) A reconciler that runs sed on specs/pricing.md during propose gets proposal valid:true with no problems and no decision, and the spec is already rewritten, because propose never inspects the reconciler run diff. (2) A SPEC-BEHIND block holding a GIT binary patch and a rename passed patchTargets as [\"specs/pricing.md\"], and accept then also rewrote src/fee.js and created src/renamed-by-reconciler.js while reporting applied: specs/pricing.md only."
+              "note": "Independent re-QA (fresh agent, not the builder): both old repros fixed. Scratch repo (atk/h5.mjs): a reconciler that seds specs/pricing.md during propose now gets valid:false, 'changed specs/pricing.md in the workspace; a reconciler proposes, it does not apply', so accept refuses it (also when it commits the edit). A SPEC-BEHIND block hiding a GIT binary patch for src/fee.js and a rename src/run.sh->src/renamed.js gives targets [specs/pricing.md, src/fee.js, src/renamed.js, src/run.sh], stray, invalid. A clean proposal applies only on accept and reports applied [specs/pricing.md], with git status showing only that spec plus the parent's src/fee.js. reconcile.test green (47).",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent QA (fresh agent, not the builder): a spec changes without acceptance. (1) A reconciler that runs sed on specs/pricing.md during propose gets proposal valid:true with no problems and no decision, and the spec is already rewritten, because propose never inspects the reconciler run diff. (2) A SPEC-BEHIND block holding a GIT binary patch and a rename passed patchTargets as [\"specs/pricing.md\"], and accept then also rewrote src/fee.js and created src/renamed-by-reconciler.js while reporting applied: specs/pricing.md only."
+                }
+              ]
             }
           }
         },
@@ -550,9 +641,16 @@
               "note": "Independent review (fresh agent, not the builder): directionFor gives task.driftDirection over config drift.direction over 'spec', and refuses unknown values by name. gate({direction}) fixes ok for code (conflicts and spec errors still block), lists harvest, and keeps drift rows. The CLI takes --direction over --config and reads the task override from the named board. reconcile passes the direction to the reconciler as context. reconcile.test.mjs and drift.test.mjs green. Notes: 'blocks' means a failing gate verdict/exit code only, because nothing makes done consult the gate (failed under H-4). 'reconcile blocks until a human decides' is not wired to decisions: accepting or rejecting a proposal does not unblock; only resolving or dismissing the drift does."
             },
             "qa": {
-              "verdict": "fail",
+              "verdict": "pass",
               "at": "2026-09-29",
-              "note": "Independent QA (fresh agent, not the builder): the project declaration is read only when the caller passes --config. With drift.direction \"code\" in ops/caretaker/config.json, drift.mjs check --path src/a.js exits 1, both in the form graduate.mjs emits for CI (check --no-events --specs specs) and in the README form with --task. Only --config ... --task gives exit 0. So a code-leads project gets a CI gate that blocks every drift."
+              "note": "Independent re-QA (fresh agent, not the builder): the old repro is fixed (drift.mjs:679-682 reads ops/caretaker/config.json under --repo when no --config). Scratch git repo, config drift.direction code, src/a.js changed: 'check --path src/a.js' exit 0; graduate's form 'check --no-events --specs specs' (git diff) exit 0, direction code, harvest [specs/p.md]; '--task T-1' exit 0; '--task T-2' with driftDirection spec exit 1; '--direction spec' exit 1; from / with --repo exit 0; reconcile exit 1; direction 'sideways' exit 2 naming it; no config falls back to spec, exit 1. Deleting :681 fails reconcile.test 'with no --config, the project's own config sets the direction'; restored, sha256 checked.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent QA (fresh agent, not the builder): the project declaration is read only when the caller passes --config. With drift.direction \"code\" in ops/caretaker/config.json, drift.mjs check --path src/a.js exits 1, both in the form graduate.mjs emits for CI (check --no-events --specs specs) and in the README form with --task. Only --config ... --task gives exit 0. So a code-leads project gets a CI gate that blocks every drift."
+                }
+              ]
             }
           }
         },
@@ -678,7 +776,14 @@
             "reviewer": {
               "verdict": "fail",
               "at": "2026-09-29",
-              "note": "Independent review (fresh agent, not the builder): freshness.mjs itself is correct (stale/lying/undated, same-day not a lie), but the first half of the AC is unmet and the note overclaims it: the spec path is rendered as plain text, not a link (web/src/pages/WorkItem.tsx:105 <span className=mono>), and no card shows it at all (board.mjs taskBlock :276-310, dashboard cards, web Dashboard)."
+              "note": "Independent re-review (fresh agent, not the builder): old points fixed (board.md/board.html cards link the spec, WorkItem links governing specs; freshness, board-facts, dashboard-lib tests pass). New defect in the control the commit claims (a URL is 'never a link'): specHref checks for a scheme BEFORE path.relative, so spec 'docs/javascript:alert(document.cookie)' relativises from docs/ to href=\"javascript:alert(document.cookie)\" (bin/board.mjs:302-305, bin/dashboard.mjs:613-617). Reproduced end to end in a scratch clone with board.mjs build (docs/board.md) and via render() for board.html, which has no CSP. Check the scheme on the computed href too, or prefix ./.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent review (fresh agent, not the builder): freshness.mjs itself is correct (stale/lying/undated, same-day not a lie), but the first half of the AC is unmet and the note overclaims it: the spec path is rendered as plain text, not a link (web/src/pages/WorkItem.tsx:105 <span className=mono>), and no card shows it at all (board.mjs taskBlock :276-310, dashboard cards, web Dashboard)."
+                }
+              ]
             },
             "qa": {
               "verdict": "fail",
@@ -851,12 +956,26 @@
             "reviewer": {
               "verdict": "fail",
               "at": "2026-09-29",
-              "note": "Independent review (fresh agent, not the builder): graduate.mjs:22-23 claims output is 'never over the project's own files', but graduate() writes wherever --out points with no guard (:316-335). In a scratch clone, graduate all --out . overwrote .github/workflows/ci.yml with a generated one that drops the podman image pull (the live sandbox/egress attacks), the web build and the installed-copy check, with no warning. Refuse an out dir that resolves to the repo root, or to any existing tracked file. Nits: branches [main], ubuntu-24.04 and node 22 are fixed template values, not derived; the drift step is found by matching the detail text /drift|governed/ (:193)."
+              "note": "Independent re-review (fresh agent, not the builder): the old point is fixed: in a scratch repo --out ., .., '', bin/../, ops, ops/caretaker/events and a symlink to the root are all refused, exit 2, nothing written (graduate.mjs:413-416). New defect against the ac 'built from the commands the gates really ran': :266 prefixes every npm step with 'npm ci', which no gate ran and which exits EUSAGE with no package-lock.json (run in scratch: 'npm ci can only install with an existing package-lock.json'), so a lockfile-less repo gets a CI that is red on every push. Nits: --out naming an existing file crashes with a raw ENOTDIR stack; branches [main] is still a fixed value, not the repo's branch.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent review (fresh agent, not the builder): graduate.mjs:22-23 claims output is 'never over the project's own files', but graduate() writes wherever --out points with no guard (:316-335). In a scratch clone, graduate all --out . overwrote .github/workflows/ci.yml with a generated one that drops the podman image pull (the live sandbox/egress attacks), the web build and the installed-copy check, with no warning. Refuse an out dir that resolves to the repo root, or to any existing tracked file. Nits: branches [main], ubuntu-24.04 and node 22 are fixed template values, not derived; the drift step is found by matching the detail text /drift|governed/ (:193)."
+                }
+              ]
             },
             "qa": {
               "verdict": "fail",
               "at": "2026-09-29",
-              "note": "Independent QA (fresh agent, not the builder): the workflow is built from file presence and a regex, not from commands a gate ran. A scratch repo with only a never-run, failing bin/never-run.test.mjs, one hand-emitted gate event whose detail says drift, and a config naming boardMarkdown gets a ci.yml with tests, drift gate and board steps. It calls bin/drift.mjs and ops/caretaker/board.mjs, which do not exist there. The docs site and decision index hold, and bin/graduate.test.mjs passes."
+              "note": "Independent re-QA (fresh agent, not the builder): partly fixed: board and drift steps no longer come from a config key or a regex (a real drift summary event with no drift.mjs is skipped and said), and a named file the repo lacks is skipped. The core point still stands: steps come from any mention in a note, not a run. Scratch repo whose only gate note is a FAIL reading 'I did not run node bin/never-run.test.mjs, and npm run build was never tried; do not run npm test either' gets a ci.yml with all three steps, each citing that note as 'named as run'; never-run.test.mjs exits 1 (NAMED regex, graduate.mjs:217). The npm steps also add 'npm ci', which fails with no lockfile. Site and decision index hold; graduate.test green.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent QA (fresh agent, not the builder): the workflow is built from file presence and a regex, not from commands a gate ran. A scratch repo with only a never-run, failing bin/never-run.test.mjs, one hand-emitted gate event whose detail says drift, and a config naming boardMarkdown gets a ci.yml with tests, drift gate and board steps. It calls bin/drift.mjs and ops/caretaker/board.mjs, which do not exist there. The docs site and decision index hold, and bin/graduate.test.mjs passes."
+                }
+              ]
             }
           }
         },
@@ -1057,9 +1176,16 @@
           "note": "Spec: specs/caretaker-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built in PR #9, which also carries C-1, C-2, C-3, C-6 and U-2. Gate verdicts not recorded: nobody closes their own work. Needs security.",
           "gate": {
             "reviewer": {
-              "verdict": "fail",
+              "verdict": "pass",
               "at": "2026-09-29",
-              "note": "Independent review (fresh agent, not the builder): the controls themselves are right (loopback-only bind, 256-bit in-process token, timingSafeEqual on /auth and cookie, HttpOnly SameSite=Strict port-named cookie, 302 to /, exact Host on every request, exact Origin + application/json + X-Caretaker on POST, no CORS, CSP, run-id regex, fixed names, realpath under the archive), and mutating host, X-Caretaker, content-type, cookie compare, realpath and sandbox CSP each turns serve.test red. But the static-traversal attack is decorative: serve.test.mjs:252 requests /..%2f..%2fdocs%2fboard.json, which from dist=<root>/dist resolves to the fixture's PARENT, so it can never hit board.json. Deleting the prefix check at serve.mjs:170 leaves the suite green, and with it deleted /..%2fdocs%2fboard.json returns the board (reproduced in a copy). The AC says each control is attacked in a test; this one is not. Fix: one level of ../ and assert 404."
+              "note": "Independent re-review (fresh agent, not the builder): the old finding is fixed. serve.test.mjs:252-258 now asserts the target is one level above dist and tries /..%2fdocs%2fboard.json, /%2e%2e/... and /assets/..%2f..%2f...; commenting out the prefix check at serve.mjs:205 turns serve.test red by name on two of them (restored, sha256 verified). Scratch attack against startServer with dist=<fx>/web/dist: ..%2f to a file one up, ..%2fdist-evil (sibling prefix), ..%5c, %00, //etc/passwd, %2fetc%2fpasswd all 404 or the app shell; malformed %E0%A4%A is a 500 and the server stays up. serve, web-boundary tests and tsc green. Other controls unchanged from the earlier review.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent review (fresh agent, not the builder): the controls themselves are right (loopback-only bind, 256-bit in-process token, timingSafeEqual on /auth and cookie, HttpOnly SameSite=Strict port-named cookie, 302 to /, exact Host on every request, exact Origin + application/json + X-Caretaker on POST, no CORS, CSP, run-id regex, fixed names, realpath under the archive), and mutating host, X-Caretaker, content-type, cookie compare, realpath and sandbox CSP each turns serve.test red. But the static-traversal attack is decorative: serve.test.mjs:252 requests /..%2f..%2fdocs%2fboard.json, which from dist=<root>/dist resolves to the fixture's PARENT, so it can never hit board.json. Deleting the prefix check at serve.mjs:170 leaves the suite green, and with it deleted /..%2fdocs%2fboard.json returns the board (reproduced in a copy). The AC says each control is attacked in a test; this one is not. Fix: one level of ../ and assert 404."
+                }
+              ]
             },
             "qa": {
               "verdict": "pass",
@@ -1112,9 +1238,16 @@
               "note": "Independent review (fresh agent, not the builder): tailFile reads from a byte offset, holds a partial final line, skips and counts unparseable lines; ids carry every file's offset so a Last-Event-ID reconnect resumes each file with no gap or duplicate, files that appear later are read from 0; invalidate on board rewrite and archive listing change; fs.watch plus a stat poll; heartbeat. serve.test's half-line, one-event and resume checks are green. Nits: the hello event carries no id, so a client that saw no log line reconnects without Last-Event-ID and skips events appended while it was away (REST refetch covers the page, not the live feed); a single line longer than the 8 MiB read window stalls the tail at that offset forever (serve.mjs:63-90); the per-run stream has no heartbeat."
             },
             "qa": {
-              "verdict": "fail",
+              "verdict": "pass",
               "at": "2026-09-29",
-              "note": "Independent QA (fresh agent, not the builder): the Last-Event-ID resume holds (serve.test.mjs green, and multi-file cursors carry each file's offset), but the stream does not hold a partial line for a client that connects while one is half-written. openStream starts a fresh client at statSync(path).size, which can be mid-line; when the line completes, tailFile reads only its tail, JSON.parse fails, and the line is skipped and counted, never emitted. Reproduced against node bin/serve.mjs on a copy of the repo with /tmp/qa-w-sse.mjs: wrote event 0, appended the first 25 bytes of event 1, connected a fresh client, completed event 1, then appended event 2. The client received only [qa event 2], so event 1 is a gap. The REST fetch before connecting cannot have included it, because it was incomplete. Starting a fresh client at the last newline would fix it. The test only half-writes after the client connects."
+              "note": "Independent re-review (fresh agent, not the builder): the old gap is fixed. openStream starts a fresh client at lineStart() (serve.mjs:313), not the size. Scratch client over HTTP against startServer: QA's repro (event 0, 25 bytes of event 1, connect, finish 1, append 2) now delivers [1,2]; a client that saw only hello reconnects with hello's id (runs.jsonl:210) and gets the 2 lines written while away; after a 9 MiB line, the next line still arrives; Last-Event-ID from mid-batch gives 7,8,9 with no dup; a new events file is read from 0; a UTF-8 char split across writes arrives intact. Mutating lineStart back to size, and dropping hello's id, each fail serve.test by name (restored, sha256 OK).",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent QA (fresh agent, not the builder): the Last-Event-ID resume holds (serve.test.mjs green, and multi-file cursors carry each file's offset), but the stream does not hold a partial line for a client that connects while one is half-written. openStream starts a fresh client at statSync(path).size, which can be mid-line; when the line completes, tailFile reads only its tail, JSON.parse fails, and the line is skipped and counted, never emitted. Reproduced against node bin/serve.mjs on a copy of the repo with /tmp/qa-w-sse.mjs: wrote event 0, appended the first 25 bytes of event 1, connected a fresh client, completed event 1, then appended event 2. The client received only [qa event 2], so event 1 is a gap. The REST fetch before connecting cannot have included it, because it was incomplete. Starting a fresh client at the last newline would fix it. The test only half-writes after the client connects."
+                }
+              ]
             }
           }
         },
