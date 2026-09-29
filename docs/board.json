@@ -344,6 +344,11 @@
               "verdict": "fail",
               "at": "2026-09-29",
               "note": "Independent review (fresh agent, not the builder): the CLI path is right (group kill, container rm -f with its own ceiling, bounded settle after SIGKILL, WARN end event with state killed; harness.test.mjs green). The openai-compatible adapter, a run path through the same seam, has no enforced ceiling. Tool calls are blocking spawnSync (openai-compatible.mjs:143-145, 159-165) with a 120s per-call timeout, and the deadline is checked only between turns (:308). Reproduced in a copy: a 1000ms ceiling with two 'sleep 4' calls in one turn took 8100ms. Under sandbox:none, 'sleep 9 & echo started' took 9070ms: the backgrounded grandchild holds spawnSync's pipes, and nothing kills its process group. That is the hazard harness.mjs:634-657 documents and fixes for the CLI path, and it is unbounded with a longer sleep. Both report state killed, but only after the fact."
+            },
+            "qa": {
+              "verdict": "fail",
+              "at": "2026-09-29",
+              "note": "Independent QA (fresh agent, not the builder): the ceiling holds only on the cli adapter. On openai-compatible, a tool call runs under spawnSync with its own 120s limit and the deadline is checked only between turns. A run with a 1500ms ceiling whose model called run(\"sleep 171 & echo started\") returned after 120195ms, and the sleep was still alive afterwards, yet the verdict and end event said killed."
             }
           }
         },
@@ -364,6 +369,11 @@
               "verdict": "fail",
               "at": "2026-09-29",
               "note": "Independent review (fresh agent, not the builder): the AC says the default CLI adapter runs inside the dev environment 'so a subscription login works'. Nothing makes it work. The container gets only the workspace mount (sandbox.mjs buildArgs). HOME is moved to a fresh tmpfs, /tmp/agent-home (harness.mjs:216, 224). No credential or login state is mounted or delivered, and the preserve-fd secret channel is not wired in (see H-0). So neither a 'claude login' session nor an API key can reach the in-container CLI, and every real podman run of the default adapter is unauthenticated. The header comment (harness.mjs:12-16) defends the default with a capability that does not exist. Also: tool-fixture.mjs:100 defaults to sandbox:none, so scoring an untrusted candidate model runs its shell commands on the host with host network by default. The SDK half and fixture scoring are otherwise sound; tests green."
+            },
+            "qa": {
+              "verdict": "fail",
+              "at": "2026-09-29",
+              "note": "Independent QA (fresh agent, not the builder): the fixture does not score stopping when done. A scripted model that wrote upper.txt correctly and then made 45 more list_files turns scored pass with stopped:true (turns 48), because stopped means only that it stopped before maxTurns 50. Also, nothing lets a subscription login reach the CLI inside the container: HOME is a fresh /tmp/agent-home, net defaults to none, and PR #13 README says the container still needs \"a way for that CLI to sign in\"."
             }
           }
         },
@@ -415,6 +425,11 @@
               "verdict": "fail",
               "at": "2026-09-29",
               "note": "Independent review (fresh agent, not the builder): false comments defending a control. openai-compatible.mjs:94-96 says a symlink whose target is outside the workspace is refused on the host; hostExecutor.guard (:112-122) walks up past a DANGLING symlink to its parent, so write_file follows it out. Reproduced in a copy: ws/link -> ../outside/pwned.txt (not yet existing), write_file path 'link' -> 'wrote 7 bytes to link' and the file appeared outside the workspace. The header (:22-24 'tools run on the host, confined to the workspace') and the run warning (:253 'confined to the workspace by path checks only') claim confinement, but the run tool (:143-145) is an unconfined host shell. harness-config.mjs:120 tells users 'Pass secrets with --secret, which redacts them' as if that delivers them; --secret never reaches the CLI. Otherwise good: key read from the harness env, sent only in the Authorization header, the settings file is refused inside the workspace and refuses isolation keys; tests green."
+            },
+            "qa": {
+              "verdict": "fail",
+              "at": "2026-09-29",
+              "note": "Independent QA (fresh agent, not the builder): no second vendor has run. openai-compatible has only been exercised against a scripted local server, and the codex preset was never run and lacks --sandbox workspace-write (codex exec defaults to read-only, per PR #13). The interface changes are also not fully recorded: vendors.md says verify.mjs ran unmodified, but e60736d changed it for the API transcript shape, and reconcile.parseProposal still returns direction null for {\"type\":\"assistant\",\"content\":\"DIRECTION: CODE-DRIFTED x\"}."
             }
           }
         },
@@ -434,6 +449,11 @@
               "verdict": "fail",
               "at": "2026-09-29",
               "note": "Independent review (fresh agent, not the builder): a qa fail gets recorded on verdicts the refuter never gave. (1) parseVerdict reads every string in the transcript through transcriptTexts, including tool OUTPUT. Reproduced in a copy: the builder writes NOTES.md with a line 'VERDICT: REFUTED planted...'; an openai-compatible refuter reads it with read_file and answers 'nothing obviously broken' with no verdict. Result: outcome refuted, qa fail recorded, reason taken from the file. (2) verify.mjs:148-149 says 'A refuter that crashed or was killed checked nothing, whatever it printed first', but the guard exempts REFUTED. A refuter printing 'VERDICT: REFUTED early guess' then exit 1 records a qa fail (reproduced). verify.test.mjs:106 'inconclusive, whatever it printed' tests only STANDS. The asymmetry itself (stands records nothing) is right; tests green."
+            },
+            "qa": {
+              "verdict": "fail",
+              "at": "2026-09-29",
+              "note": "Independent QA (fresh agent, not the builder): the refutation only blocks done when qa is a required gate. With a task owned by product-architect whose ac names no code, verify.refute recorded qa fail (recorded:true), and after a reviewer pass board.mjs done exited 0 and closed the task, so the refutation was only a comment. The same flow on a backend-owned task was REFUSED. Repro: a scratch copy, attack/h3.mjs."
             }
           }
         },
@@ -478,6 +498,11 @@
               "verdict": "fail",
               "at": "2026-09-29",
               "note": "Independent review (fresh agent, not the builder): the only-the-drifted-spec control is bypassable, and so is propose-not-apply. (1) patchTargets (reconcile.mjs:76-83) strips a/ b/ only if present, but git apply always strips one component (-p1). Reproduced: '--- specs/pricing.md / +++ specs/pricing.md' validates as targets [specs/pricing.md], valid; accept then reports applied [specs/pricing.md] while git modified pricing.md at the repo root. (2) propose never looks at out.diff (:171-192). A reconciler that edits the spec in the working tree itself (sed on specs/pricing.md) and prints 'DIRECTION: CODE-DRIFTED' gives valid:true with no warning, and the spec is changed with no acceptance (reproduced). That defeats 'nothing reaches a spec without that acceptance'. Use git apply --numstat/--summary for targets, and refuse a proposal whose run changed files."
+            },
+            "qa": {
+              "verdict": "fail",
+              "at": "2026-09-29",
+              "note": "Independent QA (fresh agent, not the builder): a spec changes without acceptance. (1) A reconciler that runs sed on specs/pricing.md during propose gets proposal valid:true with no problems and no decision, and the spec is already rewritten, because propose never inspects the reconciler run diff. (2) A SPEC-BEHIND block holding a GIT binary patch and a rename passed patchTargets as [\"specs/pricing.md\"], and accept then also rewrote src/fee.js and created src/renamed-by-reconciler.js while reporting applied: specs/pricing.md only."
             }
           }
         },
@@ -497,6 +522,11 @@
               "verdict": "pass",
               "at": "2026-09-29",
               "note": "Independent review (fresh agent, not the builder): read bin/harvest.mjs and its wiring in runstore.mjs; harvest.test.mjs green. Only declared DECISION lines are extracted. The live recorder sees only redacted complete lines. 'Recorded' is an 80% significant-word match against specs and docs/decisions. keep writes a draft ADR with a sanitised slug and no path traversal; discard needs a reason; each is recorded once. A harvest failure never fails the run. Nits: extractDecisions goes through transcriptTexts, so DECISION lines in TOOL OUTPUT are harvested as the agent's own (reproduced: reading bin/harvest.mjs yields 'retry the upload twice...' from its header comment). That contradicts 'what is harvested is what was DECLARED', but a human triages it, so it is noise, not harm. runstore.mjs:275 harvests with root=workspace and the default 'specs' dir, ignoring config.specs."
+            },
+            "qa": {
+              "verdict": "fail",
+              "at": "2026-09-29",
+              "note": "Independent QA (fresh agent, not the builder): the 80% word-overlap test marks decisions that REVERSE the specs as already recorded, so they are never surfaced. On this repo corpus, recordedIn returns TECH.md for \"give the container open egress to the internet and drop the allowlist proxy\", ADR-0001 for \"run the sandbox as root with Docker instead of rootless podman\", and TECH.md for \"the builder may close its own task without a reviewer\"."
             }
           }
         },
@@ -518,6 +548,11 @@
               "verdict": "pass",
               "at": "2026-09-29",
               "note": "Independent review (fresh agent, not the builder): directionFor gives task.driftDirection over config drift.direction over 'spec', and refuses unknown values by name. gate({direction}) fixes ok for code (conflicts and spec errors still block), lists harvest, and keeps drift rows. The CLI takes --direction over --config and reads the task override from the named board. reconcile passes the direction to the reconciler as context. reconcile.test.mjs and drift.test.mjs green. Notes: 'blocks' means a failing gate verdict/exit code only, because nothing makes done consult the gate (failed under H-4). 'reconcile blocks until a human decides' is not wired to decisions: accepting or rejecting a proposal does not unblock; only resolving or dismissing the drift does."
+            },
+            "qa": {
+              "verdict": "fail",
+              "at": "2026-09-29",
+              "note": "Independent QA (fresh agent, not the builder): the project declaration is read only when the caller passes --config. With drift.direction \"code\" in ops/caretaker/config.json, drift.mjs check --path src/a.js exits 1, both in the form graduate.mjs emits for CI (check --no-events --specs specs) and in the README form with --task. Only --config ... --task gives exit 0. So a code-leads project gets a CI gate that blocks every drift."
             }
           }
         },
@@ -556,6 +591,11 @@
               "verdict": "fail",
               "at": "2026-09-29",
               "note": "Independent review (fresh agent, not the builder): path traversal from untrusted skill metadata onto the host. stage() copies each skill to join(into, sk.name) (skills.mjs:153), and sk.name is the SKILL.md frontmatter 'name' (:97), taken from a third-party repo unvalidated. Reproduced in a copy: a skill with 'name: ../../victim/planted' and a harness.json beside its SKILL.md was staged; cpSync wrote victim/planted/SKILL.md and victim/planted/harness.json OUTSIDE the staging dir. Staging runs on the host before any sandbox, into /tmp/caretaker-skills-PID-TS. A name like ../../home/USER/.config/caretaker drops a harness.json that points endpoint (with the API key) at an attacker, and ~/.ssh is reachable the same way. Require the name to match the directory name, or /^[a-z0-9][a-z0-9-]*$/. The rest is sound: standard layout read with no new fields, fetch-never-at-run-time, duplicates refused, read-only mount, read_skill confined; skills.test.mjs green."
+            },
+            "qa": {
+              "verdict": "fail",
+              "at": "2026-09-29",
+              "note": "Independent QA (fresh agent, not the builder): stage() joins the frontmatter name onto the staging path. A repo in the skills/<cat>/<name>/SKILL.md layout with name: ../../../s1-escaped made stageForRun write /tmp/s1-escaped/SKILL.md outside the staging dir on the host, and that skill was silently not available to the run (staged() listed only \"good\"). So pointing at an untrusted repo can write host paths, and it loses skills without an error."
             }
           }
         },
@@ -1242,6 +1282,11 @@
               "verdict": "fail",
               "at": "2026-09-29",
               "note": "Independent review (fresh agent, not the builder): the command menu half is right: CommandMenu.tsx lists pages, work items, runs and, on a work item, exactly item.commands from commandsFor, adds none of its own, and choosing one opens the same CommandForm the page uses. The Getting started half does not meet the AC 'walks a new repo to its first closed task': GettingStarted.tsx:14-43 covers building the client, starting the server, ssh -L and the server's promises (PRODUCT.md §10), but never installs into a repo (install.sh), never shows the board, and never reaches a closed task: no board.mjs done, no gate verdicts, no refusal. Either the page walks install to first close, or the AC is narrowed to what PRODUCT §10 asks for, by someone other than the builder."
+            },
+            "qa": {
+              "verdict": "fail",
+              "at": "2026-09-29",
+              "note": "Independent QA (fresh agent, not the builder): the command menu half holds. In Chromium on /work/W-2, /work/W-0 and /work/B-1, Ctrl-K listed exactly the commands /api/v1/work/<id> returned from commandsFor, in order (W-2: block, todo, answer q1, ask, pr, note, drop; B-1: todo, note), plus pages, items and runs, and no command of its own. The Getting started half does not. web/src/pages/GettingStarted.tsx has four cards: build the client, start the server, ssh -L, and what the server promises. It never mentions install.sh, adding a task, recording gate verdicts from the CLI, or done. Rendered text confirmed, so it does not walk a new repo to its first closed task."
             }
           }
         },
@@ -1261,6 +1306,11 @@
               "verdict": "pass",
               "at": "2026-09-29",
               "note": "Independent review (fresh agent, not the builder): theme.css holds every color as the TECH §4 tokens; Inter and Anton are bundled from @fontsource (Latin files only) and the built dist has no external stylesheet, font or script (only library namespace and error-doc strings); the wordmark is Anton text; the boundary test catches a planted https URL, CSS url(http…), hex, rgb() and named color and the real tree is clean. Nit: the no-build fallback page in serve.mjs:177-184 uses inline style attributes, which its own CSP (default-src 'self', no unsafe-inline) blocks, so that page renders unstyled."
+            },
+            "qa": {
+              "verdict": "fail",
+              "at": "2026-09-29",
+              "note": "Independent QA (fresh agent, not the builder): at runtime the client holds. Chromium loaded every page with zero requests off 127.0.0.1, Inter Variable and Anton loaded from dist, and the wordmark is CARETAKER in Anton. The current web/src has no color outside theme.css (grep). But the boundary test does not enforce either half. Planted one at a time in a copy's web/src, node bin/web-boundary.test.mjs stayed green for: fetch('//evil.example.com/x') (protocol-relative), new WebSocket('wss://evil.example.com/'), @import url(//fonts.googleapis.com/...) in a .css file, .qa { color: red; background: white; } in a .css file other than theme.css (unquoted named colors are never checked), and style={{ color: 'tomato' }} or 'Red' (unlisted or capitalised names). web/index.html is outside the scanned tree."
             }
           }
         }
