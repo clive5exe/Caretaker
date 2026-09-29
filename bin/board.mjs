@@ -172,8 +172,17 @@ function build() {
   const byOwner = {};
   for (const t of all) (byOwner[t.owner] ||= []).push(t);
 
+  // Dates, goals and a launch target are optional in board.json. This repo's
+  // own board has none of them, and formatting a missing date printed
+  // "Invalid Date" and a missing goal printed "undefined" into every phase.
   const fmt = (s) =>
     new Date(s + "T00:00:00Z").toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
+  const span = (p) => {
+    if (p.start && p.end) return `<b>${fmt(p.start)} &rarr; ${fmt(p.end)}</b> &middot; `;
+    if (p.start) return `<b>from ${fmt(p.start)}</b> &middot; `;
+    if (p.end) return `<b>until ${fmt(p.end)}</b> &middot; `;
+    return "";
+  };
 
   // The headline number is RAW closed/total — no half credit for "in progress".
   // A weighted score reads higher than reality and hides the actual bottleneck,
@@ -222,7 +231,7 @@ order: 2
   <div class="bignum">${currentPct}<span>%</span></div>
   <div class="boardmeta">
     <b>${currentPhase.name} &middot; ${current.done} of ${current.total} tasks closed through the full gate</b>
-    <span>${gatePending} more are built and waiting only on reviewer / qa / security verdicts &middot; launch target <b>${fmt(d.meta.launch)}</b></span>
+    <span>${gatePending} more are built and waiting only on reviewer / qa / security verdicts${d.meta.launch ? ` &middot; launch target <b>${fmt(d.meta.launch)}</b>` : ""}</span>
     <span>All phases ever, including pre-V1 scope: ${overall.done} of ${overall.total} (${rawPct}%)</span>
   </div>
 </div>
@@ -257,8 +266,8 @@ ${bar(currentPct, "big")}
     const pr = progress(p.tasks);
     const pdays = p.tasks.filter((t) => t.status !== "done").reduce((a, t) => a + toDays(t.est), 0);
     md += `## ${p.name}\n\n`;
-    md += `<div class="phasebar"><div class="phasemeta"><b>${fmt(p.start)} &rarr; ${fmt(p.end)}</b> &middot; ${pr.done}/${pr.total} done &middot; ${Math.ceil(pdays)}d remaining</div>${bar(pr.pct)}</div>\n\n`;
-    md += `${p.goal}\n\n`;
+    md += `<div class="phasebar"><div class="phasemeta">${span(p)}${pr.done}/${pr.total} done &middot; ${Math.ceil(pdays)}d remaining</div>${bar(pr.pct)}</div>\n\n`;
+    if (p.goal) md += `${p.goal}\n\n`;
     // Full-width blocks, NOT a table. A five-column table crushes the title and
     // the note into one narrow cell, which is unreadable the moment a task has
     // any real history on it.
