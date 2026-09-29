@@ -65,6 +65,8 @@ const BOARD = {
         },
       ],
     },
+    // Undated, with no goal: the shape of this repo's own board.
+    { name: "Phase 2", tasks: [{ id: "U-1", title: "later", owner: "builder", est: "1h", status: "todo", ac: "y" }] },
   ],
 };
 
