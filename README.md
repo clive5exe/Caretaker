@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/assets/caretaker-logo.png" alt="Caretaker" width="600"></p>
+
 # foreman
 
 A task board that refuses to let you sign off your own work, a dashboard over
