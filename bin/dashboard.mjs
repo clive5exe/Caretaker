@@ -739,14 +739,13 @@ const html = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(cfg.name)}</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 :root{
   --bg:#08080a; --panel:#111114; --line:#1e1e23; --line2:#2c2c34;
   --ink:#ece9e2; --dim:#918f87; --faint:#5f5d57;
   --lime:#c6f24a; --amber:#f5a524; --red:#ff5d51;
+  /* Plex is used when installed locally; nothing is fetched. The page makes no
+     request to another origin, so it opens offline and leaks nothing. */
   --sans:"IBM Plex Sans Condensed",ui-sans-serif,system-ui,"Segoe UI",Helvetica,Arial,sans-serif;
   --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
 }

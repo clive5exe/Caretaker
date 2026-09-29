@@ -93,7 +93,12 @@ function bar(pct, cls = "") {
   return `<div class="pbar ${cls}"><div class="pfill" style="width:${pct}%"></div></div>`;
 }
 
-const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+// Quotes too, not only & < >. No user text sits in an attribute in this output
+// today — the one title="…" carries validated verdicts only — so this closes a
+// latent hazard rather than a live one: the day someone adds an attribute, it
+// is already safe. Same five characters dashboard.mjs escapes.
+const esc = (s) =>
+  String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 
 // Notes are appended chronologically joined by " — ". The newest entry is the
 // current state and is the only part worth showing by default; the rest is
@@ -292,10 +297,18 @@ ${bar(currentPct, "big")}
   } catch {
     /* status-latest.md is optional; a missing file is not a build failure. */
   }
-  try {
-    execFileSync("node", [path.join(HERE, "build.mjs")], { stdio: "pipe" });
-  } catch (e) {
-    console.error("build.mjs failed:", e.message);
+  // An OPTIONAL docs-site hook. The project this came from had a build.mjs
+  // beside the board; nothing here ships one, so running it unconditionally
+  // printed "build.mjs failed" on every mutation — noise that teaches people to
+  // ignore this script's stderr. A hook that exists still runs, and still
+  // reports its own failure; a hook that does not exist is not an error.
+  const hook = path.join(HERE, "build.mjs");
+  if (fs.existsSync(hook)) {
+    try {
+      execFileSync("node", [hook], { stdio: "pipe" });
+    } catch (e) {
+      console.error("build.mjs failed:", e.message);
+    }
   }
   // The CURRENT-PHASE figures ride along, because every caller that echoes a
   // number should echo the same one the dashboard headlines. Before this, the

@@ -2,14 +2,13 @@
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Foreman</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 :root{
   --bg:#08080a; --panel:#111114; --line:#1e1e23; --line2:#2c2c34;
   --ink:#ece9e2; --dim:#918f87; --faint:#5f5d57;
   --lime:#c6f24a; --amber:#f5a524; --red:#ff5d51;
+  /* Plex is used when installed locally; nothing is fetched. The page makes no
+     request to another origin, so it opens offline and leaks nothing. */
   --sans:"IBM Plex Sans Condensed",ui-sans-serif,system-ui,"Segoe UI",Helvetica,Arial,sans-serif;
   --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
 }
@@ -168,7 +167,7 @@ footer{margin-top:34px;color:var(--faint);font-size:13px;line-height:1.7;
 
 <div class="top"><h1>Foreman</h1>
   <span class="ph">Layer 2 — Harness</span>
-  <span class="bt">built 2026-08-30 19:16</span></div>
+  <span class="bt">built 2026-09-29 03:00</span></div>
 
 <div class="prog">
   <div class="prognums">
@@ -176,8 +175,7 @@ footer{margin-top:34px;color:var(--faint);font-size:13px;line-height:1.7;
     <span class="lab">by effort<br>0h of 104h</span>
     <span class="alt">0%</span>
     <span class="lab">by task count<br>0 of 11</span>
-    <span class="eta">ETA <b>2027-02-28</b> &middot; 182 days at
-     0.6h/day</span>
+    <span class="eta">ETA <b>no rate</b> &middot; nothing closed in 14 days, so there is nothing to extrapolate</span>
   </div>
   <div class="track"><i class="t" style="width:0%"></i>
     <i class="e" style="left:0%"></i></div>
@@ -204,9 +202,9 @@ footer{margin-top:34px;color:var(--faint);font-size:13px;line-height:1.7;
       <p class="tl">No finish line</p><p class="tv">0</p><p class="ts">every open task has one</p>
       </div>
     <div class="tile plain">
-      <p class="tl">Landed today</p><p class="tv">20</p><p class="ts">commits &middot; 14-day trend</p>
+      <p class="tl">Landed today</p><p class="tv">0</p><p class="ts">commits &middot; 14-day trend</p>
       <svg class="spark plain" viewBox="0 0 240 44" preserveAspectRatio="none" aria-hidden="true">
-      <path class="a" d="M0.0 42.0 L18.5 42.0 L36.9 42.0 L55.4 42.0 L73.8 42.0 L92.3 42.0 L110.8 42.0 L129.2 42.0 L147.7 42.0 L166.2 42.0 L184.6 42.0 L203.1 42.0 L221.5 42.0 L240.0 3.0 L240 44 L0 44 Z"/><path class="l" d="M0.0 42.0 L18.5 42.0 L36.9 42.0 L55.4 42.0 L73.8 42.0 L92.3 42.0 L110.8 42.0 L129.2 42.0 L147.7 42.0 L166.2 42.0 L184.6 42.0 L203.1 42.0 L221.5 42.0 L240.0 3.0"/></svg></div>
+      <path class="a" d="M0.0 42.0 L18.5 42.0 L36.9 42.0 L55.4 42.0 L73.8 42.0 L92.3 42.0 L110.8 42.0 L129.2 42.0 L147.7 42.0 L166.2 42.0 L184.6 42.0 L203.1 42.0 L221.5 42.0 L240.0 42.0 L240 44 L0 44 Z"/><path class="l" d="M0.0 42.0 L18.5 42.0 L36.9 42.0 L55.4 42.0 L73.8 42.0 L92.3 42.0 L110.8 42.0 L129.2 42.0 L147.7 42.0 L166.2 42.0 L184.6 42.0 L203.1 42.0 L221.5 42.0 L240.0 42.0"/></svg></div>
   </div>
   <div class="strip"><h2>Executing now</h2><p class="note">No run log yet. This fills in when something appends to
        <code>ops/foreman/runs.jsonl</code>. Until then the board is a snapshot rather than a live view,
@@ -264,49 +262,49 @@ footer{margin-top:34px;color:var(--faint);font-size:13px;line-height:1.7;
 </div>
 
 <div class="pane pane-data">
-  <div class="panel"><h2>Velocity &middot; last 14 days</h2><div class="vwrap"><div class="vmean" style="bottom:7%"><span>avg 1.4</span></div><div class="vday" title="2026-08-17: 0 commits, 0 closed">
+  <div class="panel"><h2>Velocity &middot; last 14 days</h2><div class="vwrap"><div class="vmean" style="bottom:0%"><span>avg 0.0</span></div><div class="vday" title="2026-09-16: 0 commits, 0 closed">
         <div class="vbars"><i class="vc" style="height:0%"></i>
         </div>
-        <span class="vd">17</span></div><div class="vday" title="2026-08-18: 0 commits, 0 closed">
+        <span class="vd">16</span></div><div class="vday" title="2026-09-17: 0 commits, 0 closed">
         <div class="vbars"><i class="vc" style="height:0%"></i>
         </div>
-        <span class="vd">18</span></div><div class="vday" title="2026-08-19: 0 commits, 0 closed">
+        <span class="vd">17</span></div><div class="vday" title="2026-09-18: 0 commits, 0 closed">
         <div class="vbars"><i class="vc" style="height:0%"></i>
         </div>
-        <span class="vd">19</span></div><div class="vday" title="2026-08-20: 0 commits, 0 closed">
+        <span class="vd">18</span></div><div class="vday" title="2026-09-19: 0 commits, 0 closed">
         <div class="vbars"><i class="vc" style="height:0%"></i>
         </div>
-        <span class="vd">20</span></div><div class="vday" title="2026-08-21: 0 commits, 0 closed">
+        <span class="vd">19</span></div><div class="vday" title="2026-09-20: 0 commits, 0 closed">
         <div class="vbars"><i class="vc" style="height:0%"></i>
         </div>
-        <span class="vd">21</span></div><div class="vday" title="2026-08-22: 0 commits, 0 closed">
+        <span class="vd">20</span></div><div class="vday" title="2026-09-21: 0 commits, 0 closed">
         <div class="vbars"><i class="vc" style="height:0%"></i>
         </div>
-        <span class="vd">22</span></div><div class="vday" title="2026-08-23: 0 commits, 0 closed">
+        <span class="vd">21</span></div><div class="vday" title="2026-09-22: 0 commits, 0 closed">
         <div class="vbars"><i class="vc" style="height:0%"></i>
         </div>
-        <span class="vd">23</span></div><div class="vday" title="2026-08-24: 0 commits, 0 closed">
+        <span class="vd">22</span></div><div class="vday" title="2026-09-23: 0 commits, 0 closed">
         <div class="vbars"><i class="vc" style="height:0%"></i>
         </div>
-        <span class="vd">24</span></div><div class="vday" title="2026-08-25: 0 commits, 0 closed">
+        <span class="vd">23</span></div><div class="vday" title="2026-09-24: 0 commits, 0 closed">
         <div class="vbars"><i class="vc" style="height:0%"></i>
         </div>
-        <span class="vd">25</span></div><div class="vday" title="2026-08-26: 0 commits, 0 closed">
+        <span class="vd">24</span></div><div class="vday" title="2026-09-25: 0 commits, 0 closed">
         <div class="vbars"><i class="vc" style="height:0%"></i>
         </div>
-        <span class="vd">26</span></div><div class="vday" title="2026-08-27: 0 commits, 0 closed">
+        <span class="vd">25</span></div><div class="vday" title="2026-09-26: 0 commits, 0 closed">
         <div class="vbars"><i class="vc" style="height:0%"></i>
         </div>
-        <span class="vd">27</span></div><div class="vday" title="2026-08-28: 0 commits, 0 closed">
+        <span class="vd">26</span></div><div class="vday" title="2026-09-27: 0 commits, 0 closed">
         <div class="vbars"><i class="vc" style="height:0%"></i>
         </div>
-        <span class="vd">28</span></div><div class="vday" title="2026-08-29: 0 commits, 0 closed">
+        <span class="vd">27</span></div><div class="vday" title="2026-09-28: 0 commits, 0 closed">
         <div class="vbars"><i class="vc" style="height:0%"></i>
         </div>
-        <span class="vd">29</span></div><div class="vday" title="2026-08-30: 20 commits, 1 closed (8h)">
-        <div class="vbars"><i class="vc" style="height:100%"></i>
-        <i class="vk" style="height:5%"></i></div>
-        <span class="vd">30</span></div></div>
+        <span class="vd">28</span></div><div class="vday" title="2026-09-29: 0 commits, 0 closed">
+        <div class="vbars"><i class="vc" style="height:0%"></i>
+        </div>
+        <span class="vd">29</span></div></div>
     <div class="legend"><span><i style="background:var(--line2)"></i>commits</span>
       <span><i style="background:var(--lime)"></i>tasks closed</span></div></div>
   <div class="grid2">
@@ -328,27 +326,27 @@ footer{margin-top:34px;color:var(--faint);font-size:13px;line-height:1.7;
     <div class="panel"><h2>Agent routing</h2><table><tr><td>no agent definitions found</td></tr></table></div>
   </div>
   <div class="panel" style="margin-top:15px"><h2>What landed</h2>
-    <ul class="log"><li><code>0bd7800</code><span class="dim">34 minutes ago</span>
-       <span class="sub">the sandbox claim is proven, and three of my own bugs are fixed</span></li><li><code>f0ca975</code><span class="dim">42 minutes ago</span>
-       <span class="sub">H-4: the drift gate, and it found that this repo governs nothing</span></li><li><code>422d2db</code><span class="dim">55 minutes ago</span>
-       <span class="sub">TUI mockup: a layout spec that happens to be runnable</span></li><li><code>d0af966</code><span class="dim">82 minutes ago</span>
-       <span class="sub">E-2: the egress proxy, and the bypasses it refuses</span></li><li><code>7d63587</code><span class="dim">2 hours ago</span>
-       <span class="sub">tokens: record the breakdown, show where they actually go</span></li><li><code>2cac51d</code><span class="dim">2 hours ago</span>
-       <span class="sub">four layers, and the agent CLIs do not fit them</span></li><li><code>d48ce3d</code><span class="dim">2 hours ago</span>
-       <span class="sub">events: one append-only log, and the organising key is a field not a folder</span></li><li><code>8b16b01</code><span class="dim">3 hours ago</span>
-       <span class="sub">E-0 and E-1: a container that boots, with limits proven from inside it</span></li><li><code>8e29ad4</code><span class="dim">3 hours ago</span>
-       <span class="sub">E-0: podman is the assumption, not the preference</span></li><li><code>cfbf4fe</code><span class="dim">3 hours ago</span>
-       <span class="sub">ADR-0001: say why podman, and note their runner is bound to the Docker API</span></li><li><code>6244c54</code><span class="dim">4 hours ago</span>
-       <span class="sub">ADR-0001: build the egress layer. Fabro does not have it</span></li><li><code>dafb95d</code><span class="dim">4 hours ago</span>
-       <span class="sub">spec: two fields, because devcontainer.json already has the rest</span></li><li><code>d4a1535</code><span class="dim">5 hours ago</span>
-       <span class="sub">environments: two problems that look like one, and they want opposite tools</span></li><li><code>662c721</code><span class="dim">5 hours ago</span>
-       <span class="sub">P-2: gate verdicts append, so rework becomes measurable</span></li><li><code>168d2e4</code><span class="dim">6 hours ago</span>
-       <span class="sub">memory: three tiers, computed staleness, and one drift mechanism with a direction</span></li><li><code>ebe7057</code><span class="dim">6 hours ago</span>
-       <span class="sub">doc drift: detection is a gate, reconciliation is a run, and the direction is recorded</span></li><li><code>69cc13b</code><span class="dim">6 hours ago</span>
-       <span class="sub">the plan, sequenced, with the two things that must happen first</span></li><li><code>3e341bc</code><span class="dim">6 hours ago</span>
-       <span class="sub">board.mjs and the dashboard disagreed about which phase is current</span></li><li><code>ce4a9b4</code><span class="dim">6 hours ago</span>
-       <span class="sub">the roadmap, and this repo starts using its own board</span></li><li><code>5e2e3fa</code><span class="dim">6 hours ago</span>
-       <span class="sub">foreman: a board that will not let you sign off your own work</span></li></ul></div>
+    <ul class="log"><li><code>d502820</code><span class="dim">4 weeks ago</span>
+       <span class="sub">harness: hardening the timeout, and NOT claiming it fixed the flake</span></li><li><code>0bd7800</code><span class="dim">4 weeks ago</span>
+       <span class="sub">the sandbox claim is proven, and three of my own bugs are fixed</span></li><li><code>f0ca975</code><span class="dim">4 weeks ago</span>
+       <span class="sub">H-4: the drift gate, and it found that this repo governs nothing</span></li><li><code>422d2db</code><span class="dim">4 weeks ago</span>
+       <span class="sub">TUI mockup: a layout spec that happens to be runnable</span></li><li><code>d0af966</code><span class="dim">4 weeks ago</span>
+       <span class="sub">E-2: the egress proxy, and the bypasses it refuses</span></li><li><code>7d63587</code><span class="dim">4 weeks ago</span>
+       <span class="sub">tokens: record the breakdown, show where they actually go</span></li><li><code>2cac51d</code><span class="dim">4 weeks ago</span>
+       <span class="sub">four layers, and the agent CLIs do not fit them</span></li><li><code>d48ce3d</code><span class="dim">4 weeks ago</span>
+       <span class="sub">events: one append-only log, and the organising key is a field not a folder</span></li><li><code>8b16b01</code><span class="dim">4 weeks ago</span>
+       <span class="sub">E-0 and E-1: a container that boots, with limits proven from inside it</span></li><li><code>8e29ad4</code><span class="dim">4 weeks ago</span>
+       <span class="sub">E-0: podman is the assumption, not the preference</span></li><li><code>cfbf4fe</code><span class="dim">4 weeks ago</span>
+       <span class="sub">ADR-0001: say why podman, and note their runner is bound to the Docker API</span></li><li><code>6244c54</code><span class="dim">4 weeks ago</span>
+       <span class="sub">ADR-0001: build the egress layer. Fabro does not have it</span></li><li><code>dafb95d</code><span class="dim">4 weeks ago</span>
+       <span class="sub">spec: two fields, because devcontainer.json already has the rest</span></li><li><code>d4a1535</code><span class="dim">4 weeks ago</span>
+       <span class="sub">environments: two problems that look like one, and they want opposite tools</span></li><li><code>662c721</code><span class="dim">4 weeks ago</span>
+       <span class="sub">P-2: gate verdicts append, so rework becomes measurable</span></li><li><code>168d2e4</code><span class="dim">4 weeks ago</span>
+       <span class="sub">memory: three tiers, computed staleness, and one drift mechanism with a direction</span></li><li><code>ebe7057</code><span class="dim">4 weeks ago</span>
+       <span class="sub">doc drift: detection is a gate, reconciliation is a run, and the direction is recorded</span></li><li><code>69cc13b</code><span class="dim">4 weeks ago</span>
+       <span class="sub">the plan, sequenced, with the two things that must happen first</span></li><li><code>3e341bc</code><span class="dim">4 weeks ago</span>
+       <span class="sub">board.mjs and the dashboard disagreed about which phase is current</span></li><li><code>ce4a9b4</code><span class="dim">4 weeks ago</span>
+       <span class="sub">the roadmap, and this repo starts using its own board</span></li></ul></div>
 </div>
 
 <div class="pane pane-stats">
@@ -356,8 +354,8 @@ footer{margin-top:34px;color:var(--faint);font-size:13px;line-height:1.7;
     <div class="panel"><h2>ETA, as predicted &middot; and how it moved</h2>
       <table><tr><th>day</th><th class="num">effort</th><th class="num">left</th>
         <th class="num">predicted</th><th class="num">drift vs now</th></tr>
-        <tr><td class="num">2026-08-30</td><td class="num">0%</td>
-      <td class="num">1h</td><td class="num">-</td>
+        <tr><td class="num">2026-09-29</td><td class="num">0%</td>
+      <td class="num">104h</td><td class="num">-</td>
       <td class="num ">-</td></tr></table>
       <p class="cav">Drift compares each day&rsquo;s prediction to today&rsquo;s. Positive means
         the date moved OUT since that day. One row per day, appended on the first build of
