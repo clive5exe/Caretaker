@@ -31,6 +31,27 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const VENDOR = resolve(HERE, "..", "vendor");
+/** Caretaker's own part of the install: the action standing in for Oz. */
+export const ACTION_SRC = resolve(HERE, "..", "factory", "caretaker-agent");
+export const ACTION_DEST = ".github/actions/caretaker-agent";
+
+/**
+ * The bin/ files the action runs: agent-step.mjs and everything it imports,
+ * followed through relative imports, plus egress.mjs, which the per-run
+ * proxy runs from the same directory (netns.mjs mounts it).
+ */
+export function actionBin(bin = HERE) {
+  const seen = new Set();
+  const queue = ["agent-step.mjs", "egress.mjs"];
+  while (queue.length) {
+    const f = queue.pop();
+    if (seen.has(f)) continue;
+    seen.add(f);
+    const text = readFileSync(join(bin, f), "utf8");
+    for (const m of text.matchAll(/(?:\bimport\b[^"'`]*?|\bimport\s*\(\s*)["']\.\/([^"']+\.mjs)["']/g)) queue.push(m[1]);
+  }
+  return [...seen].sort();
+}
 
 export class VendorError extends Error {
   constructor(code, message) {
@@ -134,7 +155,7 @@ export function check({ vendor = VENDOR } = {}) {
  * source's `install` map applied, then every patch, in order. Returns the
  * files written.
  */
-export function build(outdir, { vendor = VENDOR } = {}) {
+export function build(outdir, { vendor = VENDOR, withAction = true } = {}) {
   const out = resolve(outdir);
   if (existsSync(out) && readdirSync(out).length) throw new VendorError("NOT_EMPTY", `${out} is not empty`);
   mkdirSync(out, { recursive: true });
@@ -148,6 +169,16 @@ export function build(outdir, { vendor = VENDOR } = {}) {
       mkdirSync(dirname(to), { recursive: true });
       cpSync(join(dir, f), to);
     }
+  }
+  // Caretaker's action, with its own copy of the bin/ files it runs, so the
+  // repo it is installed into needs nothing else from Caretaker.
+  if (withAction) {
+    for (const f of walk(ACTION_SRC)) {
+      mkdirSync(dirname(join(out, ACTION_DEST, f)), { recursive: true });
+      cpSync(join(ACTION_SRC, f), join(out, ACTION_DEST, f));
+    }
+    mkdirSync(join(out, ACTION_DEST, "bin"), { recursive: true });
+    for (const f of actionBin()) cpSync(join(HERE, f), join(out, ACTION_DEST, "bin", f));
   }
   for (const p of patches(vendor)) {
     const r = spawnSync("git", ["apply", "--whitespace=nowarn", join(vendor, "patches", p)], { cwd: out, encoding: "utf8" });
