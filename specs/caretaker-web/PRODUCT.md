@@ -211,11 +211,13 @@ Factories calls this page Activity, and so does the sidebar.
   `board.html` uses (Working / Queued / Blocked / Done from `config.columns`).
 - A card shows id, title, owner, estimate, the gate rail (one segment per
   gate: filled on pass, red on fail, hollow if not run), missing gates, a
-  blocked badge, and run count and tokens when a run log exists.
+  blocked badge, run count and tokens when a run log exists, and the task's
+  spec path when it has one (as `board.md` and `board.html` cards do, as a link).
 - **Work item detail** shows: the stage and its reason; acceptance criterion;
   the notes, newest first; the **full gate history with attempt counts**; the
   runs (linking to run detail); questions and answers; the spec link and its
-  approval state; the PR link.
+  approval state; the PR link. A governing spec links to the Specs page at
+  `/specs?path=<spec>`, which marks that row; a context doc stays text.
 - Actions (only those the server offers): start, block (with reason), reset
   to todo, note, close (`done`), ask, answer, triage accept/reject, spec
   approve/reject, record PR, drop (with reason).

@@ -389,7 +389,7 @@ zero.
 | route | returns | backed by |
 |---|---|---|
 | `GET /snapshot` | headline metrics, active phase, executing runs, inbox count | `dashboard.metrics` (C-2), readmodel |
-| `GET /work` | tasks with `lifecycle`, `reason`, `rework`, `missingGates`, `commands`, run count, tokens | `board.load`, `lifecycle.stageOf`/`commandsFor`, `board.missingGates` |
+| `GET /work` | tasks with `lifecycle`, `reason`, `rework`, `missingGates`, `commands`, run count, tokens, `specPath` | `board.load`, `lifecycle.stageOf`/`commandsFor`, `board.missingGates` |
 | `GET /work/:id` | one task in full: gate history, notes, questions, spec review, pr, runs | same |
 | `GET /inbox` | derived items: `{ kind, task, since, action }` | readmodel over the facts in §Inbox |
 | `GET /runs?task=&state=&agent=&model=` | runs, folded by id | `runs.jsonl` plus `<stateDir>/runs/*/run.json` |

@@ -4,7 +4,7 @@
  * the commands core offers; verdicts are never among them.
  */
 import { useState } from "react";
-import { useParams } from "react-router";
+import { Link, useParams } from "react-router";
 import { gateLabel, stageTone } from "../api/labels";
 import { useResource } from "../api/store";
 import type { WorkItem } from "../api/types";
@@ -102,7 +102,13 @@ export function WorkItemPage() {
                 <dd>
                   {t.spec ? (
                     <>
-                      <span className="mono">{t.spec.path}</span>{" "}
+                      {t.spec.governing ? (
+                        <Link className="mono" to={`/specs?path=${encodeURIComponent(t.spec.path)}`}>
+                          {t.spec.path}
+                        </Link>
+                      ) : (
+                        <span className="mono">{t.spec.path}</span>
+                      )}{" "}
                       {!t.spec.exists ? (
                         <span className="chip fail">missing file</span>
                       ) : !t.spec.governing ? (

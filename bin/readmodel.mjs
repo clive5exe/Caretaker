@@ -274,6 +274,7 @@ export function createReadModel({ cfgPath, board, dash, now = () => new Date(), 
       tokens: tokens ?? null,
       openQuestions: openQuestions(t).length,
       pr: t.pr?.url ?? null,
+      specPath: t.spec ? String(t.spec) : null,
       hasAc: !!(Array.isArray(t.ac) ? t.ac.length : String(t.ac ?? "").trim()),
       commands: commandsFor(t, c),
     };

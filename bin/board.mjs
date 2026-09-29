@@ -273,7 +273,23 @@ function acBlock(ac) {
   return `<div class="acc"><b>Accept:</b> ${list.map((a) => esc(a)).join("<br>")}</div>`;
 }
 
-function taskBlock(t) {
+/**
+ * B-3: a task's spec, as a link relative to the page it is shown on. A value
+ * that is not a plain path inside the repo (a URL, absolute, or climbing out
+ * with ..) is shown as text, never as a link.
+ */
+const specHref = (spec, pageRel) => {
+  const s = String(spec ?? "");
+  if (!s || /^[a-z][a-z0-9+.-]*:/i.test(s) || s.startsWith("/") || s.split("/").includes("..")) return null;
+  return path.posix.relative(path.posix.dirname(pageRel), s);
+};
+const specMeta = (t, pageRel, cls) => {
+  if (!t.spec) return "";
+  const href = specHref(t.spec, pageRel);
+  return `<span class="${cls}">spec ${href ? `<a href="${esc(href)}">${esc(t.spec)}</a>` : esc(t.spec)}</span>`;
+};
+
+function taskBlock(t, pageRel = "docs/board.md") {
   const st = STATUS[t.status] || STATUS.todo;
   const g = t.gate || {};
   const gates = ["reviewer", "qa", "security"]
@@ -293,6 +309,7 @@ function taskBlock(t) {
     t.est ? `<span class="tmi">${esc(t.est)}</span>` : "",
     t.deps?.length ? `<span class="tmi">after ${t.deps.join(", ")}</span>` : "",
     t.completed ? `<span class="tmi">closed ${esc(t.completed)}</span>` : "",
+    specMeta(t, pageRel, "tmi"),
   ]
     .filter(Boolean)
     .join("");
@@ -419,7 +436,7 @@ ${bar(currentPct, "big")}
     // any real history on it.
     const order = { doing: 0, blocked: 1, todo: 2, done: 3 };
     for (const t of [...p.tasks].sort((a, b) => (order[a.status] ?? 9) - (order[b.status] ?? 9))) {
-      md += taskBlock(t);
+      md += taskBlock(t, path.relative(ROOT, OUT).split(path.sep).join("/"));
     }
     md += `\n`;
   }

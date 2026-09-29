@@ -64,6 +64,25 @@ function fixture(boardFile = join(HERE, "board.mjs")) {
 const task = (f, id) => JSON.parse(readFileSync(join(f.root, "docs", "board.json"), "utf8")).phases[0].tasks.find((t) => t.id === id);
 const ISO = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d+Z$/;
 
+/* 0. B-3: the spec on a card --------------------------------------------- */
+{
+  const f = fixture();
+  const b = JSON.parse(readFileSync(join(f.root, "docs", "board.json"), "utf8"));
+  b.phases[0].tasks.push(
+    { id: "T-4", title: "four", owner: "b", status: "todo", spec: "https://evil.example/x" },
+    { id: "T-5", title: "five", owner: "b", status: "todo", spec: "../outside.md" },
+    { id: "T-6", title: "six", owner: "b", status: "todo", spec: 'specs/"><script>x</script>.md' },
+  );
+  writeFileSync(join(f.root, "docs", "board.json"), JSON.stringify(b));
+  const r = f.cli("build");
+  const md = readFileSync(join(f.root, "docs", "board.md"), "utf8");
+  // Independent review: the spec was on no card, and plain text where it was shown.
+  ok("a card links its spec, relative to board.md", r.status === 0 && md.includes('spec <a href="../specs/gov.md">specs/gov.md</a>') && md.includes('<a href="context.md">docs/context.md</a>'), md.slice(0, 600));
+  ok("a URL, an absolute path or one climbing out with .. is text, not a link", md.includes("spec https://evil.example/x</span>") && md.includes("spec ../outside.md</span>") && !md.includes('href="https:') && !md.includes('href="../../'));
+  ok("a spec path is escaped, in the text and in the href", !md.includes("<script>x") && md.includes("&lt;script&gt;x"));
+  rmSync(f.root, { recursive: true, force: true });
+}
+
 /* 1. commands ------------------------------------------------------------- */
 {
   const f = fixture();

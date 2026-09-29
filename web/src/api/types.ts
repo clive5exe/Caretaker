@@ -46,6 +46,7 @@ export interface WorkSummary {
   tokens: number | null;
   openQuestions: number;
   pr: string | null;
+  specPath: string | null;
   hasAc: boolean;
   commands: Command[];
 }

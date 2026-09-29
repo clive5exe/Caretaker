@@ -58,7 +58,7 @@ writeFileSync(
           name: "P",
           tasks: [
             { id: "T-1", title: "one", owner: "b", est: "2h", status: "doing", ac: "x", gate: { qa: { verdict: "pass", at: "2026-09-28" } } },
-            { id: "T-2", title: "two", owner: "b", est: "3h", status: "todo", ac: "y" },
+            { id: "T-2", title: "two", owner: "b", est: "3h", status: "todo", ac: "y", spec: "docs/two.md" },
             { id: "T-3", title: "three", owner: "b", est: "1h", status: "done", completed: "2026-09-28", ac: "z", gate: { reviewer: { verdict: "pass", at: "2026-09-28" }, qa: { verdict: "pass", at: "2026-09-28" } } },
           ],
         },
@@ -306,6 +306,7 @@ const post = (path, obj, headers = WRITE()) => req("POST", path, { headers, body
   const work = (await get("/api/v1/work")).json;
   const t3 = work.tasks.find((t) => t.id === "T-3");
   ok("a closed task is in the done stage", t3.lifecycle === "done");
+  ok("a work card carries its spec path, and null for none (B-3)", work.tasks.find((t) => t.id === "T-2")?.specPath === "docs/two.md" && t3.specPath === null);
   ok("a work item's commands come from lifecycle.commandsFor", !work.tasks.some((t) => t.commands.some((c) => ["reviewer", "qa", "security"].includes(c.cmd))));
   const run = (await get(`/api/v1/runs/${RUN}`)).json;
   ok("a run folds its archive record", run?.task === "T-1" && run?.status === "ok", JSON.stringify(run));

@@ -41,7 +41,7 @@ import {
   readFileSync, writeFileSync, appendFileSync, existsSync, readdirSync, mkdirSync, realpathSync,
 } from "node:fs";
 import { execFileSync } from "node:child_process";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, posix, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -601,6 +601,14 @@ function gateRail(t) {
   }).join("")}</div>`;
 }
 
+/** B-3: a task's spec, as a link relative to this page; text when it is not a plain path inside the repo. */
+function specMeta(t, pageRel) {
+  if (!t.spec) return "";
+  const s = String(t.spec);
+  const href = /^[a-z][a-z0-9+.-]*:/i.test(s) || s.startsWith("/") || s.split("/").includes("..") ? null : posix.relative(posix.dirname(pageRel), s);
+  return `<span class="es">spec ${href ? `<a href="${esc(href)}">${esc(s)}</a>` : esc(s)}</span>`;
+}
+
 function taskCard(t) {
   const h = held(t, GATES);
   const hrs = hoursOf.get(t.id);
@@ -608,6 +616,7 @@ function taskCard(t) {
     t.owner ? `<span class="ow">${esc(t.owner)}</span>` : "",
     t.est ? `<span class="es">${esc(t.est)}</span>` : `<span class="es no">no estimate</span>`,
     t.deps?.length ? `<span class="es">after ${esc(t.deps.join(", "))}</span>` : "",
+    specMeta(t, cfg.out ?? "docs/board.html"),
   ]
     .filter(Boolean)
     .join("");

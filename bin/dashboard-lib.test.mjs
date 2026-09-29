@@ -173,6 +173,10 @@ const normalise = (html) =>
       ),
       est: [m.estHours({ est: "1d" }), m.estHours({ est: "1d" }, 6), m.estHours({ est: "nonsense" })],
       noGit: m.metrics(board, null, { commitsByDay: [], commitsPerTask: new Map() }, cfg).pctTasks,
+      specHtml: m.render(m.metrics({ phases: [{ name: "Phase 1", tasks: [
+        { id: "S-1", title: "s", owner: "b", status: "doing", spec: "specs/a.md" },
+        { id: "S-2", title: "t", owner: "b", status: "doing", spec: "javascript:alert(1)" },
+      ] }] }, null, { commitsByDay: [], commitsPerTask: new Map() }, cfg), { cfg }),
     }));
   `;
   const r = spawnSync("node", ["--input-type=module", "-e", probe], { cwd: tmpdir(), encoding: "utf8" });
@@ -198,6 +202,9 @@ const normalise = (html) =>
   ok("rework: a task that never failed spends nothing on rework", o.rw?.tasks === 1);
   ok("estHours: 1d is 8h by default, 6h with a 6h day, null when unparsed", JSON.stringify(o.est) === "[8,6,null]");
   ok("metrics: no git and no run log still computes", o.noGit === o.pctTasks);
+  // B-3 (independent review): no card showed the task's spec.
+  ok("a card links its spec, relative to board.html", o.specHtml?.includes('spec <a href="../specs/a.md">specs/a.md</a>'), (o.specHtml ?? "").match(/spec[^\n]{0,80}/)?.[0]);
+  ok("…and a spec that is not a plain repo path is text, never a link", o.specHtml?.includes("spec javascript:alert(1)</span>") && !o.specHtml.includes('href="javascript'));
   rmSync(f.root, { recursive: true, force: true });
 }
 
