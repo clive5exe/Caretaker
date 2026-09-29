@@ -45,11 +45,13 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
  * reads nothing. FACTORY_CONFIG and the config.json beside this file stay the
  * defaults, exactly as when the CLI resolved them at module load.
  */
-export function loadConfig(cfgPath = process.env.FACTORY_CONFIG || path.join(HERE, "config.json")) {
+export function loadConfig(cfgPath = process.env.FACTORY_CONFIG || path.join(HERE, "config.json"), base = HERE) {
   const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
-  // The repo root is relative to THIS FILE, not to the config, as it always
-  // was: ops/foreman/ sits two levels below the repo it serves.
-  const root = path.resolve(HERE, "..", "..", cfg.repo ?? ".");
+  // The repo root is two levels above `base`, which is THIS FILE's directory
+  // for the CLI, as it always was: ops/foreman/ sits two levels below the repo
+  // it serves. A library caller holding a config path passes its directory,
+  // which is the same place for an installed copy and the right one otherwise.
+  const root = path.resolve(base, "..", "..", cfg.repo ?? ".");
   return {
     cfg,
     cfgPath: path.resolve(cfgPath),
