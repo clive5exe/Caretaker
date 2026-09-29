@@ -496,6 +496,18 @@ export function createReadModel({ cfgPath, board, dash, now = () => new Date(), 
           : net === "none"
             ? { state: "sealed", net: "none" }
             : { state: "network", net };
+    // The openai-compatible adapter calls its model FROM THIS MACHINE, outside
+    // the sandbox; only its tools run in the container. Those calls are in no
+    // egress log, so the page names where they went (round-3 review).
+    if (rec && (rec.adapter ?? rec.policy?.adapter) === "openai-compatible") {
+      let host = null;
+      try {
+        host = new URL(rec.policy?.endpoint ?? "").host || null;
+      } catch {
+        host = null;
+      }
+      egress.modelCalls = { from: "host", endpoint: host };
+    }
     return {
       sources: sources(),
       ...runRow(r),

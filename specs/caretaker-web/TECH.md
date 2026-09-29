@@ -401,7 +401,7 @@ zero.
 | `GET /work/:id` | one task in full: gate history, notes, questions, spec review, pr, runs | same |
 | `GET /inbox` | derived items: `{ kind, task, since, action }` | readmodel over the facts in §Inbox |
 | `GET /runs?task=&state=&agent=&model=` | runs, folded by id | `runs.jsonl` plus `<stateDir>/runs/*/run.json` |
-| `GET /runs/:id` | one run: identity, parent, children, verdict, cost, diff summary, drift events for it, and `egress.state` (host, proxied, sealed, network or unknown) from its archived record | same, plus the event log |
+| `GET /runs/:id` | one run: identity, parent, children, verdict, cost, diff summary, drift events for it, and `egress.state` (host, proxied, sealed, network or unknown) from its archived record, plus `egress.modelCalls` for the openai-compatible adapter, whose model calls leave from this machine and are not in the egress log | same, plus the event log |
 | `GET /runs/:id/transcript?from=<byte>`, `/stderr?from=`, `/diff`, `/egress` | raw text or JSONL, byte-ranged. `/egress` only once the run is archived: until then the proxy's log is unredacted | the run archive (C-4, C-5) |
 | `GET /agents` | roles, models, runs and tokens aggregate, current work | `agentsDir` frontmatter (as `dashboard.mjs` `agents()` reads it), runs |
 | `GET /specs` | specs, `governs`, parse errors, and `freshness` (stale, lying, undated; null outside git) | `drift.loadSpecs`, `freshness.freshness` |
@@ -584,9 +584,12 @@ It fails if `web/src`:
   `web/src/api/labels.ts`: every stage `stageOf` returns, `ready` and `dropped`
   included, as a string; a gate also as a property, key or destructured name
   (`gates.security`, `{ qa: … }`, `const { qa } = …`), and in display text (JSX
-  text, template literals). Getting started's walk blocks are CLI commands run
-  by their own test, and are exempt by name
-- `web/index.html` is scanned too, and URLs are matched in any case
+  text, template literals; a stage name when it is the whole text). Getting
+  started's walk blocks are CLI commands run by their own test, and are exempt
+  by name
+- `web/index.html` is scanned too, including its colour attributes (`fill=`,
+  `bgcolor=`) and unquoted `src=//host`; URLs are matched in any case, and
+  `color()` and `color-mix()` count as colour literals
 - contains an `http://`, `https://`, `ws://`, `wss://` or protocol-relative
   (`//host`, `url(//host)`) URL, which would be an external request
 - contains a color literal outside `web/src/theme.css`: hex, a color

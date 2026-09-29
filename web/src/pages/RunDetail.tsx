@@ -361,7 +361,15 @@ export function RunDetailPage() {
 
       {tab === "egress" ? (
         egress.missing ? (
-          <NotRecorded what="No egress record for this run." why={EGRESS_WHY[r.egress?.state ?? "unknown"].replace("{net}", r.egress?.net ?? "")} />
+          <NotRecorded
+            what="No egress record for this run."
+            why={
+              EGRESS_WHY[r.egress?.state ?? "unknown"].replace("{net}", r.egress?.net ?? "") +
+              (r.egress?.modelCalls
+                ? ` That covers the run's tools only: this adapter called its model from this machine, outside the sandbox, at ${r.egress.modelCalls.endpoint ?? "its configured endpoint"}, and those calls are not recorded.`
+                : "")
+            }
+          />
         ) : (
           <div className="card flush">
             <div className="tw">

@@ -243,7 +243,7 @@ export interface RunDetail extends RunRow {
   events: LogEvent[] | null;
   taskGates: Record<string, { verdict: string; at?: string }> | null;
   taskTitle: string | null;
-  egress: { state: "host" | "proxied" | "sealed" | "network" | "unknown"; net: string | null };
+  egress: { state: "host" | "proxied" | "sealed" | "network" | "unknown"; net: string | null; modelCalls?: { from: "host"; endpoint: string | null } };
 }
 
 export interface Agent {

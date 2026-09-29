@@ -269,7 +269,7 @@ Everything Caretaker measured about one run. Each section shows its source, and
 | measured diff | files changed, insertions and deletions, the patch; truncation and the fact that gitignored paths are not measured are stated on the page |
 | transcript | the redacted transcript and stderr as **raw text**, live-tailing while the run is in flight |
 | gate results | drift gate events recorded against this run; the work item's gate verdicts, shown as *task-level with their dates*, never attributed to this run unless the record says so |
-| egress | each connection the run's proxy decided: `allowed`, `refused` (with its reason) or `error` (with why), as `bin/egress.mjs` writes them. With no log, the reason, from the run's archived record: sandbox none (the host's network, uncontrolled), a proxy that saw no connection, no network at all, another network (not recorded), or no record |
+| egress | each connection the run's proxy decided: `allowed`, `refused` (with its reason) or `error` (with why), as `bin/egress.mjs` writes them. With no log, the reason, from the run's archived record: sandbox none (the host's network, uncontrolled), a proxy that saw no connection, no network at all, another network (not recorded), or no record. For the API adapter, also that its model calls left from this machine, and to which host |
 | artifacts | patch, transcript, stderr, drift report, PR link |
 
 What is available today and what waits on prerequisite core work is spelled

@@ -328,6 +328,10 @@ const post = (path, obj, headers = WRITE()) => req("POST", path, { headers, body
   const asMap = (gs) => Object.fromEntries(gs.filter(([, v]) => v.pass + v.fail > 0).map(([g, v]) => [g, { pass: v.pass, fail: v.fail }]));
   ok("Metrics' all-time gate figures count every attempt on the board", sorted(asMap(met.allTime.gateStats)) === sorted(count(null)), JSON.stringify(met.allTime.gateStats));
   ok("…and its range counts only attempts inside the window it reports", sorted(asMap(met.gateStats)) === sorted(count(met.window[0])) && asMap(met.allTime.gateStats).qa?.fail === 1 && !asMap(met.gateStats).qa?.fail, JSON.stringify(met.gateStats));
+  // Round 3: the all-time first-pass figure was not held either. T-1's qa
+  // failed in 2000 and passed later: first pass in the range, not all time.
+  ok("Metrics' all-time first-pass is dashboard.quality over the whole board", JSON.stringify(met.allTime.quality) === JSON.stringify(dash.quality(d.phases, cfg.gates ?? ["reviewer", "qa", "security"])), JSON.stringify(met.allTime.quality));
+  ok("…and differs from the range's where an attempt falls outside it", met.allTime.quality.firstPass < met.quality.firstPass, `${met.allTime.quality.firstPass} vs ${met.quality.firstPass}`);
   ok("…with pass% from core, beside the counts", met.allTime.gateStats.every(([, v]) => v.pass + v.fail === 0 ? v.passPct === null : v.passPct === Math.round((v.pass / (v.pass + v.fail)) * 100)));
   const work = (await get("/api/v1/work")).json;
   const t3 = work.tasks.find((t) => t.id === "T-3");
@@ -345,6 +349,7 @@ const post = (path, obj, headers = WRITE()) => req("POST", path, { headers, body
     r_e0000003: { policy: { sandbox: "podman", net: "none" } },
     r_e0000004: { policy: { sandbox: "podman", net: "shared" } },
     r_e0000005: {},
+    r_e0000006: { adapter: "openai-compatible", policy: { sandbox: "podman", net: "none", adapter: "openai-compatible", endpoint: "https://api.example.test/v1" } },
   };
   for (const [id, rec] of Object.entries(states)) {
     mkdirSync(join(state, "runs", id), { recursive: true });
@@ -352,7 +357,9 @@ const post = (path, obj, headers = WRITE()) => req("POST", path, { headers, body
   }
   const got = {};
   for (const id of Object.keys(states)) got[id] = (await get(`/api/v1/runs/${id}`)).json?.egress?.state;
-  ok("a run's egress state says why it has no log: host, proxied, sealed, another network, or unknown", JSON.stringify(Object.values(got)) === '["host","proxied","sealed","network","unknown"]', JSON.stringify(got));
+  ok("a run's egress state says why it has no log: host, proxied, sealed, another network, or unknown", JSON.stringify(Object.values(got).slice(0, 5)) === '["host","proxied","sealed","network","unknown"]', JSON.stringify(got));
+  const api = (await get("/api/v1/runs/r_e0000006")).json?.egress;
+  ok("an API-adapter run says its model calls went from this machine, and where", api?.state === "sealed" && api?.modelCalls?.from === "host" && api.modelCalls.endpoint === "api.example.test", JSON.stringify(api));
   // C-5 (independent QA): the proxy's log is raw until the run is archived.
   const live = "r_e0000009";
   mkdirSync(join(state, "runs", live), { recursive: true });
