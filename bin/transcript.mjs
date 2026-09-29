@@ -13,15 +13,24 @@ export function transcriptTexts(raw) {
     if (typeof v === "string") texts.push(v);
     else if (v && typeof v === "object") for (const x of Array.isArray(v) ? v : Object.values(v)) walk(x);
   };
+  // Consecutive plain lines stay ONE text, so a multi-line block (a fenced
+  // diff) is still a block; a JSON line ends it.
+  let plain = [];
+  const flush = () => {
+    if (plain.length) texts.push(plain.join("\n"));
+    plain = [];
+  };
   for (const line of String(raw ?? "").split("\n")) {
     try {
       const v = JSON.parse(line);
       if (v && typeof v === "object") {
+        flush();
         walk(v);
         continue;
       }
     } catch {}
-    texts.push(line.replace(/\\n/g, "\n"));
+    plain.push(line.replace(/\\n/g, "\n"));
   }
+  flush();
   return texts;
 }

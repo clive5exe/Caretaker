@@ -68,7 +68,13 @@ const SPEC = { id: "specs/pricing.md", governs: ["src/**"], errors: [] };
   ok("a proposal's direction, reason and diff are read", p.direction === "spec-behind" && p.reason === "the fee moved on purpose" && p.patch.includes("+b"));
   ok("no direction line means no direction", parseProposal("```diff\n+x\n```").direction === null);
   ok("CODE-DRIFTED is read", parseProposal("DIRECTION: CODE-DRIFTED we decided 5%").direction === "code-drifted");
-  ok("patch targets come from the headers", JSON.stringify(patchTargets("--- a/specs/x.md\n+++ b/specs/x.md\n--- a/src/y.js\n+++ /dev/null\n")) === '["specs/x.md","src/y.js"]');
+  // Targets are what `git apply` would write, asked of git (the reviewer's cases).
+  const t = (patch) => patchTargets(patch, tmpdir());
+  const hunk = "--- a/specs/x.md\n+++ b/specs/x.md\n@@ -1 +1 @@\n-a\n+b\n";
+  ok("patch targets are what git would write", JSON.stringify(t(`diff --git a/specs/x.md b/specs/x.md\n${hunk}`)) === '["specs/x.md"]', JSON.stringify(t(`diff --git a/specs/x.md b/specs/x.md\n${hunk}`)));
+  ok("a rename names both sides", JSON.stringify(t("diff --git a/specs/x.md b/src/y.js\nsimilarity index 100%\nrename from specs/x.md\nrename to src/y.js\n")) === '["specs/x.md","src/y.js"]');
+  ok("a new file with no ---/+++ headers, hidden after a spec hunk, is still a target", t(`diff --git a/specs/x.md b/specs/x.md\n${hunk}diff --git a/src/new.js b/src/new.js\nnew file mode 100644\nindex 0000000..e69de29\n`)?.includes("src/new.js"));
+  ok("a header without the a/ prefix is read as git reads it (-p1 strips one part)", JSON.stringify(t("--- specs/x.md\n+++ specs/x.md\n@@ -1 +1 @@\n-a\n+b\n")) === '["x.md"]');
 }
 
 /* ================================================================ fixture */
@@ -151,6 +157,21 @@ const specPatch = `--- a/specs/pricing.md\n+++ b/specs/pricing.md\n${realDiff.sp
 {
   const p = await propose({ cfgPath: CFG, run: PARENT, workspace: REPO, policy: policy(say("I am not sure which side is wrong.\n")), stateDir: STATE });
   ok("no stated direction is not a proposal", !p.valid && p.problems.some((x) => /no DIRECTION line/.test(x)));
+}
+
+{
+  // The reviewer's case: a reconciler that edits the spec itself and then
+  // says CODE-DRIFTED was marked valid, and the spec had changed unaccepted.
+  const spec = join(REPO, "specs", "pricing.md");
+  const before = readFileSync(spec, "utf8");
+  const p = await propose({ cfgPath: CFG, run: PARENT, workspace: REPO, policy: policy(cli(`printf '\\nedited by the reconciler\\n' >> specs/pricing.md; echo 'DIRECTION: CODE-DRIFTED nothing to see'`)), stateDir: STATE });
+  ok("a reconciler that EDITED the workspace makes no valid proposal, and says what it changed", !p.valid && p.problems.some((x) => /changed specs\/pricing\.md in the workspace; a reconciler proposes/.test(x)), JSON.stringify(p.problems));
+  writeFileSync(spec, before);
+}
+{
+  // A reply that OPENS with the direction, inside claude's JSON result.
+  const p = await propose({ cfgPath: CFG, run: PARENT, workspace: REPO, policy: policy(say('{"type":"result","result":"DIRECTION: CODE-DRIFTED the fee is 5% by decision"}\n')), stateDir: STATE });
+  ok("a DIRECTION line that opens a JSON reply is read", p.direction === "code-drifted" && p.valid, JSON.stringify(p.problems));
 }
 
 /* ------------------------------------------------------ CODE-DRIFTED, accept */

@@ -39,6 +39,7 @@ import * as events from "./events.mjs";
 import { load as loadHarnessSettings, policyFlags, policyFor } from "./harness-config.mjs";
 import { RUN_ID, runArchived, stateDirFor } from "./runstore.mjs";
 import { requireSecrets } from "./secrets.mjs";
+import { transcriptTexts } from "./transcript.mjs";
 
 export class ReconcileError extends Error {
   constructor(code, message) {
@@ -57,11 +58,12 @@ const DIFF_BLOCK = /```diff[ \t]*\n([\s\S]*?)\n```/g;
  * carries the model's text as a string — a property of JSON, not of a vendor.
  */
 export function parseProposal(text) {
-  const raw = String(text ?? "");
-  const variants = [raw, raw.replace(/\\n/g, "\n").replace(/\\"/g, '"')];
+  // Read as transcript.mjs reads any transcript, so a reply that OPENS with
+  // the DIRECTION line inside a JSON transcript line is found (independent
+  // review: it returned null for both the API adapter and claude's result).
   let dir = null;
   let diff = null;
-  for (const v of variants) {
+  for (const v of transcriptTexts(text)) {
     for (const m of v.matchAll(DIRECTION_LINE)) dir = m;
     for (const m of v.matchAll(DIFF_BLOCK)) diff = m[1];
   }
@@ -72,13 +74,32 @@ export function parseProposal(text) {
   };
 }
 
-/** Paths a unified diff writes to, from its ---/+++ headers. */
-export function patchTargets(patch) {
+/**
+ * The paths `git apply` WOULD write, asked of git itself (`--numstat -z`, the
+ * same -p1 that accept uses), both sides of a rename included. Reading only
+ * the ---/+++ headers let a binary patch or a rename hide behind a normal
+ * spec hunk, and assumed the a/ b/ prefix git strips whether it is there or
+ * not, so a header naming specs/x.md wrote x.md (independent review).
+ * Returns null when git cannot read the patch.
+ */
+export function patchTargets(patch, root) {
+  const r = spawnSync("git", ["apply", "--numstat", "-z", "-"], { cwd: root, input: String(patch ?? ""), encoding: "utf8" });
+  if (r.status !== 0) return null;
   const out = new Set();
-  for (const line of String(patch ?? "").split("\n")) {
-    const m = /^(?:\+\+\+|---) (?:[ab]\/)?(.+?)\s*$/.exec(line);
-    if (m && m[1] !== "/dev/null") out.add(norm(m[1]));
+  const parts = r.stdout.split("\0");
+  for (let i = 0; i < parts.length; i++) {
+    const cols = parts[i].split("\t");
+    if (cols.length < 3) continue;
+    if (cols[2] === "") {
+      // A rename: the two paths follow as their own NUL-separated fields.
+      if (parts[i + 1]) out.add(norm(parts[i + 1]));
+      if (parts[i + 2]) out.add(norm(parts[i + 2]));
+      i += 2;
+    } else out.add(norm(cols[2]));
   }
+  // numstat names a rename or copy by its NEW path only; the old one is in the
+  // patch's own `rename from` / `copy from` line, which git takes literally.
+  for (const m of String(patch ?? "").matchAll(/^(?:rename|copy) from (.+)$/gm)) out.add(norm(m[1]));
   return [...out].sort();
 }
 
@@ -172,18 +193,23 @@ export async function propose({ cfgPath, run, workspace, policy = {}, secrets = 
   const cdir = runDir(stateDir, child);
   // Read from the ARCHIVED transcript, which is redacted: a proposal can quote
   // the change, and the change can carry a secret.
-  const parsed = parseProposal(readFileSync(join(cdir, "transcript.log"), "utf8"));
+  const parsed = parseProposal(out.verdict.finalText ?? readFileSync(join(cdir, "transcript.log"), "utf8"));
   const problems = [];
   if (!out.verdict.ok) problems.push(`the reconciling run did not complete (${out.verdict.state})`);
+  // A reconciler PROPOSES. One that edited the workspace, a spec included,
+  // changed what it was asked only to describe, and no one accepted it
+  // (independent review: such a run was marked valid).
+  const edited = out.diff?.measured ? out.diff.files.map((f) => f.path) : [];
+  if (edited.length) problems.push(`the reconciling run changed ${edited.join(", ")} in the workspace; a reconciler proposes, it does not apply. Review and revert those changes`);
   if (!parsed.direction) problems.push("no DIRECTION line: a proposal must say which side is wrong");
   let targets = [];
   let applies = null;
   if (parsed.direction === "spec-behind") {
     if (!parsed.patch) problems.push("SPEC-BEHIND with no ```diff block: there is nothing to accept");
     else {
-      targets = patchTargets(parsed.patch);
+      targets = patchTargets(parsed.patch, c.root) ?? [];
       const stray = targets.filter((t) => !driftedSpecs.includes(t));
-      if (!targets.length) problems.push("the diff names no file");
+      if (!targets.length) problems.push("the diff names no file git can apply");
       if (stray.length) problems.push(`the diff touches ${stray.join(", ")}, which did not drift; a proposal may change only ${driftedSpecs.join(", ")}`);
       const chk = spawnSync("git", ["apply", "--check", "-"], { cwd: c.root, input: parsed.patch, encoding: "utf8" });
       applies = chk.status === 0;
