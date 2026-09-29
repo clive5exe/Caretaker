@@ -302,12 +302,12 @@
           "title": "Adversarial verify as a first-class step",
           "owner": "architect",
           "est": "1d",
-          "status": "todo",
+          "status": "doing",
           "deps": [
             "H-1"
           ],
           "ac": "a run can be declared as an attempt to REFUTE another run's result, and its verdict can fail the task rather than merely commenting on it",
-          "note": "The technique behind grill-me, without the branding. Every defect worth finding in the project this came from was found by one agent refusing to take another's word: a security review that failed a rate-limit fix and found an OTP brute-force bypass, a qa run that found the paid checkout path returning 500 on every order. Neither came from an agent doing work."
+          "note": "The technique behind grill-me, without the branding. Every defect worth finding in the project this came from was found by one agent refusing to take another's word: a security review that failed a rate-limit fix and found an OTP brute-force bypass, a qa run that found the paid checkout path returning 500 on every order. Neither came from an agent doing work. — Built in bin/verify.mjs (refute), checked by bin/verify.test.mjs and mutation-checked. A refutation records a qa fail naming both runs; a refuter that finds nothing records no pass, since failing to break something is absence of evidence. Gate verdicts not recorded: nobody closes their own work."
         },
         {
           "id": "H-4",

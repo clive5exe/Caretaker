@@ -674,6 +674,10 @@ To avoid a name collision, the API field is `lifecycle`, not `stage`.
 | `pr-review` | `lifecycle === "human"` and a `pr` is recorded | `done` (nothing records a merge yet) | review outside Caretaker, then `done` |
 
 - **A single qa fail is not an Inbox item.** It sends the task back to build.
+- **A refutation (H-3, `bin/verify.mjs`) is a qa fail like any other.** Its
+  gate event carries `source: "refute"` and is excluded from the drift-gate
+  rule, so it never gets a drift-dismissal command and never masks a drift
+  failure. Repeated refutations reach the Inbox through the rework threshold.
 - **Dropped tasks never appear.**
 - Items are ordered by `since`: the `at` of the fact that created them, or the
   date for legacy verdicts.
