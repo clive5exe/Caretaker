@@ -35,7 +35,7 @@ Today it is two things:
 - [An agent run, through the harness](#an-agent-run-through-the-harness)
 - [The sandbox and egress](#the-sandbox-and-egress)
 - [Specs and the drift gate](#specs-and-the-drift-gate)
-- [How the pieces are meant to connect](#how-the-pieces-are-meant-to-connect)
+- [How the pieces connect](#how-the-pieces-connect)
 - [The web client](#the-web-client)
 - [The board format](#the-board-format)
 - [Configuration](#configuration)
@@ -96,18 +96,17 @@ work is the usual way projects like this die, so the UI comes last.
 flowchart BT
   L1["1 · environment<br/>it cannot hurt your machine<br/><i>bin/sandbox, egress, netns, secrets</i>"]
   L2["2 · harness<br/>plug in your AI<br/><i>bin/harness.mjs</i>"]
-  L3["3 · skills<br/>consume the existing standard<br/><i>not started</i>"]
+  L3["3 · skills<br/>consume the existing standard<br/><i>bin/skills.mjs</i>"]
   L4["4 · board<br/>tasks, gates, tracking, cost<br/><i>built, installable</i>"]
   L5["5 · UI<br/>watch a run, steer it<br/><i>web client and TUI screens</i>"]
-  L6["6 · graduate<br/>CI and docs from what happened<br/><i>not started</i>"]
+  L6["6 · graduate<br/>CI and docs from what happened<br/><i>bin/graduate.mjs</i>"]
   L1 --> L2 --> L3 --> L4 --> L5 --> L6
 
   classDef built fill:#1f6f3f,stroke:#1f6f3f,color:#fff
   classDef partial fill:#8a6d1d,stroke:#8a6d1d,color:#fff
   classDef planned fill:#555,stroke:#555,color:#fff
   class L4 built
-  class L1,L2 partial
-  class L3,L5,L6 planned
+  class L1,L2,L3,L5,L6 partial
 ```
 
 Green is built and installable. Amber has working code in `bin/` that is tested
@@ -626,7 +625,7 @@ flowchart LR
   DR --> Q{did a governed path change<br/>without its spec changing?}
   Q -- no --> CLEAN([exit 0, clean])
   Q -- yes --> BLK([exit 1, blocked<br/>names the path and the spec])
-  BLK -. "planned: a reconciliation run<br/>proposes the spec change" .-> H5[human accepts or rejects]
+  BLK -- "bin/reconcile.mjs propose:<br/>a run proposes the spec change" --> H5[human accepts or rejects]
 ```
 
 - **It detects and refuses, and never edits a spec.** A spec that follows the
@@ -640,30 +639,49 @@ flowchart LR
 
 ```
 node bin/drift.mjs check [--git HEAD|A..B] [--diff FILE] [--task T-1] [--run r_x]
+                        # --diff takes a unified patch (a run's diff.patch) or one path per line
 node bin/drift.mjs map
 node bin/drift.mjs explain <path>
 ```
 
-## How the pieces are meant to connect
+## How the pieces connect
 
-Each layer works and is tested on its own. The end-to-end path is not wired
-yet. This is where it is going, with solid lines for what exists and dotted
-lines for what is planned:
+Each piece is a command, and they meet through files: the board, the run
+archive and the event log. Nothing drives the whole path for you yet, but every
+step below exists and was run end to end, in this order, on a fresh repo made by
+`install.sh`. Solid lines exist; dotted ones are planned.
 
 ```mermaid
 flowchart TD
-  T[board task T-012] -. "planned: task → prompt" .-> H[harness.run<br/>in the sealed container]
-  H --> O["diff, transcript,<br/>verdict, cost"]
-  O -. "planned: every run appends to<br/>one event log (B-6)" .-> EV[(event log)]
-  O -. "planned: diff → drift gate" .-> DG[drift gate<br/>on the diff]
-  O -. "planned: adversarial verify (H-3)" .-> VR[second run checks the first]
-  DG -. "informs" .-> G[reviewer and qa verdicts<br/>recorded on the board]
-  VR -.-> G
+  T[board task T-001] -- "runstore.mjs run --task<br/>you write the prompt" --> H[harness.run]
+  H --> O["archived run: diff.patch,<br/>transcript, verdict, cost"]
+  O -- "every run appends to<br/>the project's event log (B-6)" --> EV[(event log)]
+  O -- "drift.mjs check --diff diff.patch" --> DG[drift gate]
+  DG -- "reconcile.mjs propose / accept" --> SP[spec updated,<br/>by a human's accept]
+  O -- "verify.mjs refute (H-3)" --> VR[a second run tries<br/>to refute the first]
+  VR -- "refuted: qa fail recorded" --> G[verdicts on the board]
   G --> DN{board.mjs done}
   DN -- "gates pass" --> DONE([done])
   DN -- "missing" --> REF([refused])
   EV -. "planned: board state is a<br/>projection of the log (B-7)" .-> T
 ```
+
+From the Caretaker checkout, against a repo at `$REPO` with `ops/caretaker/`
+installed:
+
+```
+C=$REPO/ops/caretaker/config.json
+node bin/runstore.mjs run --workspace $REPO --prompt-file task.txt --config $C --task T-001
+node bin/drift.mjs check --repo $REPO --diff "$(node bin/runstore.mjs where --config $C)/runs/r_…/diff.patch" --run r_…
+node bin/reconcile.mjs propose --config $C --run r_… --workspace $REPO     # when drift blocks
+node bin/reconcile.mjs accept  --config $C --proposal r_…
+node bin/verify.mjs refute --config $C --parent r_… --workspace $REPO
+node bin/serve.mjs $C                                                        # watch it all
+```
+
+`--sandbox podman` is the default and needs an image with the agent CLI in it
+and a way for that CLI to sign in; `--sandbox none` runs on the host and says so
+on every run.
 
 `docs/board.json` in this repo tracks each of these steps as its own task.
 

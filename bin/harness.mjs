@@ -183,12 +183,22 @@ export function normalisePolicy(policy = {}) {
 export const CLI_PRESETS = {
   claude: {
     bin: "claude",
-    /** stdin carries the prompt; `-` is not needed, --print reads stdin. */
+    /**
+     * stdin carries the prompt; `-` is not needed, --print reads stdin.
+     *
+     * `--permission-mode auto`, the same mode `loop.sh` runs unattended. With
+     * no mode, `--print` has nobody to answer a permission prompt, so every
+     * Edit and Bash call is DENIED and the CLI still exits 0: the run reports
+     * completed with an empty diff. Seen on a real run, 2026-09-29, claude
+     * 2.1.284 on the host: `permission_denials` held the one Edit the task needed.
+     */
     argv: ({ model }) => [
       "claude",
       "--print",
       "--output-format",
       "json",
+      "--permission-mode",
+      "auto",
       ...(model ? ["--model", model] : []),
     ],
     /**
@@ -202,8 +212,14 @@ export const CLI_PRESETS = {
   },
   codex: {
     bin: "codex",
-    /** `codex exec` reads instructions from stdin when no prompt argument is given. */
-    argv: ({ model }) => ["codex", "exec", "--json", ...(model ? ["--model", model] : [])],
+    /**
+     * `codex exec` reads instructions from stdin when no prompt argument is given.
+     *
+     * `--sandbox workspace-write` because `codex exec` defaults to a read-only
+     * sandbox, which fails the same way as claude above. NOT verified against a
+     * live codex: no codex CLI was on the box that found the claude failure.
+     */
+    argv: ({ model }) => ["codex", "exec", "--json", "--sandbox", "workspace-write", ...(model ? ["--model", model] : [])],
     env: { HOME: "/tmp/agent-home" },
   },
 };
@@ -473,6 +489,20 @@ function jsonCandidates(text) {
     }
   }
   return out;
+}
+
+/**
+ * Tool calls the CLI refused on its own permission rules, from its JSON output
+ * (claude: `permission_denials`). The CLI still exits 0, so without this a run
+ * that was not allowed to do the work reads as completed with an empty diff.
+ */
+export function permissionDenials(transcriptText) {
+  // The run's result document carries the whole list, so read the last one
+  // that has it. Summing across candidates would count a one-line transcript
+  // twice: jsonCandidates yields it once whole and once as its only line.
+  const docs = jsonCandidates(transcriptText ?? "").filter((d) => Array.isArray(d?.permission_denials));
+  if (!docs.length) return [];
+  return docs.at(-1).permission_denials.map((d) => String(d?.tool_name ?? "unknown"));
 }
 
 /** Deep search for the first numeric value under any of `names`. */
@@ -1057,6 +1087,14 @@ export async function run(workspace, prompt, policy = {}) {
   } else {
     state = "failed";
     reason = `exited ${exec.exitCode}${exec.signal ? ` on ${exec.signal}` : ""}`;
+  }
+
+  const denied = permissionDenials(stdoutText);
+  if (denied.length) {
+    warnings.push(
+      `the CLI refused ${denied.length} tool call(s) on its own permission rules (${[...new Set(denied)].join(", ")}); ` +
+        "the work those calls were for was not done, whatever the exit code says",
+    );
   }
 
   const verdict = {

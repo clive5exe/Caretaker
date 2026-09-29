@@ -88,6 +88,7 @@
  * Usage:
  *   node bin/drift.mjs check [--specs specs] [--repo .] [--git HEAD|A..B]
  *                            [--diff FILE|-] [--path P ...] [--task T-1] [--run r_x]
+ *                            (--diff: a unified patch, or one path per line)
  *                            [--dismiss GLOB --reason "..." [--by who] [--dismiss-task T-1]]
  *                            [--dismiss-file F] [--events DIR | --no-events]
  *                            [--tree-file F | --no-tree] [--ignore GLOB ...] [--quiet]
@@ -524,6 +525,35 @@ const git = (repo, args) =>
     .filter(Boolean);
 
 /**
+ * The paths a `--diff` input names. Two shapes: one path per line (what
+ * `git diff --name-only` prints), or a unified patch (what `git diff` prints,
+ * and what runstore archives as a run's diff.patch). A patch read as a path
+ * list is every line a "path" that no spec governs, so the gate PASSES on
+ * exactly the change it was handed: fail-open on the most natural input.
+ * Both sides of a rename are changed paths; /dev/null is neither.
+ */
+export function pathsFromDiffText(raw) {
+  const lines = raw.split("\n");
+  const isPatch = lines.some((l) => l.startsWith("diff --git ") || l.startsWith("+++ ") || l.startsWith("--- a/"));
+  if (!isPatch) return uniqSort(lines.map(norm).filter(Boolean));
+  const out = [];
+  const side = (p) => {
+    const t = p.replace(/\t.*$/, "").trim();
+    if (t === "/dev/null") return;
+    out.push(norm(t.replace(/^"?[ab]\//, "").replace(/"$/, "")));
+  };
+  for (const l of lines) {
+    const g = /^diff --git a\/(.+) b\/(.+)$/.exec(l);
+    if (g) { side(`a/${g[1]}`); side(`b/${g[2]}`); continue; }
+    if (l.startsWith("+++ ") || l.startsWith("--- ")) side(l.slice(4));
+    // No a/ or b/ prefix on these, so not through side(): a real top-level
+    // directory called b/ would lose its name.
+    else if (l.startsWith("rename from ") || l.startsWith("rename to ")) out.push(norm(l.replace(/^rename (from|to) /, "")));
+  }
+  return uniqSort(out.filter(Boolean));
+}
+
+/**
  * Changed paths. With no ref: everything uncommitted, PLUS untracked files —
  * `git diff` does not list a new file, and a new governed file with no spec
  * change is drift by exactly the same argument as an edited one.
@@ -627,7 +657,7 @@ if (isEntry) {
   let changed;
   if (opt.diff) {
     const raw = opt.diff === "-" ? readFileSync(0, "utf8") : readFileSync(opt.diff, "utf8");
-    changed = uniqSort(raw.split("\n").map(norm).filter(Boolean));
+    changed = pathsFromDiffText(raw);
   } else if (opt.path.length) {
     changed = uniqSort(opt.path.map(norm));
   } else {
