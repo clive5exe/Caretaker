@@ -38,7 +38,7 @@ import { spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { stateDirFor } from "./runstore.mjs";
+import { stateDirFor } from "./statedir.mjs";
 
 export class SkillsError extends Error {
   constructor(code, message) {

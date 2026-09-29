@@ -132,6 +132,13 @@ const DEFAULTS = {
   skillsDir: null,
 };
 
+/**
+ * The name a run's CLI is recorded under: a preset's name, or `custom:<name>`
+ * for one defined in harness settings, so the record says which program ran.
+ */
+export const cliLabel = (cli) =>
+  cli === undefined ? DEFAULTS.cli : typeof cli === "string" ? cli : cli?.name ? `custom:${cli.name}` : "custom";
+
 const newRunId = () => `r_${randomBytes(4).toString("hex")}`;
 
 export function normalisePolicy(policy = {}) {
@@ -729,7 +736,7 @@ function looksUnavailable(exitCode, stderrText) {
 export function skillsMount(policy, preset, warnings) {
   if (!policy.skillsDir) return [];
   if (!preset.skillsPath) {
-    warnings.push(`skills were staged but NOT attached: the ${typeof policy.cli === "string" ? policy.cli : "custom"} CLI has no known skills location`);
+    warnings.push(`skills were staged but NOT attached: the ${cliLabel(policy.cli)} CLI has no known skills location`);
     return [];
   }
   return ["-v", `${resolve(policy.skillsDir)}:${preset.skillsPath}:ro,Z`];
@@ -994,7 +1001,7 @@ export async function run(workspace, prompt, policy = {}) {
   logEvent({
     phase: "start",
     level: "info",
-    detail: `run started: adapter ${p.adapter}, cli ${typeof p.cli === "string" ? p.cli : "custom"}, sandbox ${p.sandbox}, ceiling ${p.timeoutMs}ms`,
+    detail: `run started: adapter ${p.adapter}, cli ${cliLabel(p.cli)}, sandbox ${p.sandbox}, ceiling ${p.timeoutMs}ms`,
   });
 
   // Snapshot BEFORE anything runs. Everything after this point is the delta.
@@ -1067,7 +1074,7 @@ export async function run(workspace, prompt, policy = {}) {
     adapter: p.adapter,
     // Only the cli adapter runs a CLI. Naming the default ("claude") on a run
     // that went through another adapter would record a vendor that never ran.
-    cli: p.adapter === "cli" ? (typeof p.cli === "string" ? p.cli : "custom") : null,
+    cli: p.adapter === "cli" ? cliLabel(p.cli) : null,
     runId: p.runId,
     container: container
       ? { runtime: container.runtime, name: container.name, image: container.image, cleanup: container.cleanup ?? null }

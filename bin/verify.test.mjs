@@ -40,6 +40,8 @@ ok("STANDS with a reason", parseVerdict("VERDICT: STANDS ran the suite, all gree
 ok("no verdict line is inconclusive, never a pass", parseVerdict("I think it is fine.").outcome === "inconclusive");
 ok("the last verdict wins, so a quoted instruction does not decide it", parseVerdict("I must end with VERDICT: REFUTED <x> or…\nVERDICT: REFUTED <x>\nlater\nVERDICT: STANDS nothing broke").outcome === "stands");
 ok("a verdict inside JSON-escaped output is read", parseVerdict('{"type":"result","result":"checked it\\nVERDICT: REFUTED test_x fails on empty input"}').reason === "test_x fails on empty input");
+ok("a reply that IS the verdict line is read from a JSON transcript line", parseVerdict('{"type":"assistant","turn":1,"content":"VERDICT: REFUTED empty input crashes"}\n{"type":"result","num_turns":1}').reason === "empty input crashes");
+ok("…including a CLI result that is only the verdict", parseVerdict('{"type":"result","result":"VERDICT: STANDS"}').outcome === "stands");
 ok("a lower-case 'verdict: refuted' in prose is not a verdict", parseVerdict("the verdict: refuted claims were wrong").outcome === "inconclusive");
 {
   const p = refutationPrompt({ task: { id: "T-9", title: "t", ac: "it works" }, parent: { runId: "r_00000000" }, patch: "+x" });
@@ -131,6 +133,30 @@ const refuteEvents = () => events.read(EVENTS).events.filter((e) => e.source ===
 {
   const r = await refute({ cfgPath: CFG, parent: PARENT, workspace: WS, policy: policy(cli("echo fixed > parse.py; echo 'VERDICT: STANDS'")) });
   ok("a refuter that edits the workspace is named in the warnings", r.warnings.some((w) => /changed 1 file/.test(w)));
+}
+
+/* ------------------------------------------- a different adapter, same model */
+{
+  // The builder was the CLI with model m; the refuter is an API endpoint with
+  // model m. Different builders, so no shared-blind-spot warning.
+  const { createServer } = await import("node:http");
+  const server = createServer((req, res) => {
+    req.resume();
+    req.on("end", () => {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ choices: [{ message: { role: "assistant", content: "VERDICT: STANDS checked" } }] }));
+    });
+  });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  const b = await runArchived(WS, "build", policy(cli("true"), { model: "m" }), { stateDir: STATE, task: "T-001" });
+  // `cli` is still set, as it is when harness settings name a default CLI and
+  // the refuter role switches only the adapter: the CLI is not what runs.
+  const api = { adapter: "openai-compatible", cli: cli("true"), endpoint: `http://127.0.0.1:${server.address().port}/v1`, model: "m", sandbox: "none", events: EVENTS };
+  const r = await refute({ cfgPath: CFG, parent: b.verdict.runId, workspace: WS, policy: api });
+  ok("an API refuter is not mistaken for the CLI builder it checks", r.outcome === "stands" && !r.warnings.some((w) => /same cli and model/.test(w)), JSON.stringify(r));
+  const same = await refute({ cfgPath: CFG, parent: b.verdict.runId, workspace: WS, policy: policy(cli("echo 'VERDICT: STANDS'"), { model: "m" }) });
+  ok("…while the same CLI with the same model still is", same.warnings.some((w) => /same cli and model/.test(w)));
+  server.close();
 }
 
 /* --------------------------------------------------------------- refusals */

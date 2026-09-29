@@ -286,7 +286,7 @@
         },
         {
           "id": "H-2",
-          "title": "Second vendor, and it should be a LOCAL model",
+          "title": "Second vendor behind the same seam: ChatGPT/OpenAI",
           "owner": "backend",
           "est": "1d",
           "status": "doing",
@@ -295,7 +295,7 @@
           ],
           "ac": "a second agent CLI runs behind the same interface with no change above it; if the interface had to change, that change is recorded as what the first vendor had baked in",
           "spec": "docs/vendors.md",
-          "note": "A second frontier API would agree with the first about almost everything and prove almost nothing. An OpenAI-compatible local model stresses the seam properly: different tool-call quirks, NO PROMPT CACHING so the cost model changes completely, smaller context so selection has to actually work, and GPU contention instead of hosted rate limits. — Built: bin/openai-compatible.mjs, a second adapter behind the unchanged seam, for Ollama/vLLM/llama.cpp and anything OpenAI-compatible. Checked by bin/openai-compatible.test.mjs against a scripted server and mutation-checked; its live container half runs in CI. What the interface had to change is recorded in docs/vendors.md 'What the second vendor showed'. NOT yet run against a real local model: that needs a GPU box and one run of bin/tool-fixture.mjs. Gate verdicts not recorded."
+          "note": "A second frontier API would agree with the first about almost everything and prove almost nothing. An OpenAI-compatible local model stresses the seam properly: different tool-call quirks, NO PROMPT CACHING so the cost model changes completely, smaller context so selection has to actually work, and GPU contention instead of hosted rate limits. — Built: bin/openai-compatible.mjs, a second adapter behind the unchanged seam, for Ollama/vLLM/llama.cpp and anything OpenAI-compatible. Checked by bin/openai-compatible.test.mjs against a scripted server and mutation-checked; its live container half runs in CI. What the interface had to change is recorded in docs/vendors.md 'What the second vendor showed'. NOT yet run against a real local model: that needs a GPU box and one run of bin/tool-fixture.mjs. Gate verdicts not recorded. — Owner decision 2026-09-29: no local model. The second vendor is ChatGPT/OpenAI, through the codex CLI (ChatGPT sign-in, in the container) or the openai-compatible adapter against the OpenAI API. Built alongside it: harness settings (bin/harness-config.mjs), ~/.config/caretaker/harness.json choosing adapter/cli/model per job (builder, refuter, reconciler) plus custom CLIs; isolation keys, key values and a file inside the workspace are refused by name. Checked by bin/harness-config.test.mjs, mutations H1-H10 each fail it by name. Found while testing it: runstore.mjs run deadlocked on an import cycle through skills.mjs (exit 13), fixed by bin/statedir.mjs; and verify could not read a verdict that was a reply's first line, so an API refuter was always inconclusive, fixed. Still open: no run against real OpenAI yet. Gate verdicts not recorded."
         },
         {
           "id": "H-3",

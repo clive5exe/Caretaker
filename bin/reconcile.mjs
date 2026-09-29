@@ -36,6 +36,7 @@ import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { directionFor, gate, loadSpecs, norm } from "./drift.mjs";
 import * as events from "./events.mjs";
+import { load as loadHarnessSettings, policyFlags, policyFor } from "./harness-config.mjs";
 import { RUN_ID, runArchived, stateDirFor } from "./runstore.mjs";
 import { requireSecrets } from "./secrets.mjs";
 
@@ -275,7 +276,7 @@ export async function reject({ cfgPath, proposal, by, reason, stateDir }) {
 const isEntry = process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href;
 if (isEntry) {
   const [cmd, ...argv] = process.argv.slice(2);
-  const KNOWN = new Set(["config", "run", "proposal", "workspace", "cli", "model", "sandbox", "image", "net", "timeout", "secret", "state-dir", "by", "reason"]);
+  const KNOWN = new Set(["config", "run", "proposal", "workspace", "adapter", "cli", "model", "endpoint", "api-key-env", "max-turns", "sandbox", "image", "net", "timeout", "secret", "state-dir", "by", "reason", "harness-config"]);
   const flags = { secret: [] };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -297,14 +298,7 @@ if (isEntry) {
       if (!flags.run || !flags.workspace) throw new ReconcileError("USAGE", "propose needs --run r_… and --workspace DIR");
       const workspace = resolve(flags.workspace);
       const secrets = flags.secret.length ? Object.fromEntries(requireSecrets(flags.secret, { repoRoot: workspace }).values) : {};
-      const policy = {
-        ...(flags.cli ? { cli: flags.cli } : {}),
-        ...(flags.model ? { model: flags.model } : {}),
-        ...(flags.sandbox ? { sandbox: flags.sandbox } : {}),
-        ...(flags.image ? { image: flags.image } : {}),
-        ...(flags.net ? { net: flags.net } : {}),
-        ...(flags.timeout ? { timeoutMs: Number(flags.timeout) } : {}),
-      };
+      const { policy } = policyFor("reconciler", loadHarnessSettings({ path: flags["harness-config"], workspace }), policyFlags(flags));
       const p = await propose({ cfgPath, run: flags.run, workspace, policy, secrets, stateDir });
       console.log(JSON.stringify(p, null, 2));
       console.error(`[reconcile] ${p.proposal}: ${p.direction ?? "no direction"} — ${p.valid ? `accept with: node bin/reconcile.mjs accept --proposal ${p.proposal}` : `not acceptable: ${p.problems.join("; ")}`}`);

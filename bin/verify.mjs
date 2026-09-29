@@ -36,6 +36,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import * as events from "./events.mjs";
+import { cliLabel } from "./harness.mjs";
+import { load as loadHarnessSettings, policyFlags, policyFor } from "./harness-config.mjs";
 import { RUN_ID, runArchived, stateDirFor } from "./runstore.mjs";
 import { requireSecrets } from "./secrets.mjs";
 
@@ -52,15 +54,34 @@ const VERDICT_LINE = /^[ \t>*`_-]*VERDICT:[ \t]*(REFUTED|STANDS)\b[ \t:—-]*(.*
 
 /**
  * Read the refuter's verdict from its transcript. The LAST verdict line wins,
- * because an agent may quote the instruction before answering it. Text is also
- * read with `\n` escapes unfolded, since a CLI's JSON output carries the model's
- * text as an escaped string. That is a property of JSON, not of any vendor.
+ * because an agent may quote the instruction before answering it. A JSON line
+ * is read as the strings it holds; any other line with `\n` escapes unfolded.
+ * Both are properties of JSON, not of any vendor.
  */
 export function parseVerdict(text) {
   const raw = String(text ?? "");
   let last = null;
-  for (const candidate of [raw, raw.replace(/\\n/g, "\n")]) {
-    for (const m of candidate.matchAll(VERDICT_LINE)) last = m;
+  // A transcript line that is JSON is read as the strings it holds, in order —
+  // whatever the field names, so no vendor's output shape is known here. A
+  // reply that IS the verdict line then starts a line, as the rule requires,
+  // instead of sitting after `"content":"`.
+  const texts = [];
+  const walk = (v) => {
+    if (typeof v === "string") texts.push(v);
+    else if (v && typeof v === "object") for (const x of Array.isArray(v) ? v : Object.values(v)) walk(x);
+  };
+  for (const line of raw.split("\n")) {
+    try {
+      const v = JSON.parse(line);
+      if (v && typeof v === "object") {
+        walk(v);
+        continue;
+      }
+    } catch {}
+    texts.push(line.replace(/\\n/g, "\n"));
+  }
+  for (const t of texts) {
+    for (const m of t.matchAll(VERDICT_LINE)) last = m;
   }
   if (!last) return { outcome: "inconclusive", reason: "no VERDICT: REFUTED or VERDICT: STANDS line in the transcript" };
   const reason = last[2].replace(/\\"/g, '"').replace(/["}\]]+$/, "").trim();
@@ -124,10 +145,12 @@ export async function refute({ cfgPath, parent, workspace, policy = {}, secrets 
   const warnings = [];
   // Same CLI and same model as the builder is allowed, and named. Two runs of
   // one model share its blind spots, which is most of what a refuter is for.
-  // Named the way the harness names it in the verdict: a preset's name, or
-  // "custom" for a CLI given as an object.
-  const cliName = policy.cli === undefined ? "claude" : typeof policy.cli === "string" ? policy.cli : "custom";
-  const sameCli = cliName === (parentRec.cli ?? "claude");
+  // Named the way the harness names it in the verdict (cliLabel), and with the
+  // adapter: the claude CLI and an API endpoint are different builders even
+  // when neither names a cli.
+  const who = (adapter, cli, endpoint) => ((adapter ?? "cli") === "cli" ? `cli ${cli ?? "claude"}` : `${adapter} ${endpoint ?? ""}`);
+  const sameCli =
+    who(policy.adapter, cliLabel(policy.cli), policy.endpoint) === who(parentRec.adapter, parentRec.cli, parentRec.policy?.endpoint);
   const sameModel = (policy.model ?? null) === (parentRec.model ?? null);
   if (sameCli && sameModel) warnings.push(`the refuter runs the same cli and model as ${parent}; they share blind spots`);
 
@@ -185,7 +208,7 @@ export async function refute({ cfgPath, parent, workspace, policy = {}, secrets 
 const isEntry = process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href;
 if (isEntry) {
   const [cmd, ...argv] = process.argv.slice(2);
-  const KNOWN = new Set(["config", "parent", "workspace", "cli", "model", "sandbox", "secret", "state-dir", "timeout", "image", "net"]);
+  const KNOWN = new Set(["config", "parent", "workspace", "adapter", "cli", "model", "endpoint", "api-key-env", "max-turns", "sandbox", "secret", "state-dir", "timeout", "image", "net", "harness-config"]);
   const flags = { secret: [] };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -204,16 +227,11 @@ if (isEntry) {
     console.error("usage: verify.mjs refute --config ops/caretaker/config.json --parent r_… --workspace DIR [--cli …] [--model …]");
     process.exit(2);
   }
-  const policy = {
-    ...(flags.cli ? { cli: flags.cli } : {}),
-    ...(flags.model ? { model: flags.model } : {}),
-    ...(flags.sandbox ? { sandbox: flags.sandbox } : {}),
-    ...(flags.image ? { image: flags.image } : {}),
-    ...(flags.net ? { net: flags.net } : {}),
-    ...(flags.timeout ? { timeoutMs: Number(flags.timeout) } : {}),
-  };
   try {
     const workspace = resolve(flags.workspace);
+    // Harness settings (who refutes) under this run's flags; isolation flags
+    // are only ever from the command line.
+    const { policy } = policyFor("refuter", loadHarnessSettings({ path: flags["harness-config"], workspace }), policyFlags(flags));
     const secrets = flags.secret.length ? Object.fromEntries(requireSecrets(flags.secret, { repoRoot: workspace }).values) : {};
     const r = await refute({
       cfgPath: flags.config ?? "ops/caretaker/config.json",
