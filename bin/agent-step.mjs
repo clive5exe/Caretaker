@@ -26,20 +26,31 @@
  * that mode as root (checked with claude 2.1.285 on 2026-09-29). With
  * --sandbox none it gets acceptEdits only: on the host, nothing is bypassed.
  *
+ * PUBLISHING (--open-pr): the agent cannot commit — the sandbox's .git is
+ * read-only, because a hook planted there runs outside the sandbox the next
+ * time anything uses git. So for the Warp skills that end in a pull request
+ * (implementation, spec, improve-review-pr) the agent leaves its changes and
+ * writes the PR title and body to .caretaker/pr.md, and THIS process, outside
+ * the sandbox and after it, commits exactly the files the harness measured the
+ * agent changing, pushes a branch, opens the PR with `gh`, and posts its link
+ * on the issue. It runs git with hooks off and literal pathspecs, and never
+ * commits .caretaker/ itself.
+ *
  * Usage:
  *   node bin/agent-step.mjs --skill review-pr --name "Review PR #3"
  *        (--prompt TEXT | --prompt-file F | --prompt-env VAR)
  *        [--workspace .] [--cli claude|codex] [--model M]
  *        [--sandbox podman|none] [--image I] [--egress api.anthropic.com]
  *        [--secret CLAUDE_CODE_OAUTH_TOKEN]... [--state-dir D] [--timeout MS]
- *        [--output FILE]
+ *        [--output FILE] [--open-pr [--issue N]]
  * Writes agent_output to --output and, under GitHub Actions, to $GITHUB_OUTPUT.
  * Exit: 0 the agent completed, 1 it did not (failed, killed, unavailable), 2 misuse.
  */
+import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { redactorFor, runArchived } from "./runstore.mjs";
 
@@ -111,7 +122,63 @@ export async function agentStep({ skill, name = null, prompt, workspace = ".", c
   });
   const redact = redactorFor(values);
   const agentOutput = out.verdict.finalText === null || out.verdict.finalText === undefined ? "" : redact(out.verdict.finalText);
-  return { state: out.verdict.state, agentOutput, runId: out.verdict.runId, archived: out.archived, name, skill: s, warnings: out.verdict.warnings ?? [] };
+  const changed = out.diff?.measured === false ? null : (out.diff?.files ?? []).map((f) => f.path);
+  return { state: out.verdict.state, agentOutput, runId: out.verdict.runId, archived: out.archived, name, skill: s, warnings: out.verdict.warnings ?? [], changed };
+}
+
+/**
+ * Both sides of a path as git's numstat prints a rename ("a => b" or
+ * "dir/{a => b}/f"), so the commit records the old path's removal too.
+ */
+export function renamedPaths(p) {
+  const braced = /^(.*)\{(.*) => (.*)\}(.*)$/.exec(p);
+  if (braced) return [braced[1] + braced[2] + braced[4], braced[1] + braced[3] + braced[4]].map((x) => x.replace(/\/\/+/g, "/"));
+  const plain = /^(.*) => (.*)$/.exec(p);
+  return plain ? [plain[1], plain[2]] : [p];
+}
+
+/** Title and body from .caretaker/pr.md: the first non-empty line, then the rest. */
+export function prText(text, fallbackTitle) {
+  const lines = String(text ?? "").split(/\r?\n/);
+  const i = lines.findIndex((l) => l.trim());
+  if (i === -1) return { title: fallbackTitle, body: "Opened by the Caretaker agent step; the agent wrote no .caretaker/pr.md." };
+  const title = lines[i].replace(/^#+\s*/, "").trim().slice(0, 200) || fallbackTitle;
+  return { title, body: lines.slice(i + 1).join("\n").trim() || "(no description)" };
+}
+
+/**
+ * Outside the sandbox, after the agent: commit what the agent changed, push a
+ * branch, open the PR, link it on the issue. Returns { opened, url?, branch?,
+ * files?, why? }; throws AgentStepError when a git or gh command fails.
+ */
+export function publish({ workspace, changed, runId, skill, name = null, issue = null, run = spawnSync, env = process.env }) {
+  const ws = resolve(workspace);
+  if (changed === null) return { opened: false, why: "the run's changes were not measured, so there is nothing safe to commit" };
+  const files = [...new Set(changed.flatMap(renamedPaths))].filter((f) => f && f !== ".caretaker" && !f.startsWith(".caretaker/"));
+  if (!files.length) return { opened: false, why: "the agent changed no files" };
+  const sh = (file, args, what) => {
+    const r = run(file, args, { cwd: ws, encoding: "utf8", env });
+    if (r.status !== 0) throw new AgentStepError(`${what} failed: ${String(r.stderr || r.error?.message || "").trim()}`);
+    return String(r.stdout ?? "").trim();
+  };
+  // Hooks off and pathspecs literal: a changed file named ":(glob)*" is a file.
+  const git = (args, what) => sh("git", ["-c", "core.hooksPath=/dev/null", "--literal-pathspecs", ...args], what);
+  const head = git(["rev-parse", "--abbrev-ref", "HEAD"], "reading the current branch");
+  const base = head !== "HEAD" ? head : env.GITHUB_REF_NAME;
+  if (!base) throw new AgentStepError("the checkout is on no branch and GITHUB_REF_NAME is not set, so there is no base for the PR");
+  const branch = `caretaker/${skill}-${runId.replace(/^r_/, "")}`;
+  const prFile = join(ws, ".caretaker", "pr.md");
+  const { title, body } = prText(existsSync(prFile) ? readFileSync(prFile, "utf8") : "", name || `${skill} (${runId})`);
+  git(["checkout", "-q", "-b", branch], "creating the branch");
+  git(["add", "-A", "--", ...files], "staging the agent's changes");
+  git(["-c", "user.name=github-actions[bot]", "-c", "user.email=41898282+github-actions[bot]@users.noreply.github.com", "commit", "-q", "-m", title, "-m", `Caretaker run ${runId}, skill ${skill}.`], "committing");
+  git(["push", "-q", "origin", branch], "pushing the branch");
+  const bodyFile = join(ws, ".caretaker", `pr-body-${runId}.md`);
+  mkdirSync(dirname(bodyFile), { recursive: true });
+  writeFileSync(bodyFile, `${body}\n\n---\nOpened by Caretaker (run ${runId}) for the agent, which works in a sandbox that cannot push.\n`);
+  const url = sh("gh", ["pr", "create", "--base", base, "--head", branch, "--title", title, "--body-file", bodyFile], "opening the pull request").split("\n").pop();
+  if (issue) sh("gh", ["issue", "comment", String(issue), "--body", `Pull request opened: ${url}`], "linking the PR on the issue");
+  return { opened: true, url, branch, files };
 }
 
 /** `name<<DELIM ... DELIM` for $GITHUB_OUTPUT, with a delimiter the value cannot contain. */
@@ -126,11 +193,15 @@ export function githubOutput(name, value) {
 
 const isEntry = process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href;
 if (isEntry) {
-  const VALUE = ["skill", "name", "prompt", "prompt-file", "prompt-env", "workspace", "cli", "model", "sandbox", "image", "egress", "secret", "state-dir", "timeout", "output"];
+  const VALUE = ["skill", "name", "prompt", "prompt-file", "prompt-env", "workspace", "cli", "model", "sandbox", "image", "egress", "secret", "state-dir", "timeout", "output", "issue"];
   const f = { secret: [] };
   const argv = process.argv.slice(2);
   for (let i = 0; i < argv.length; i++) {
     const k = argv[i].replace(/^--/, "");
+    if (argv[i] === "--open-pr") {
+      f["open-pr"] = true;
+      continue;
+    }
     if (!argv[i].startsWith("--") || !VALUE.includes(k) || i + 1 >= argv.length) {
       console.error(`agent-step: bad argument ${argv[i]}\nusage: agent-step.mjs --skill S (--prompt T | --prompt-file F | --prompt-env V) [--cli claude|codex] [--sandbox podman|none] [--secret NAME]... [--egress hosts] [--output F]`);
       process.exit(2);
@@ -161,6 +232,12 @@ if (isEntry) {
     }
     for (const w of r.warnings) console.error(`[agent-step] warning: ${w}`);
     console.error(`[agent-step] ${r.name ?? r.skill}: ${r.runId} ${r.state} (archive ${r.archived})`);
+    if (f["open-pr"] && r.state === "completed") {
+      if (f.issue !== undefined && !/^[0-9]+$/.test(f.issue)) throw new AgentStepError(`--issue takes an issue number, got ${JSON.stringify(f.issue)}`);
+      const p = publish({ workspace: f.workspace ?? ".", changed: r.changed, runId: r.runId, skill: r.skill, name: r.name, issue: f.issue || null });
+      console.error(p.opened ? `[agent-step] opened ${p.url} from ${p.branch} (${p.files.length} file(s))` : `[agent-step] no pull request: ${p.why}`);
+      if (process.env.GITHUB_OUTPUT && p.opened) appendFileSync(process.env.GITHUB_OUTPUT, `pr_url=${p.url}\n`);
+    }
     process.exit(r.state === "completed" ? 0 : 1);
   } catch (e) {
     console.error(`[agent-step] ${e.message}`);

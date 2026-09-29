@@ -124,23 +124,31 @@ The budget is 5 hours. Each step ends in a commit you can check.
 | 0 plan + README | done | 609629f |
 | 1 vendor Warp | done: 27 files byte for byte, test fails on one edited byte | 30cb6fa |
 | 2 the Oz stand-in | done with a **fake model**. Warp's own validator accepts its `review.json`. Not yet proven: a real model, and the podman path, which can't run on the build machine | 88997cf |
-| 3 workflows | **2 of 5 on Caretaker** (review, triage), actionlint clean. **3 blocked** on the decision below | this commit |
+| 3 workflows | **done: all 5 on Caretaker**, actionlint clean. Review and triage only read. Implement, spec and improve-review-pr use option A (below) | this commit |
 
-### Open decision: how the agent pushes (implement, spec, improve-review-pr)
+### How the agent's work becomes a PR (option A, chosen 2026-09-29)
 
-In those three workflows Warp's agent commits, pushes a branch and opens the
-PR itself. Caretaker's sandbox mounts `.git` read-only, because a planted git
-hook runs outside the sandbox the next time anything uses git there. So:
+The agent never pushes. Caretaker's sandbox mounts `.git` read-only, because a
+planted git hook runs outside the sandbox the next time anything uses git
+there. For the three workflows that end in a pull request:
 
-- **A (recommended): the agent edits, a trusted step pushes.** The agent works
-  in the sandbox as now and writes the PR title and body to a file. A step
-  after it, outside the sandbox, commits, pushes and opens the PR. The sandbox
-  is unchanged. Cost: a few lines patched into each of the three prompts
-  ("don't push; write the PR text to `pr.md`"), plus one small shared step.
-- **B: writable `.git`, on a throwaway copy of the repo.** Warp's flow is
-  unchanged, but this loosens an isolation control. The permission system
-  blocked it as weakening the sandbox, so it needs your explicit say-so and a
-  `security` verdict.
+1. The agent edits files in the sandbox and writes the PR title and body to
+   `.caretaker/pr.md`. Warp's prompt is patched to say so.
+2. After the agent, **outside** the sandbox, the Caretaker step:
+   - commits exactly the files the harness measured the agent changing. Not
+     files the workflow made beforehand, and never `.caretaker/`;
+   - runs git with hooks off;
+   - pushes `caretaker/<skill>-<run>` and opens the PR with `gh`;
+   - posts the PR link on the issue.
+
+The same patches:
+- drop the run-time `npx skills add` steps, because those skills are vendored
+  at a pinned commit;
+- replace Oz's `computer_use` and `oz.warp.dev` links with "verify with what
+  this environment has, and say what could not be verified".
+
+Warp's skill files themselves are unchanged. The workflow prompt overrides
+their push step.
 
 ## After the 5 hours (not in this window)
 

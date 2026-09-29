@@ -24,9 +24,9 @@ const ok = (name, cond, detail = "") => {
   if (!cond) failures += 1;
 };
 
-/** On Caretaker: no Oz step. Pending: still on Oz, waiting on a decision (docs/plan.md). */
-const ON_CARETAKER = ["review-pull-requests.yml", "triage-issues.yml"];
-const PENDING = ["implement-ready-issues.yml", "spec-ready-issues.yml", "improve-review-pr.yml"];
+const ON_CARETAKER = ["review-pull-requests.yml", "triage-issues.yml", "implement-ready-issues.yml", "spec-ready-issues.yml", "improve-review-pr.yml"];
+/** The agent's work ends in a PR: it cannot push from the sandbox, so the trusted step opens it (option A, docs/plan.md). */
+const OPENS_PR = ["implement-ready-issues.yml", "spec-ready-issues.yml", "improve-review-pr.yml"];
 
 const T = mkdtempSync(join(tmpdir(), "workflows-test-"));
 try {
@@ -39,7 +39,13 @@ try {
     ok(`${f}: no step uses Oz any more`, !/uses: warpdotdev\/oz-agent-action/.test(text));
     ok(`${f}: the agent is given your subscription token, not a Warp key`, /claude_code_oauth_token: \$\{\{ secrets\.CLAUDE_CODE_OAUTH_TOKEN \}\}/.test(text) && !/warp_api_key:/.test(text));
   }
-  for (const f of PENDING) console.log(`NOTE  ${f}: still on Oz — its agent pushes a branch, which the sandbox's read-only .git blocks (docs/plan.md, open decision)`);
+  for (const f of OPENS_PR) {
+    const text = wf(f);
+    ok(`${f}: the trusted step opens the PR (open_pr), not the agent`, /open_pr: "true"/.test(text) && /write the pull request title[\s\S]*\.caretaker\/pr\.md/.test(text));
+    ok(`${f}: the prompt no longer asks for Oz computer use or Oz links`, !/computer_use: true|oz\.warp\.dev\/runs/.test(text));
+    ok(`${f}: no unpinned \`npx skills add\` at run time (the skills are vendored)`, !/npx skills add/.test(text));
+  }
+  for (const f of ["review-pull-requests.yml", "triage-issues.yml"]) ok(`${f}: opens no PR (the agent only reads)`, !/open_pr:/.test(wf(f)));
 
   const bin = process.env.ACTIONLINT || "actionlint";
   const probe = spawnSync(bin, ["-version"], { encoding: "utf8" });

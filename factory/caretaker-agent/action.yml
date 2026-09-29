@@ -43,6 +43,17 @@ inputs:
     description: The run's ceiling
     required: false
     default: "30"
+  open_pr:
+    description: >-
+      "true" for skills that end in a pull request. The agent cannot push from
+      the sandbox; it writes .caretaker/pr.md, and this action then commits
+      what the agent changed, pushes a branch and opens the PR with GH_TOKEN
+    required: false
+    default: "false"
+  issue:
+    description: The issue number to post the PR link on (with open_pr)
+    required: false
+    default: ""
   profile:
     description: Accepted so Warp's workflows need no other change; Oz-only, unused
     required: false
@@ -55,6 +66,9 @@ outputs:
   run_id:
     description: Caretaker's run id; the archive is uploaded as caretaker-<run_id>
     value: ${{ steps.agent.outputs.run_id }}
+  pr_url:
+    description: The pull request opened (with open_pr), else empty
+    value: ${{ steps.agent.outputs.pr_url }}
 
 runs:
   using: composite
@@ -81,6 +95,8 @@ runs:
         AGENT_MODEL: ${{ inputs.model }}
         SANDBOX: ${{ inputs.sandbox }}
         TIMEOUT_MINUTES: ${{ inputs.timeout_minutes }}
+        OPEN_PR: ${{ inputs.open_pr }}
+        ISSUE: ${{ inputs.issue }}
         CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.claude_code_oauth_token }}
         ANTHROPIC_API_KEY: ${{ inputs.anthropic_api_key }}
         OPENAI_API_KEY: ${{ inputs.openai_api_key }}
@@ -105,6 +121,10 @@ runs:
         if [ "$SANDBOX" != none ]; then
           if [ "$AGENT_CLI" = codex ]; then hosts+=(api.openai.com); else hosts+=(api.anthropic.com); fi
           args+=(--egress "$(IFS=,; echo "${hosts[*]}")")
+        fi
+        if [ "$OPEN_PR" = true ]; then
+          args+=(--open-pr)
+          if [ -n "$ISSUE" ]; then args+=(--issue "$ISSUE"); fi
         fi
         node "$GITHUB_ACTION_PATH/bin/agent-step.mjs" "${args[@]}"
 
