@@ -55,6 +55,9 @@
  * Usage:
  *   node bin/harness.mjs run --workspace DIR --prompt-file F [--adapter cli]
  *                            [--cli claude|codex] [--timeout MS] [--json]
+ *   node bin/harness.mjs run --workspace DIR --prompt-file F --adapter openai-compatible
+ *                            --endpoint http://localhost:11434/v1 --model M
+ *                            [--api-key-env VAR] [--max-turns N]
  *   node bin/harness.mjs adapters
  */
 import { spawn, spawnSync } from "node:child_process";
@@ -66,6 +69,7 @@ import { pathToFileURL } from "node:url";
 import { DEFAULT_DIR as DEFAULT_EVENTS_DIR, STAGES, append as appendEvents } from "./events.mjs";
 import { buildArgs, checkLimits, delegatedControllers } from "./sandbox.mjs";
 import { readDevcontainer, toLimits } from "./spec.mjs";
+import { openaiCompatibleAdapter } from "./openai-compatible.mjs";
 
 /**
  * The seam, as data. Exported so a test can assert the shape rather than trust
@@ -116,7 +120,24 @@ const DEFAULTS = {
   events: null,
   task: null,
   stage: "build",
+  // The openai-compatible adapter (H-2): the server's base URL, the NAME of an
+  // environment variable holding a key (never the key), and a turn ceiling
+  // so a model that never stops is a failed run, not a hung one.
+  endpoint: null,
+  apiKeyEnv: null,
+  maxTurns: 50,
+  // S-1: a HOST directory of staged skills (<name>/SKILL.md), from
+  // `skills.mjs`. Mounted read-only for a CLI that reads skills, offered as a
+  // tool by the openai-compatible adapter. Never copied into the workspace.
+  skillsDir: null,
 };
+
+/**
+ * The name a run's CLI is recorded under: a preset's name, or `custom:<name>`
+ * for one defined in harness settings, so the record says which program ran.
+ */
+export const cliLabel = (cli) =>
+  cli === undefined ? DEFAULTS.cli : typeof cli === "string" ? cli : cli?.name ? `custom:${cli.name}` : "custom";
 
 const newRunId = () => `r_${randomBytes(4).toString("hex")}`;
 
@@ -176,6 +197,8 @@ export const CLI_PRESETS = {
      * on its first write with an error that reads like a permissions bug.
      */
     env: { HOME: "/tmp/agent-home" },
+    /** Where this CLI reads user-level skills, given the HOME above (S-1). */
+    skillsPath: "/tmp/agent-home/.claude/skills",
   },
   codex: {
     bin: "codex",
@@ -705,6 +728,20 @@ function looksUnavailable(exitCode, stderrText) {
   );
 }
 
+/**
+ * The read-only mount that hands a CLI its skills (S-1), or nothing. A preset
+ * that names no skills location gets a warning rather than a guessed path: a
+ * mount the CLI never reads would look like skills were given when they were not.
+ */
+export function skillsMount(policy, preset, warnings) {
+  if (!policy.skillsDir) return [];
+  if (!preset.skillsPath) {
+    warnings.push(`skills were staged but NOT attached: the ${cliLabel(policy.cli)} CLI has no known skills location`);
+    return [];
+  }
+  return ["-v", `${resolve(policy.skillsDir)}:${preset.skillsPath}:ro,Z`];
+}
+
 async function cliAdapter({ workspace, prompt, policy, paths, warnings }) {
   const preset =
     typeof policy.cli === "string"
@@ -741,6 +778,11 @@ async function cliAdapter({ workspace, prompt, policy, paths, warnings }) {
       "sandbox:none — the CLI ran on the HOST, not in a container. No filesystem " +
         "isolation, no resource ceiling and no egress control applied to this run.",
     );
+    if (policy.skillsDir) {
+      // On the host the CLI reads the operator's own skills directory; there is
+      // nowhere to mount these without writing into it, so they are not given.
+      warnings.push("skills were staged but NOT attached: with sandbox:none there is no container to mount them into");
+    }
     file = cliArgv[0];
     args = cliArgv.slice(1);
   } else {
@@ -792,7 +834,7 @@ async function cliAdapter({ workspace, prompt, policy, paths, warnings }) {
       containerName,
       cliArgv,
       env,
-      extraRunFlags: policy.extraRunFlags,
+      extraRunFlags: [...policy.extraRunFlags, ...skillsMount(policy, preset, warnings)],
     });
     file = policy.sandbox;
     container = { runtime: policy.sandbox, name: containerName, image };
@@ -853,6 +895,7 @@ async function sdkAdapter() {
 export const ADAPTERS = {
   cli: cliAdapter,
   sdk: sdkAdapter,
+  "openai-compatible": (args) => openaiCompatibleAdapter({ ...args, HarnessError }),
 };
 
 /** Which adapters exist, for an error message and for the CLI. */
@@ -958,7 +1001,7 @@ export async function run(workspace, prompt, policy = {}) {
   logEvent({
     phase: "start",
     level: "info",
-    detail: `run started: adapter ${p.adapter}, cli ${typeof p.cli === "string" ? p.cli : "custom"}, sandbox ${p.sandbox}, ceiling ${p.timeoutMs}ms`,
+    detail: `run started: adapter ${p.adapter}, cli ${cliLabel(p.cli)}, sandbox ${p.sandbox}, ceiling ${p.timeoutMs}ms`,
   });
 
   // Snapshot BEFORE anything runs. Everything after this point is the delta.
@@ -1029,21 +1072,26 @@ export async function run(workspace, prompt, policy = {}) {
     startedAt,
     endedAt: new Date().toISOString(),
     adapter: p.adapter,
-    cli: typeof p.cli === "string" ? p.cli : "custom",
+    // Only the cli adapter runs a CLI. Naming the default ("claude") on a run
+    // that went through another adapter would record a vendor that never ran.
+    cli: p.adapter === "cli" ? cliLabel(p.cli) : null,
     runId: p.runId,
     container: container
       ? { runtime: container.runtime, name: container.name, image: container.image, cleanup: container.cleanup ?? null }
       : null,
     warnings,
+    // Only adapters that drive the tool loop themselves can score it; for a
+    // CLI the loop is inside the vendor's binary and this stays absent.
+    ...(result.toolUse ? { toolUse: result.toolUse } : {}),
   };
 
   const cost = parseUsage(stdoutText, {
     billing: p.billing,
-    source: `${verdict.cli}-json`,
+    source: verdict.cli ? `${verdict.cli}-json` : `${p.adapter}-usage`,
   });
   if (!cost.reported) {
     cost.note =
-      `${verdict.cli} reported no usage in its output; null means unknown, not zero. ` +
+      `${verdict.cli ?? p.adapter} reported no usage in its output; null means unknown, not zero. ` +
       "The run still spent tokens as effort.";
   }
 
@@ -1113,6 +1161,9 @@ if (isEntry) {
       ...(flags.devcontainer ? { devcontainer: flags.devcontainer } : {}),
       ...(flags["log-dir"] ? { logDir: flags["log-dir"] } : {}),
       ...(flags.billing ? { billing: flags.billing } : {}),
+      ...(flags.endpoint ? { endpoint: flags.endpoint } : {}),
+      ...(flags["api-key-env"] ? { apiKeyEnv: flags["api-key-env"] } : {}),
+      ...(flags["max-turns"] ? { maxTurns: Number(flags["max-turns"]) } : {}),
     };
     try {
       const out = await run(workspace, prompt, policy);

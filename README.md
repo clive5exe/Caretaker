@@ -505,7 +505,7 @@ What the defaults are, and why:
 
 | Policy | Default | Why |
 |---|---|---|
-| `adapter` | `cli` | Subscription auth lives in the CLI. The `sdk` adapter is registered but not implemented, and says so by name rather than faking a result. |
+| `adapter` | `cli` | Subscription auth lives in the CLI. `openai-compatible` calls any OpenAI-style API (OpenAI, a hosted provider, a local server) from the harness and runs the agent's tools in the container. The `sdk` adapter is registered but not implemented, and says so by name rather than faking a result. |
 | `cli` | `claude` | `codex` is the other preset. |
 | `sandbox` | `podman` | `none` runs on the host with no isolation, is never the default, and always warns. |
 | `net` | `none` | No route off the host. A real CLI then cannot reach its model, and the run says so in `verdict.warnings` rather than opening the network for you. |
@@ -520,6 +520,41 @@ no usage, because null means unknown, not zero.
 node bin/harness.mjs adapters
 node bin/harness.mjs run --workspace DIR --prompt-file F [--cli claude|codex] [--timeout MS] [--json]
 ```
+
+### Choosing which AI does which job
+
+Put your choices in `~/.config/caretaker/harness.json` (`node bin/harness-config.mjs path`
+prints where). Each job — `builder`, `refuter` (`verify.mjs refute`), `reconciler`
+(`reconcile.mjs propose`) — gets `default` with its own role laid over it, and flags
+for one run are laid over both:
+
+```json
+{
+  "default": { "cli": "claude" },
+  "roles": {
+    "refuter": { "cli": "codex" },
+    "reconciler": { "adapter": "openai-compatible", "endpoint": "https://api.openai.com/v1",
+                    "apiKeyEnv": "OPENAI_API_KEY", "model": "<model name>" }
+  },
+  "clis": {
+    "mine": { "argv": ["mine", "--print"], "modelFlag": "--model" }
+  }
+}
+```
+
+`claude` signs in with a Claude subscription and `codex` with ChatGPT, inside the
+container. `clis` adds your own agent CLI: it gets the prompt on stdin, like the
+built-ins, and is recorded as `custom:<name>`. `node bin/harness-config.mjs show` prints
+what each job will use and where each value came from.
+
+What the file refuses, by name:
+
+- **Isolation.** `sandbox`, `net`, `env` and the other container flags are decided per
+  run on the command line, where they are seen.
+- **Key values.** `apiKeyEnv` names a variable.
+- **Being inside the repo.** The repo is mounted into the agent's container, and
+  settings the agent can edit are settings the agent chooses: one changed `endpoint`
+  would send your key to another server.
 
 ## The sandbox and egress
 

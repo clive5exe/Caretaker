@@ -45,6 +45,58 @@ export function SpecsPage() {
       </div>
       {data.skipped.length ? <p className="ft">{data.skipped.length} file(s) skipped: {data.skipped.map((s) => s.path).join(", ")}</p> : null}
 
+      <div className="card">
+        <h3>Can these documents be trusted?</h3>
+        {data.freshness === null ? (
+          <div style={{ marginTop: 8 }}>
+            <NotRecorded what="Not a git checkout, so freshness cannot be computed." why="It compares each doc's updated: date against git history." />
+          </div>
+        ) : data.freshness.ok && !data.freshness.undated.length ? (
+          <p className="dim" style={{ margin: "6px 0 0" }}>
+            Every dated doc is current: no spec is older than the code it governs, and no doc was edited after the date it claims.
+          </p>
+        ) : (
+          <div className="tw" style={{ marginTop: 8 }}>
+            <table>
+              <tbody>
+                {data.freshness.stale.map((s) => (
+                  <tr key={`stale-${s.spec}`}>
+                    <td>
+                      <span className="chip fail">stale</span>
+                    </td>
+                    <td className="mono">{s.spec}</td>
+                    <td>
+                      says {s.updated}; code it governs changed {s.lastGoverned?.day} ({s.lastGoverned?.sha} {s.lastGoverned?.subject})
+                    </td>
+                  </tr>
+                ))}
+                {data.freshness.lying.map((l) => (
+                  <tr key={`lying-${l.doc}`}>
+                    <td>
+                      <span className="chip fail">date lies</span>
+                    </td>
+                    <td className="mono">{l.doc}</td>
+                    <td>
+                      says {l.updated}; last edited {l.lastCommit.day} ({l.lastCommit.sha})
+                    </td>
+                  </tr>
+                ))}
+                {data.freshness.undated.map((u) => (
+                  <tr key={`undated-${u}`}>
+                    <td>
+                      <span className="chip">undated</span>
+                    </td>
+                    <td className="mono">{u}</td>
+                    <td className="muted">makes no updated: claim, so it cannot be checked</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <p className="ft">Computed from git on every load by bin/freshness.mjs. There is no freshness flag to set.</p>
+      </div>
+
       <div className="grid g2">
         <div className="card">
           <h3>Ownership map</h3>

@@ -93,3 +93,42 @@ the building.
 So "we support DeepSeek" means two quite different things depending on which one
 is meant, and the tool should make which one is in play obvious in the config
 rather than leaving it to be inferred from a model name.
+
+## What the second vendor showed
+
+`bin/openai-compatible.mjs` is the second adapter behind
+`run(workspace, prompt, policy)`. Nothing above the harness changed for it:
+`runstore.mjs`, `verify.mjs`, `reconcile.mjs` and the read model run it
+unmodified, and its tests archive and read back a run made through it. What
+did have to move is recorded here, because each item is a place where the
+first vendor's shape had been taken for the general one.
+
+- **The cost vocabulary was Anthropic's.** `cost.tokens` is
+  `in + cached + write + out`, with `in` meaning fresh input only. OpenAI's
+  `prompt_tokens` *includes* the cached part, so reporting it as `in` would
+  count cached tokens twice. The adapter splits it. There is no `write` at all
+  on this API, and a local model reports no cache, which stays null rather
+  than zero.
+- **"Which CLI ran" was assumed.** The verdict named the default CLI on every
+  run, so a run through any other adapter would have been recorded as a
+  Claude run that never happened. `verdict.cli` is now null unless the cli
+  adapter ran.
+- **The tool loop was invisible.** With a CLI, the loop runs inside the
+  vendor's binary, so nothing could score it. Only an adapter that drives the
+  loop can count malformed calls, invented tools and stopping, so
+  `verdict.toolUse` is optional and absent for CLIs. `bin/tool-fixture.mjs`
+  scores a candidate on those three behaviours and on whether it did the task.
+- **`net: none` works on this path, and cannot on the CLI path.** The model
+  call leaves from the harness, above the container, so the container needs
+  no egress for the agent's own traffic. With a CLI, the model traffic starts
+  inside, so its API host has to be on the allowlist.
+- **Policy grew adapter-specific keys:** `endpoint`, `apiKeyEnv`, `maxTurns`,
+  beside the CLI-specific `cli` and `extraCliArgs`. Policy is one flat bag,
+  and it now visibly holds two adapters' settings. That is tolerable at two
+  adapters, and worth splitting before a third.
+
+**Not yet proven on a real local model.** Every check here ran against a
+scripted fake server, and the box these were built on has no GPU. The claim
+the task makes — that a local model stresses the seam harder — needs one run
+through `node bin/tool-fixture.mjs --endpoint … --model …` against a real
+server. Until then the adapter is proven to the API, not to a model.

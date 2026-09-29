@@ -389,7 +389,7 @@ zero.
 | `GET /runs/:id` | one run: identity, parent, children, verdict, cost, diff summary, drift events for it | same, plus the event log |
 | `GET /runs/:id/transcript?from=<byte>`, `/stderr?from=`, `/diff`, `/egress` | raw text or JSONL, byte-ranged | the run archive (C-4, C-5) |
 | `GET /agents` | roles, models, runs and tokens aggregate, current work | `agentsDir` frontmatter (as `dashboard.mjs` `agents()` reads it), runs |
-| `GET /specs` | specs, `governs`, parse errors | `drift.loadSpecs` |
+| `GET /specs` | specs, `governs`, parse errors, and `freshness` (stale, lying, undated; null outside git) | `drift.loadSpecs`, `freshness.freshness` |
 | `GET /specs/ownership` | the ownership map, unowned, orphaned | `drift.buildOwnership`, `findOrphaned`, `treeFromGit` |
 | `GET /specs/drift` | recent drift and gate events, dismissals | the event log, `kind in (drift, gate)` |
 | `GET /settings` | read-only config, `stateDir`, sources, binding | config, server |
@@ -674,6 +674,10 @@ To avoid a name collision, the API field is `lifecycle`, not `stage`.
 | `pr-review` | `lifecycle === "human"` and a `pr` is recorded | `done` (nothing records a merge yet) | review outside Caretaker, then `done` |
 
 - **A single qa fail is not an Inbox item.** It sends the task back to build.
+- **A refutation (H-3, `bin/verify.mjs`) is a qa fail like any other.** Its
+  gate event carries `source: "refute"` and is excluded from the drift-gate
+  rule, so it never gets a drift-dismissal command and never masks a drift
+  failure. Repeated refutations reach the Inbox through the rework threshold.
 - **Dropped tasks never appear.**
 - Items are ordered by `since`: the `at` of the fact that created them, or the
   date for legacy verdicts.

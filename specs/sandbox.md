@@ -11,6 +11,9 @@ governs: bin/sandbox.mjs, bin/egress.mjs, bin/netns.mjs
 
 # The sandbox
 
+Decided in ADR-0001 (build the egress layer, podman) and ADR-0003 (a run's
+egress attributed by where its log lives).
+
 An agent runs inside a container that cannot hurt the host and cannot reach
 anything this file did not declare.
 

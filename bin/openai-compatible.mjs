@@ -1,0 +1,417 @@
+/**
+ * THE OPENAI-COMPATIBLE ADAPTER — H-2 and H-10's SDK half.
+ *
+ * The second vendor, behind the same seam:
+ *
+ *     run(workspace, prompt, policy) -> { diff, transcript, verdict, cost }
+ *
+ * Nearly everything self-hosted speaks this API — Ollama, vLLM, SGLang,
+ * llama.cpp, TGI — so one adapter covers them (docs/vendors.md). It uses plain
+ * `fetch`; no vendor SDK is a dependency, and nothing above the harness knows
+ * this file exists.
+ *
+ * WHERE THINGS RUN, which is the point of the SDK shape (docs/architecture.md):
+ *
+ *   the model call   HERE, in the harness process, above the dev environment.
+ *                    So the container needs NO egress for the agent's own
+ *                    traffic, and `net: none` works — which the CLI adapter
+ *                    cannot do, since its model traffic starts inside.
+ *   the tools        INSIDE the dev environment. With sandbox "podman" a
+ *                    container is started for the run (rebuilt, limits,
+ *                    read-only root, the repo at /work, no socket) and every
+ *                    tool call is a `podman exec` in it. With sandbox "none"
+ *                    tools run on the host, confined to the workspace, and the
+ *                    run carries the same warning the CLI adapter gives.
+ *
+ * FOUR TOOLS, deliberately few: list_files, read_file, write_file, run. A
+ * small model with a short context does worse with a large menu, and every
+ * extra tool is one more thing it can call wrongly.
+ *
+ * WHAT IT SCORES, because vendors.md names these as the real discriminator
+ * and a benchmark score is not: `verdict.toolUse` counts malformed tool calls,
+ * calls to tools that were never offered, and whether the model STOPPED on its
+ * own before the turn ceiling. A call it gets wrong is answered with an error
+ * and the loop continues; it is counted, never silently fixed.
+ *
+ * THE KEY. `policy.apiKeyEnv` names an environment variable of the harness
+ * process; its value goes into the Authorization header and nowhere else. Not
+ * into the policy (which runstore records), not into the transcript, not into
+ * the container. A local server usually needs none, so the default is none.
+ */
+import { spawnSync } from "node:child_process";
+import { appendFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { buildArgs, checkLimits, delegatedControllers } from "./sandbox.mjs";
+import { readDevcontainer, toLimits } from "./spec.mjs";
+import { staged } from "./skills.mjs";
+
+const OUTPUT_CAP = 20_000;
+const CMD_TIMEOUT_MS = 120_000;
+
+export const TOOLS = [
+  {
+    name: "list_files",
+    description: "List the entries of a directory in the repository. Paths are relative to the repository root.",
+    parameters: { type: "object", properties: { path: { type: "string", description: "directory, default ." } }, required: [] },
+  },
+  {
+    name: "read_file",
+    description: "Read a text file from the repository.",
+    parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
+  },
+  {
+    name: "write_file",
+    description: "Create or overwrite a text file in the repository with the given content.",
+    parameters: { type: "object", properties: { path: { type: "string" }, content: { type: "string" } }, required: ["path", "content"] },
+  },
+  {
+    name: "run",
+    description: "Run a shell command in the repository root and get its exit code and output.",
+    parameters: { type: "object", properties: { command: { type: "string" } }, required: ["command"] },
+  },
+];
+/** Offered only when skills were staged for the run (S-1). */
+export const READ_SKILL = {
+  name: "read_skill",
+  description: "Read one of the skills listed in the instructions: its SKILL.md, or another file inside it.",
+  parameters: { type: "object", properties: { name: { type: "string" }, file: { type: "string", description: "default SKILL.md" } }, required: ["name"] },
+};
+
+/** Read a file from a staged skill, confined to that skill's directory. */
+function readSkill(skillsDir, names, name, file) {
+  if (!names.has(name)) return { ok: false, output: `no skill named ${JSON.stringify(name)}; the skills are: ${[...names].join(", ")}` };
+  const base = join(skillsDir, name);
+  const rel = confine(base, file ?? "SKILL.md");
+  if (rel === null) return { ok: false, output: "refused: path is outside the skill" };
+  const abs = resolve(base, rel);
+  if (!existsSync(abs) || !statSync(abs).isFile()) return { ok: false, output: `no such file in skill ${name}: ${file}` };
+  return { ok: true, output: cap(readFileSync(abs, "utf8")) };
+}
+
+const cap = (s) => (s.length > OUTPUT_CAP ? `${s.slice(0, OUTPUT_CAP)}\n[truncated: ${s.length - OUTPUT_CAP} more characters]` : s);
+
+/**
+ * A repository-relative path, or null if it leaves the repository. Absolute
+ * paths, `..` segments that climb out, and (on the host) a symlink whose
+ * target is outside are all refused.
+ */
+export function confine(root, p) {
+  const raw = String(p ?? ".");
+  if (isAbsolute(raw)) return null;
+  const abs = resolve(root, raw);
+  const rel = relative(root, abs);
+  if (rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) return null;
+  return rel || ".";
+}
+
+/* -------------------------------------------------------------- executors */
+
+/** Tools on the host, confined to the workspace. Only for sandbox:none. */
+export function hostExecutor(ws) {
+  const realRoot = realpathSync(ws);
+  const guard = (p) => {
+    const rel = confine(ws, p);
+    if (rel === null) return null;
+    // Follow the deepest EXISTING ancestor's symlinks: a link inside the repo
+    // that points outside it is a way out, whatever the path string says.
+    let probe = resolve(ws, rel);
+    while (!existsSync(probe) && probe !== realRoot && probe !== ws) probe = dirname(probe);
+    const real = realpathSync(probe);
+    if (real !== realRoot && !real.startsWith(realRoot + sep)) return null;
+    return resolve(ws, rel);
+  };
+  return {
+    list(p) {
+      const abs = guard(p ?? ".");
+      if (!abs) return { ok: false, output: "refused: path is outside the repository" };
+      if (!existsSync(abs) || !statSync(abs).isDirectory()) return { ok: false, output: `not a directory: ${p}` };
+      return { ok: true, output: readdirSync(abs).sort().map((n) => (lstatSync(join(abs, n)).isDirectory() ? `${n}/` : n)).join("\n") };
+    },
+    read(p) {
+      const abs = guard(p);
+      if (!abs) return { ok: false, output: "refused: path is outside the repository" };
+      if (!existsSync(abs) || !statSync(abs).isFile()) return { ok: false, output: `no such file: ${p}` };
+      return { ok: true, output: cap(readFileSync(abs, "utf8")) };
+    },
+    write(p, content) {
+      const abs = guard(p);
+      if (!abs) return { ok: false, output: "refused: path is outside the repository" };
+      mkdirSync(dirname(abs), { recursive: true });
+      writeFileSync(abs, String(content));
+      return { ok: true, output: `wrote ${Buffer.byteLength(String(content))} bytes to ${confine(ws, p)}` };
+    },
+    run(command) {
+      const r = spawnSync("sh", ["-c", String(command)], { cwd: ws, encoding: "utf8", timeout: CMD_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024 });
+      return { ok: r.status === 0, output: cap(`exit ${r.status ?? r.signal}\n${r.stdout ?? ""}${r.stderr ?? ""}`) };
+    },
+    close() {
+      return null;
+    },
+  };
+}
+
+/**
+ * Tools inside a container started for this run. The container IS the
+ * boundary here, so paths are still confined to /work for consistency, but a
+ * command that wanders is wandering inside the sandbox, not on the host.
+ */
+export function containerExecutor({ runtime, name }) {
+  const exec = (args, input) =>
+    spawnSync(runtime, ["exec", ...(input !== undefined ? ["-i"] : []), "-w", "/work", name, ...args], {
+      encoding: "utf8",
+      input,
+      timeout: CMD_TIMEOUT_MS,
+      maxBuffer: 16 * 1024 * 1024,
+    });
+  const inRepo = (p) => confine("/work", p);
+  return {
+    list(p) {
+      const rel = inRepo(p ?? ".");
+      if (rel === null) return { ok: false, output: "refused: path is outside the repository" };
+      const r = exec(["ls", "-1Ap", "--", rel]);
+      return { ok: r.status === 0, output: cap(r.status === 0 ? r.stdout.trim() : `${r.stderr}`.trim()) };
+    },
+    read(p) {
+      const rel = inRepo(p);
+      if (rel === null) return { ok: false, output: "refused: path is outside the repository" };
+      const r = exec(["cat", "--", rel]);
+      return { ok: r.status === 0, output: cap(r.status === 0 ? r.stdout : r.stderr.trim()) };
+    },
+    write(p, content) {
+      const rel = inRepo(p);
+      if (rel === null) return { ok: false, output: "refused: path is outside the repository" };
+      const r = exec(["sh", "-c", 'mkdir -p "$(dirname "$1")" && cat > "$1"', "sh", rel], String(content));
+      return { ok: r.status === 0, output: r.status === 0 ? `wrote ${Buffer.byteLength(String(content))} bytes to ${rel}` : r.stderr.trim() };
+    },
+    run(command) {
+      const r = exec(["sh", "-c", String(command)]);
+      return { ok: r.status === 0, output: cap(`exit ${r.status ?? r.signal}\n${r.stdout ?? ""}${r.stderr ?? ""}`) };
+    },
+    close() {
+      const r = spawnSync(runtime, ["rm", "-f", "-t", "2", name], { encoding: "utf8", timeout: 30_000 });
+      return { attempted: true, removed: r.status === 0, detail: r.status === 0 ? null : String(r.stderr ?? "").trim() };
+    },
+  };
+}
+
+/* ------------------------------------------------------------------ loop */
+
+function dispatch(ex, call, offered, skill) {
+  const name = call?.function?.name;
+  const names = new Set(offered.map((t) => t.name));
+  if (!names.has(name)) return { invented: true, ok: false, output: `error: there is no tool named ${JSON.stringify(name)}. The tools are: ${[...names].join(", ")}` };
+  let args;
+  try {
+    args = call.function.arguments === undefined || call.function.arguments === "" ? {} : JSON.parse(call.function.arguments);
+    if (!args || typeof args !== "object" || Array.isArray(args)) throw new Error("not an object");
+  } catch {
+    return { malformed: true, ok: false, output: "error: the arguments were not a JSON object. Call the tool again with valid JSON arguments." };
+  }
+  const spec = offered.find((t) => t.name === name);
+  const missing = spec.parameters.required.filter((k) => typeof args[k] !== "string");
+  if (missing.length) return { malformed: true, ok: false, output: `error: ${name} needs ${missing.join(", ")} as string(s)` };
+  if (name === "read_skill") return skill(args.name, args.file);
+  if (name === "list_files") return ex.list(args.path);
+  if (name === "read_file") return ex.read(args.path);
+  if (name === "write_file") return ex.write(args.path, args.content);
+  return ex.run(args.command);
+}
+
+const systemPrompt = (containerised, skills) =>
+  [
+    "You are a software engineer working in a repository" + (containerised ? " mounted at /work inside a sandbox." : "."),
+    "Use the tools to inspect and change files and to run commands. Paths are relative to the repository root.",
+    "When the task is done, reply with a short summary and do NOT call a tool. That is how you signal you have finished.",
+    ...(skills.length
+      ? [
+          "\n\nSkills are available. When one fits the task, read it with read_skill before you start, and follow it:",
+          ...skills.map((s) => `\n- ${s.name}: ${s.description ?? "(no description)"}`),
+        ]
+      : []),
+  ].join(" ");
+
+/**
+ * The adapter. Same contract as the CLI adapter: returns { exec, container,
+ * file, toolUse }, never throws for an outcome (a failed or killed run is a
+ * result), and throws only when nothing could run at all.
+ */
+export async function openaiCompatibleAdapter({ workspace, prompt, policy, paths, warnings, HarnessError }) {
+  if (!policy.endpoint) throw new HarnessError('adapter "openai-compatible" needs policy.endpoint, e.g. http://localhost:11434/v1');
+  if (!policy.model) throw new HarnessError('adapter "openai-compatible" needs policy.model; the server serves more than one');
+  const url = `${String(policy.endpoint).replace(/\/+$/, "")}/chat/completions`;
+  const headers = { "content-type": "application/json" };
+  if (policy.apiKeyEnv) {
+    const key = process.env[policy.apiKeyEnv];
+    if (!key) throw new HarnessError(`policy.apiKeyEnv names ${policy.apiKeyEnv}, which is not set in the harness's environment`);
+    headers.authorization = `Bearer ${key}`;
+  }
+
+  let ex;
+  let container = null;
+  if (policy.sandbox === "none") {
+    warnings.push(
+      "sandbox:none — tools ran on the HOST, confined to the workspace by path checks only. No filesystem " +
+        "isolation beyond that, no resource ceiling and no egress control applied to the agent's commands.",
+    );
+    ex = hostExecutor(workspace);
+  } else {
+    const dev = readDevcontainer(policy.devcontainer);
+    const limits = toLimits(dev);
+    const image = policy.image ?? limits.image;
+    if (!image) throw new HarnessError(`no image: set policy.image, or an "image" in ${policy.devcontainer}`);
+    for (const m of checkLimits(["memory", "cpus", "pids"], delegatedControllers().controllers)) {
+      limits[m.limit] = null;
+      warnings.push(`not limiting ${m.limit} — no "${m.controller}" cgroup controller is delegated, so the flag is omitted. This run is NOT bounded on ${m.limit}.`);
+    }
+    // Kept alive by a shell loop, not `sleep infinity`, which BusyBox images
+    // do not all accept; the image only needs a POSIX sh for the tools anyway.
+    const name = `caretaker-${policy.runId}`;
+    const base = buildArgs({ image, limits, workdir: workspace, net: policy.net, cmd: ["sh", "-c", "while :; do sleep 3600; done"], runtime: policy.sandbox });
+    if (base[0] !== "run") throw new HarnessError(`sandbox.buildArgs no longer starts with "run"`);
+    const args = ["run", "-d", "--name", name, ...policy.extraRunFlags, ...base.slice(1)];
+    const started = spawnSync(policy.sandbox, args, { encoding: "utf8", timeout: 120_000 });
+    if (started.status !== 0) {
+      return {
+        exec: { spawnError: Object.assign(new Error(String(started.stderr || started.error?.message || "").trim()), { code: `container did not start (exit ${started.status})` }), exitCode: null, signal: null, killed: false, durationMs: 0 },
+        container: null,
+        file: policy.sandbox,
+      };
+    }
+    container = { runtime: policy.sandbox, name, image };
+    ex = containerExecutor(container);
+  }
+
+  const log = (obj) => appendFileSync(paths.stdout, `${JSON.stringify(obj)}\n`);
+  const err = (line) => appendFileSync(paths.stderr, `${line}\n`);
+  const skills = policy.skillsDir ? staged(policy.skillsDir) : [];
+  const skillNames = new Set(skills.map((s) => s.name));
+  const offered = skills.length ? [...TOOLS, READ_SKILL] : TOOLS;
+  const skill = (name, file) => readSkill(policy.skillsDir, skillNames, name, file);
+  const messages = [
+    { role: "system", content: systemPrompt(Boolean(container), skills) },
+    { role: "user", content: prompt },
+  ];
+  const tools = offered.map((t) => ({ type: "function", function: t }));
+  const toolUse = { calls: 0, malformed: 0, invented: 0, stopped: false, turns: 0 };
+  const usage = { prompt_tokens: 0, completion_tokens: 0, cached_input_tokens: 0 };
+  let usageSeen = false;
+  const startedAt = Date.now();
+  const deadline = startedAt + policy.timeoutMs;
+  const exec = { spawnError: null, exitCode: null, signal: null, killed: false, killReason: null, durationMs: 0, startedAt };
+
+  try {
+    for (;;) {
+      if (toolUse.turns >= policy.maxTurns) {
+        exec.exitCode = 1;
+        err(`did not stop within ${policy.maxTurns} turns`);
+        break;
+      }
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) {
+        exec.killed = true;
+        exec.killReason = "timeout";
+        break;
+      }
+      toolUse.turns += 1;
+      let res;
+      try {
+        res = await fetch(url, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ model: policy.model, messages, tools, tool_choice: "auto" }),
+          signal: AbortSignal.timeout(remaining),
+        });
+      } catch (e) {
+        if (e.name === "TimeoutError" || e.name === "AbortError") {
+          exec.killed = true;
+          exec.killReason = "timeout";
+        } else if (toolUse.turns === 1) {
+          // Nothing answered at all: the model is not there, which is
+          // UNAVAILABLE, not a failure of the work.
+          exec.spawnError = Object.assign(new Error(e.cause?.message ?? e.message), { code: e.cause?.code ?? "ENDPOINT_UNREACHABLE" });
+        } else {
+          exec.exitCode = 1;
+          err(`the endpoint stopped answering on turn ${toolUse.turns}: ${e.cause?.message ?? e.message}`);
+        }
+        break;
+      }
+      const bodyText = await res.text();
+      if (!res.ok) {
+        exec.exitCode = 1;
+        err(`HTTP ${res.status} from ${url}: ${bodyText.slice(0, 2000)}`);
+        break;
+      }
+      let body;
+      try {
+        body = JSON.parse(bodyText);
+      } catch {
+        exec.exitCode = 1;
+        err(`the endpoint answered with something that is not JSON: ${bodyText.slice(0, 500)}`);
+        break;
+      }
+      if (body.usage) {
+        usageSeen = true;
+        usage.prompt_tokens += body.usage.prompt_tokens ?? 0;
+        usage.completion_tokens += body.usage.completion_tokens ?? 0;
+        usage.cached_input_tokens += body.usage.prompt_tokens_details?.cached_tokens ?? 0;
+      }
+      const msg = body.choices?.[0]?.message;
+      if (!msg) {
+        exec.exitCode = 1;
+        err(`no message in the response: ${bodyText.slice(0, 500)}`);
+        break;
+      }
+      const calls = Array.isArray(msg.tool_calls) ? msg.tool_calls : [];
+      // Per-turn usage under names parseUsage does not read, so the totals on
+      // the last line are the only ones it finds.
+      log({ type: "assistant", turn: toolUse.turns, content: msg.content ?? null, tool_calls: calls, turnUsage: body.usage ? { in: body.usage.prompt_tokens ?? null, out: body.usage.completion_tokens ?? null } : null });
+      messages.push({ role: "assistant", content: msg.content ?? null, ...(calls.length ? { tool_calls: calls } : {}) });
+      if (!calls.length) {
+        toolUse.stopped = true;
+        exec.exitCode = 0;
+        break;
+      }
+      for (const call of calls) {
+        toolUse.calls += 1;
+        // A tool that THROWS (a write into a directory, a permission error) is
+        // a failed tool call, answered to the model like any other. Letting it
+        // escape would end the whole run over one bad call and lose the diff.
+        let out;
+        try {
+          out = dispatch(ex, call, offered, skill);
+        } catch (e) {
+          out = { ok: false, output: `error: the ${call?.function?.name ?? "tool"} call failed: ${e.message}` };
+        }
+        if (out.malformed) toolUse.malformed += 1;
+        if (out.invented) toolUse.invented += 1;
+        log({ type: "tool", turn: toolUse.turns, name: call?.function?.name ?? null, ok: out.ok, output: out.output });
+        messages.push({ role: "tool", tool_call_id: call.id, content: out.output });
+      }
+    }
+  } finally {
+    if (container) container.cleanup = ex.close();
+  }
+
+  exec.durationMs = Date.now() - startedAt;
+  if (exec.killed) exec.signal = "SIGKILL";
+  // The totals, last, so parseUsage reads the whole run rather than one turn.
+  // The API's prompt_tokens INCLUDES cached tokens, while the harness's `in` is
+  // fresh input only (cost.tokens is in + cached + write + out), so the cached
+  // part is split out rather than counted twice. It is reported only when the
+  // server reported some: a local model with no prompt cache reports none, and
+  // that absence is the fact vendors.md says changes the cost model.
+  log({
+    type: "result",
+    num_turns: toolUse.turns,
+    ...(usageSeen
+      ? {
+          usage: {
+            input_tokens: usage.prompt_tokens - usage.cached_input_tokens,
+            output_tokens: usage.completion_tokens,
+            ...(usage.cached_input_tokens ? { cache_read_input_tokens: usage.cached_input_tokens } : {}),
+          },
+        }
+      : {}),
+  });
+  return { exec, container, file: url, toolUse };
+}

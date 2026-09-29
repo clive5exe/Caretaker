@@ -35,16 +35,18 @@
  *        [--secret NAME ...] [--adapter cli] [--cli claude] [--model M]
  *        [--sandbox podman|none] [--net NET] [--timeout MS]
  *        [--egress host,host [--egress-network NET]]   per-run proxy, log in the archive (C-5)
+ *        [--skills yes]                                 stage the config's skills for the run (S-1)
  *   node bin/runstore.mjs where [--config F]      print the state dir
  */
 import {
   closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, renameSync, statSync, writeFileSync, appendFileSync,
 } from "node:fs";
-import { homedir, tmpdir } from "node:os";
-import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { tmpdir } from "node:os";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { randomBytes } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { makeRedactor, requireSecrets } from "./secrets.mjs";
+import { stateDirFor } from "./statedir.mjs";
 
 export const RUN_ID = /^r_[0-9a-f]{8}$/;
 export const newRunId = () => `r_${randomBytes(4).toString("hex")}`;
@@ -58,16 +60,8 @@ export class RunStoreError extends Error {
   }
 }
 
-/**
- * The state directory for a repo. The ONE definition: readmodel.mjs imports
- * this, so the writer and the reader cannot drift apart on where runs live.
- */
-export function stateDirFor(root, cfg = {}) {
-  return resolve(
-    cfg.stateDir ??
-      join(process.env.XDG_STATE_HOME || join(homedir(), ".local", "state"), "caretaker", basename(resolve(root))),
-  );
-}
+/** The state directory for a repo; defined in statedir.mjs (see there for why). */
+export { stateDirFor };
 
 const inside = (p, root) => {
   const rel = relative(resolve(root), resolve(p));
@@ -278,6 +272,7 @@ if (isEntry) {
   const KNOWN = new Set([
     "workspace", "prompt-file", "prompt", "config", "state-dir", "task", "parent", "secret",
     "adapter", "cli", "model", "sandbox", "net", "timeout", "image", "egress", "egress-network",
+    "endpoint", "api-key-env", "max-turns", "skills", "harness-config",
   ]);
   const flags = { secret: [] };
   for (let i = 0; i < argv.length; i++) {
@@ -311,16 +306,18 @@ if (isEntry) {
       console.error("usage: runstore.mjs run --workspace DIR (--prompt-file F | --prompt TEXT) [...]");
       process.exit(2);
     }
-    const policy = {
-      ...(flags.adapter ? { adapter: flags.adapter } : {}),
-      ...(flags.cli ? { cli: flags.cli } : {}),
-      ...(flags.model ? { model: flags.model } : {}),
-      ...(flags.sandbox ? { sandbox: flags.sandbox } : {}),
-      ...(flags.net ? { net: flags.net } : {}),
-      ...(flags.image ? { image: flags.image } : {}),
-      ...(flags.timeout ? { timeoutMs: Number(flags.timeout) } : {}),
-    };
     try {
+      // Harness settings (who builds) under this run's flags; isolation flags
+      // are only ever from the command line.
+      const { load: loadHarnessSettings, policyFlags, policyFor } = await import("./harness-config.mjs");
+      const { policy } = policyFor("builder", loadHarnessSettings({ path: flags["harness-config"], workspace }), policyFlags(flags));
+      // --skills yes: stage the project's configured skills (S-1) into a fresh
+      // directory OUTSIDE the workspace, for this run only.
+      if (flags.skills === "yes") {
+        const { stageForRun } = await import("./skills.mjs");
+        const dir = stageForRun(resolve(flags.config ?? "ops/caretaker/config.json"), join(tmpdir(), `caretaker-skills-${process.pid}-${Date.now()}`));
+        if (dir) policy.skillsDir = dir;
+      }
       const secrets = flags.secret.length ? Object.fromEntries(requireSecrets(flags.secret, { repoRoot: workspace }).values) : {};
       const out = await runArchived(workspace, prompt, policy, {
         stateDir: stateDirFromFlags(),
