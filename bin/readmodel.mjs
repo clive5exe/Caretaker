@@ -64,8 +64,10 @@ export async function open(cfgPath, { now = () => new Date(), stateDir: stateOve
   const board = await import(pathToFileURL(boardPath).href);
   if (board.API_VERSION !== 1 || typeof board.command !== "function") {
     throw new Error(
+      // install.sh --upgrade, not a bare cp: it keeps a backup of every file it
+      // replaces, and puts them back if the upgraded board cannot read the board.
       `${boardPath} predates the web API (no API_VERSION 1). Upgrade the installed tool files from this checkout: ` +
-        `cp bin/board.mjs bin/dashboard.mjs ${opsDir}/ — config.json, board.json and prompt.txt are not touched.`,
+        `bash ${join(HERE, "..", "install.sh")} --upgrade ${resolve(opsDir, "..", "..")} — config.json, board.json and prompt.txt are not touched, and the replaced files are backed up.`,
     );
   }
   let dash = null;

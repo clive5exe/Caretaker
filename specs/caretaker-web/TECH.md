@@ -11,8 +11,9 @@ governs: bin/serve.mjs, bin/readmodel.mjs, bin/lifecycle.mjs, web/src/api/**
 
 # Caretaker Web v1 — architecture and technical spec
 
-Accepted with ADR-0002 on 2026-09-29. **Nothing here is implemented yet.** It
-covers:
+Accepted with ADR-0002 on 2026-09-29, and built: `bin/serve.mjs`,
+`bin/readmodel.mjs`, `bin/lifecycle.mjs` and `web/`, each checked by the tests
+named in its section. It covers:
 
 1. the local server
 2. the API boundary
