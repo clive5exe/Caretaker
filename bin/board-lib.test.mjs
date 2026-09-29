@@ -6,8 +6,9 @@
  *      testdata/board.pre-c1.mjs. Both copies run the same command script over
  *      the same fixture board, every command and every refusal path, and after
  *      each step stdout, stderr, the exit code, board.json and board.md must be
- *      identical. Two things are normalised, and only these: today's date
- *      (a run that crosses midnight) and the fixture's absolute path. The
+ *      identical. Three things are normalised, and only these: today's date
+ *      (a run that crosses midnight), the fixture's absolute path, and ISO
+ *      instants (a transition's `at`, which carries milliseconds). The
  *      usage text may only grow: C-6 appends lines for its commands.
  *   2. IMPORT. Importing board.mjs reads nothing and prints nothing, and the
  *      exported domain returns results instead of exiting.
@@ -87,7 +88,7 @@ function fixture(boardFile) {
 }
 
 const TODAY = new Date().toISOString().slice(0, 10);
-const norm = (s, root) => String(s ?? "").split(root).join("<root>").split(TODAY).join("<today>");
+const norm = (s, root) => String(s ?? "").split(root).join("<root>").replace(/\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d+Z/g, "<instant>").split(TODAY).join("<today>");
 
 /* 1. golden --------------------------------------------------------------- */
 const SCRIPT = [
@@ -203,7 +204,7 @@ const SCRIPT = [
   }
   ok(
     "missingGates: an auth task needs reviewer, qa and security",
-    JSON.stringify(o.missing) === JSON.stringify({ missing: ["reviewer", "qa", "security (money/auth/tenant)"], docsOnly: false }),
+    JSON.stringify(o.missing) === JSON.stringify({ missing: ["reviewer", "qa", "security (money/auth/isolation)"], docsOnly: false }),
     JSON.stringify(o.missing),
   );
   ok("missingGates: a docs-only task needs reviewer only", JSON.stringify(o.docs) === JSON.stringify({ missing: ["reviewer"], docsOnly: true }));
@@ -249,6 +250,52 @@ async function race(boardFile, n) {
   const r = spawnSync("node", [join(f.ops, "board.mjs"), "note", "T-001", "after a crash"], { cwd: f.root, encoding: "utf8" });
   ok("a lock held by a dead pid is taken over", r.status === 0 && Date.now() - t0 < 4000, r.stderr);
   ok("and released afterwards", !existsSync(join(f.root, "docs", "board.json.lock")));
+  rmSync(f.root, { recursive: true, force: true });
+}
+{
+  // Independent review: a holder that outlived LOCK_STALE_MS, whose lock the
+  // next writer judged stale and took, deleted THAT writer's lock on release.
+  const f = fixture(join(HERE, "board.mjs"));
+  const { withLock } = await import(pathToFileURL(join(f.ops, "board.mjs")).href);
+  const lock = join(f.root, "docs", "board.json.lock");
+  withLock({ data: join(f.root, "docs", "board.json") }, () => {
+    rmSync(lock);
+    writeFileSync(lock, JSON.stringify({ pid: process.pid, at: "the next writer" }));
+  });
+  ok("releasing never removes a lock the next writer took over", existsSync(lock) && readFileSync(lock, "utf8").includes("the next writer"));
+  rmSync(f.root, { recursive: true, force: true });
+}
+
+{
+  // CLAUDE.md: money, auth and ISOLATION need security. The old list was the
+  // ticketing project's and had no word for this repo's isolation work.
+  const { missingGates } = await import("./board.mjs");
+  const needs = (title, note = "") => missingGates({ id: "X", title, note, owner: "backend" }).missing.some((m) => m.startsWith("security"));
+  ok("isolation work needs security", needs("Prove the sandbox by attacking it") && needs("Egress allowlist proxy") && needs("Secrets reach the harness"));
+  ok("auth and money still do", needs("serve: token exchanged for a cookie", "auth on every route") && needs("Billing export"));
+  ok("the ticketing project's words no longer decide it", !needs("Stripe fee refund for a tenant"));
+  ok("web auth and redaction work does, and so does a task whose note says it needs security", needs("serve: cookie, host/origin checks, CSP") && needs("archive with redacted transcripts") && needs("command endpoint", "Needs security: it is a write path."));
+  const docs = { id: "D", title: "Write the onboarding doc", owner: "product-architect", ac: "prose" };
+  ok("a docs-only task needs reviewer only…", missingGates(docs).missing.join() === "reviewer");
+  ok("…but a qa FAIL recorded on it (a refutation) still blocks done", missingGates({ ...docs, gate: { reviewer: { verdict: "pass" }, qa: { verdict: "fail" } } }).missing.join() === "qa");
+  ok("whole words only: author, tokens and escapement are not auth, secrets or escape", !needs("Author list", "estimate in tokens; escapement"));
+}
+
+{
+  // H-4: done refuses while the drift gate's latest verdict for the task is a
+  // fail. T-005 has every gate passed; only the drift gate stands in the way.
+  const f = fixture(join(HERE, "board.mjs"));
+  const ev = join(f.root, "ops", "caretaker", "events");
+  mkdirSync(ev, { recursive: true });
+  const line = (t, verdict, extra = {}) => `${JSON.stringify({ t, kind: "gate", level: verdict === "fail" ? "error" : "info", stage: "review", task: "T-005", verdict, detail: `drift ${verdict}`, ...extra })}\n`;
+  writeFileSync(join(ev, "events-2026-09-29.jsonl"), line("2026-09-29T10:00:00Z", "fail"));
+  const cli = (...a) => spawnSync("node", [join(f.ops, "board.mjs"), ...a], { cwd: f.root, encoding: "utf8" });
+  const refused = cli("done", "T-005");
+  ok("H-4: done is REFUSED while the drift gate is failing for the task", refused.status === 1 && /Missing: drift gate/.test(refused.stderr) && /drift\.mjs check --task T-005/.test(refused.stderr), refused.stderr);
+  // A refutation is a qa verdict, not the drift gate, and does not count here.
+  writeFileSync(join(ev, "events-2026-09-29.jsonl"), line("2026-09-29T10:00:00Z", "pass") + line("2026-09-29T11:00:00Z", "fail", { source: "refute" }));
+  const passed = cli("done", "T-005");
+  ok("…and allowed once its latest verdict passes (a refutation is not the drift gate)", passed.status === 0, passed.stderr);
   rmSync(f.root, { recursive: true, force: true });
 }
 

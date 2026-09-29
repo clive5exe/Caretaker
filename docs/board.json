@@ -5,6 +5,83 @@
   },
   "phases": [
     {
+      "name": "Warp factory on Caretaker (docs/plan.md)",
+      "tasks": [
+        {
+          "id": "F-1",
+          "title": "Vendor Warp's cloud factory unmodified",
+          "owner": "backend",
+          "est": "1h",
+          "status": "doing",
+          "deps": [],
+          "ac": "vendor/ holds Warp's files byte for byte at pinned commits (cloud-factory-demo ab21d0c5, common-skills 69b47536) with both MIT licences; one edited, added or deleted byte, a re-pin without a re-sync, or a patch that no longer applies fails node bin/vendor.test.mjs by name",
+          "note": "Built: bin/vendor.mjs (sync/check/build/install), vendor/sources.json, vendor/manifest.json. docs/plan.md step 1. Gate verdicts not recorded."
+        },
+        {
+          "id": "F-2",
+          "title": "The Caretaker agent step stands in for oz-agent-action",
+          "owner": "backend",
+          "est": "2h",
+          "status": "doing",
+          "deps": [
+            "F-1"
+          ],
+          "ac": "factory/caretaker-agent/action.yml takes Warp's skill/name/prompt inputs and returns agent_output; bin/agent-step.mjs runs the skill through the harness with a Claude subscription token (API keys optional), in the sandbox with egress only to the model API (plus api.github.com when the workflow hands the agent a GH_TOKEN); the token never appears in agent_output, the archive or $GITHUB_OUTPUT",
+          "note": "Proven with a FAKE model only (bin/agent-step.test.mjs): Warp's validate_review_json.py accepts the review it leaves. NOT proven: a real model, and the podman path (podman cannot run containers on the build box). Handles credentials and egress: needs security. Gate verdicts not recorded."
+        },
+        {
+          "id": "F-3",
+          "title": "All five of Warp's workflows run on Caretaker, not Oz",
+          "owner": "backend",
+          "est": "2h",
+          "status": "doing",
+          "deps": [
+            "F-2"
+          ],
+          "ac": "vendor/patches/0001-0005 swap each workflow's Oz step for the Caretaker action and the Warp key for the subscription token; actionlint accepts them with inputs checked against action.yml; for implement, spec and improve-review-pr the agent never pushes: after it, outside the sandbox, agent-step --open-pr commits exactly the files the harness measured it changing (never .caretaker/, hooks off), pushes a branch, opens the PR and links it on the issue",
+          "note": "Option A, chosen by the owner 2026-09-29 (docs/plan.md). bin/workflows.test.mjs, bin/publish.test.mjs. Pushes with the workflow's token: needs security. Not yet run on GitHub. Gate verdicts not recorded."
+        },
+        {
+          "id": "F-4",
+          "title": "A Warp review records the board's reviewer gate",
+          "owner": "backend",
+          "est": "30m",
+          "status": "doing",
+          "deps": [
+            "F-1"
+          ],
+          "ac": "bin/review-gate.mjs records reviewer pass (APPROVE) or fail (REJECT) by review-pr only after Warp's own validator accepts the review; a rejected review records nothing; a task owned by review-pr is refused",
+          "note": "bin/review-gate.test.mjs on a real install. Recording from inside the GitHub review job is not done (that job is read-only on purpose). Gate verdicts not recorded."
+        },
+        {
+          "id": "F-5",
+          "title": "caretaker review <pr> runs Warp's review locally",
+          "owner": "backend",
+          "est": "1h",
+          "status": "doing",
+          "deps": [
+            "F-2",
+            "F-4"
+          ],
+          "ac": "node bin/review.mjs <pr> runs the steps of the installed review-pull-requests.yml as written, in a throwaway worktree, prints the review, records the gate with --task, and posts only with --post (Warp's publish step)",
+          "note": "Proven with a fake gh and a fake model (bin/review.test.mjs). Gate verdicts not recorded."
+        },
+        {
+          "id": "F-6",
+          "title": "First real run on the owner's subscription",
+          "owner": "backend",
+          "est": "30m",
+          "status": "blocked",
+          "deps": [
+            "F-3"
+          ],
+          "ac": "one review and one triage run end to end on GitHub Actions with the owner's CLAUDE_CODE_OAUTH_TOKEN, in the podman sandbox, and their transcripts archived",
+          "note": "Needs the owner: claude setup-token, then the token as a repository secret.",
+          "blockedReason": "needs the owner's subscription token as a repository secret"
+        }
+      ]
+    },
+    {
       "name": "Layer 0 — Spec format",
       "tasks": [
         {
@@ -22,6 +99,21 @@
               "verdict": "pass",
               "at": "2026-08-30",
               "note": "spec.mjs parses, derives an egress allowlist and resource limits from a real devcontainer.json, and answers ownership for a path. 34 tests pass, most of them negative."
+            },
+            "reviewer": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "t": "2026-09-29T22:15:30.601Z",
+              "by": "root",
+              "via": "cli",
+              "note": "Independent re-review, round 3 (fresh agent, not the builder): both points fixed. spec.mjs:181-184 toolchainOf takes the last path segment exactly; :195-198 reads only features and image, never the free-text name. Reproduced: javascript-node:1 opens nothing, name 'Let us go, trustworthy rust' opens nothing, constructor/hasOwnProperty imply nothing, while java:17, node@sha256, registry:5000/node still imply their registry. parseSpec :91-96 refuses and drops *, .com, com, *.x.com and $(touch...). Reverting either fix in a scratch copy fails spec.test by name (3 and 2 checks). 'spec.mjs egress specs/sandbox.md .devcontainer/devcontainer.json' derives api.anthropic.com + registry.npmjs.org, which egress.mjs:193 consumes. Note only: an IP literal (1.1.1.1) passes HOST; it is declared, not opened, so not a fail.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent review (fresh agent, not the builder): spec.mjs:146-171 toEgress runs unanchored regexes over the image AND the free-text devcontainer name, so image javascript-node opens repo1.maven.org (/java/ matches javascript), name 'Let us go' opens the golang proxies and 'trustworthy' opens crates.io, all reproduced; this contradicts the comment at :159-161 that an unrecognised toolchain must never open an undeclared host. Also parseSpec accepts any hosts value unvalidated (*, .com, $(...))."
+                }
+              ]
             }
           }
         },
@@ -39,6 +131,11 @@
               "verdict": "pass",
               "at": "2026-08-30",
               "note": "appended verdicts proven: a fail then a pass records both, the terminal reports 'attempt 2; previous: fail', and the dashboard computes first-pass and rework from the history"
+            },
+            "reviewer": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "note": "Independent review (fresh agent, not the builder): recordVerdict (board.mjs:560) appends the previous verdict to history, oldest first, and keeps .verdict as the latest; gateStats and quality in dashboard.mjs count every attempt and treat any past fail as rework; bin and ops copies are identical, tests pass."
             }
           }
         },
@@ -65,6 +162,18 @@
                   "note": "governs is parsed and matched; globToRegExp handles ** and refuses to let a single star cross a directory boundary"
                 }
               ]
+            },
+            "reviewer": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "note": "Independent re-review (fresh agent, not the builder): fixed. spec.mjs:224 now emits (?:.*/)? for **/. Scratch matrix of 21 cases: a/**/b rejects a/xb, ax/b, a/x/yb; src/**/foo.ts rejects src/xfoo.ts, accepts src/foo.ts and src/x/y/foo.ts; **/foo.ts, a/**/**/b, a/**/b/**/c all correct. End to end in a scratch repo, drift.mjs explain says src/xfoo.ts unowned (exit 1), src/foo.ts and src/x/foo.ts owned by the spec. Mutating :224 back to .*/? fails spec.test 'a/**/b does NOT match a/xb' by name; restored, sha256 checked. spec, drift, freshness tests green.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent review (fresh agent, not the builder): spec.mjs:192-198 globToRegExp turns **/ into .*/? rather than (?:.*/)?, so a/**/b matches a/xb and src/**/foo.ts claims src/xfoo.ts (reproduced); drift.mjs and freshness.mjs both use it, so 'which spec governs this file' answers wrongly for any **/ glob with a suffix."
+                }
+              ]
             }
           }
         },
@@ -79,7 +188,34 @@
           ],
           "spec": "docs/memory.md",
           "ac": "decisions are immutable and superseded rather than edited, specs carry current state only, and the log is append-only; a tool can answer 'why is this like this' from the decisions without reading the log",
-          "note": "They rot at completely different speeds and want opposite treatment. A spec that accumulates a changelog becomes unreadable, unreadable specs are not consulted, and unconsulted specs drift. An ADR that gets edited stops being a record of what was decided. — Built the tool half: bin/graduate.mjs why <path> answers from the decisions without reading the log (governing specs, ADRs they cite, ADRs naming the spec, path or bare file name, each labelled with how it was found). decisions checks status vocabulary, dangling supersedes, superseded-by agreement, and immutability: a decided ADR whose text (other than status/updated) changed in a later commit, or in the working tree, is a named problem with the commit. Run on this repo it reports ADR-0001 (cfbf4fe7) and ADR-0002 (2b38c586, d823eb59) as edited after acceptance: real, left for the owner to supersede or accept. Checked by bin/graduate.test.mjs; mutations M8-M12 fail it by name. Gate verdicts not recorded."
+          "note": "They rot at completely different speeds and want opposite treatment. A spec that accumulates a changelog becomes unreadable, unreadable specs are not consulted, and unconsulted specs drift. An ADR that gets edited stops being a record of what was decided. — Built the tool half: bin/graduate.mjs why <path> answers from the decisions without reading the log (governing specs, ADRs they cite, ADRs naming the spec, path or bare file name, each labelled with how it was found). decisions checks status vocabulary, dangling supersedes, superseded-by agreement, and immutability: a decided ADR whose text (other than status/updated) changed in a later commit, or in the working tree, is a named problem with the commit. Run on this repo it reports ADR-0001 (cfbf4fe7) and ADR-0002 (2b38c586, d823eb59) as edited after acceptance: real, left for the owner to supersede or accept. Checked by bin/graduate.test.mjs; mutations M8-M12 fail it by name. Gate verdicts not recorded.",
+          "gate": {
+            "qa": {
+              "verdict": "fail",
+              "at": "2026-09-29",
+              "t": "2026-09-29T22:17:56.081Z",
+              "by": "root",
+              "via": "cli",
+              "note": "Independent re-review, round 3 (fresh agent, not the builder): old repros fixed (last ADR deleted, moved to archive/ or .bak each exit 1, named); graduate/freshness tests green. Still breakable in scratch repos, exit 0: (1) status-only rewrite of a decided ADR: accepted->proposed, accepted->rejected, accepted->bare 'superseded' with nothing superseding it all pass, though graduate.mjs:140-142 says only a move to superseded-by may change; (2) an uncommitted rm or git mv of a decided ADR is silent while an uncommitted edit is reported (deletedDecisions reads git log only, :155-176); (3) specHistory (:64-65) misses '## 2026-09-01', '## [1.0.0] - 2026-09-01', '## Change history', dated tables and numbered dated items. Spec changelogs of the standard shape pass.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent QA (fresh agent, not the builder): immutability check misses real edits: in a scratch repo, renaming an accepted ADR while rewriting its body (git mv 0001-x.md 0001-x-renamed.md, 'podman'->'docker'), deleting an accepted ADR, and editing a body line starting 'updated:' all give 'node bin/graduate.mjs decisions --repo <scratch>' exit 0 with no problem (git log without --follow; decidedText strips status/updated lines anywhere); nothing checks 'specs carry current state only'; and on this repo the check exits 1 (ADR-0001, ADR-0002 edited after acceptance) and is not in CI, so decisions here are not in fact immutable."
+                },
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent re-QA (fresh agent, not the builder): the three old repros are fixed (rename+body edit, delete with another ADR present, body 'updated:' line each exit 1, named). Still silent, exit 0, in scratch repos: (1) deleting the only/last ADR: graduate.mjs:59 returns no problems once docs/decisions is gone, so deleteDecisions is never asked; (2) git mv 0001-x.md to docs/decisions/x.md or docs/decisions/archive/0001-x.md plus podman->docker: -M sees a rename so it is not a deletion (:110), and the :61 filter / non-recursive readdir drops it from the list, so no edit check runs. An accepted decision can be rewritten or removed with no report. 'Specs carry current state only' is still unchecked. Tests green."
+                }
+              ]
+            },
+            "reviewer": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "note": "Independent review (fresh agent, not the builder): graduate.mjs why answers from specs and ADRs only (checked from another cwd with --repo), and decisions flags edits after acceptance with the commit. Nits: STATUSES accepts bare superseded and proposed while its message lists neither; decidedText strips status:/updated: lines anywhere in the body; git log has no --follow, so a rename loses history."
+            }
+          }
         },
         {
           "id": "P-5",
@@ -92,7 +228,34 @@
           ],
           "spec": "docs/memory.md",
           "ac": "a check reports stale (the doc's updated: is older than the last commit touching the paths it GOVERNS), orphaned (governs paths that no longer exist) and unowned (code no spec claims), with no manual freshness flag anywhere",
-          "note": "A manual 'is this current?' flag stops being updated the first time someone is in a hurry, and then there is no way to tell a current doc from an abandoned one. Comparing against the governed paths rather than the doc's own last commit is the stronger check: a doc can be true and untouched while the code under it moves. — Built in bin/freshness.mjs, checked by bin/freshness.test.mjs and mutation-checked: stale compares a spec's updated: against the last commit touching the paths it GOVERNS; orphaned and unowned come from the drift ownership map. No freshness flag exists anywhere. Gate verdicts not recorded."
+          "note": "A manual 'is this current?' flag stops being updated the first time someone is in a hurry, and then there is no way to tell a current doc from an abandoned one. Comparing against the governed paths rather than the doc's own last commit is the stronger check: a doc can be true and untouched while the code under it moves. — Built in bin/freshness.mjs, checked by bin/freshness.test.mjs and mutation-checked: stale compares a spec's updated: against the last commit touching the paths it GOVERNS; orphaned and unowned come from the drift ownership map. No freshness flag exists anywhere. Gate verdicts not recorded.",
+          "gate": {
+            "qa": {
+              "verdict": "fail",
+              "at": "2026-09-29",
+              "t": "2026-09-29T22:18:01.547Z",
+              "by": "root",
+              "via": "cli",
+              "note": "Independent re-review, round 3 (fresh agent, not the builder): old points fixed in scratch repos: src/**.js nested edit is STALE; a directory glob is now ORPHAN only; git rm, rm of the whole dir and a move out are STALE; same-day edit is not. New defect: code that lands via a merge is missed. Feature branch edits src/fees/x.js (commit 2026-01-06), main updates the spec to 2026-01-10, merge --no-ff on 2026-03-02: freshness.mjs reports 0 stale, exit 0. A change made only in a merge's conflict resolution is missed entirely. lastCommitsBySpec (freshness.mjs:71) runs git log --name-only without -m/--first-parent, so merge commits list no files. Tests green (23 PASS).",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent QA (fresh agent, not the builder): stale misses a governed file being deleted: scratch repo with spec updated: 2026-01-10 governing src/fees/**, then 'git rm src/fees/b.js' committed 2026-02-01, and 'node bin/freshness.mjs --repo <scratch>' reports 0 stale, exit 0, because lastCommit is asked only about paths still in git ls-files rather than the governs globs; the tests (19 PASS) and my mutation (stale measured against the spec's own commit, fails 2 checks by name) cover only modified files; orphaned/unowned and no-manual-flag hold."
+                },
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent re-QA (fresh agent, not the builder): the old repro is fixed: git rm of a governed file (and a git mv out of the governed dir) now reports STALE, exit 1; reverting freshness.mjs:88 to existing paths fails 'deleting a governed file makes its spec stale' by name (restored, sha256 checked). New defect: stale asks git with :(glob) pathspecs (:67) while ownership/orphaned use globToRegExp, and they disagree. Scratch repos: governs src/**.js, drift explain says src/a/b.js is owned by it, edit it -> 0 stale, exit 0. governs src/fees (a directory): the same run reports the spec both ORPHAN (matches nothing) and STALE (code it governs changed). One matcher should decide both."
+                }
+              ]
+            },
+            "reviewer": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "note": "Independent review (fresh agent, not the builder): stale compares updated: against the last commit on the governed paths, and orphaned/unowned come from the drift map; there is no flag. Notes: it inherits the P-3 **/ over-match; a spec with no updated: is only listed as undated and never stale, so deleting the date silences it; lastCommit passes every governed path as argv."
+            }
+          }
         }
       ]
     },
@@ -114,6 +277,18 @@
               "verdict": "pass",
               "at": "2026-08-30",
               "note": "detect reports podman 5.8.2 rootless; docker is never chosen implicitly; install hints are printed and never run"
+            },
+            "reviewer": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "note": "Independent re-review (fresh agent, not the builder): all old points fixed. Stub docker/rootful-podman on PATH: 'run --runtime docker' prints the root-daemon WARNING (sandbox.mjs:257), rootful podman warns (:258), --net host says no allowlist applies. The :74 no-op is gone. install (:298-314) refuses without a TTY and offerInstall runs only on /^y(es)?$/. Scratch-copy mutations each fail sandbox.test by name: TTY check removed (fake-sh PATH catches the run), docker warning, rootful warning, yes-regex; restored, sha256 checked. CI 115620f log 1183-1187 green. Minor: a broken-but-installed podman is offered as 'not installed'.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent review (fresh agent, not the builder): sandbox.mjs:227-236 'run --runtime docker' prints nothing about the weaker isolation (reproduced with a stub docker: silent, exit 0), which the ac requires. The install command is never run on confirmation, only printed; run proceeds on rootful podman without a word; and :74 is a no-op line that reads as a check."
+                }
+              ]
             }
           }
         },
@@ -134,6 +309,26 @@
               "verdict": "pass",
               "at": "2026-08-30",
               "note": "22 checks pass, 5 of them by booting a real container and reading the limits from inside it: memory.max is exactly 2147483648, pids.max is 512, a write to / is refused, there is no route off the box, and a file written as root inside is owned by uid 1000 on the host"
+            },
+            "reviewer": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "t": "2026-09-29T22:15:38.747Z",
+              "by": "root",
+              "via": "cli",
+              "note": "Independent re-review, round 3 (fresh agent, not the builder): both remaining points fixed. sandbox.mjs:11-15 now says egress is netns.mjs, per run via runstore (true: runstore.mjs:280-287), and the usage at :17-21 names only flags parseFlags accepts; re-adding --spec to it in a scratch copy fails the new usage check by name. Reverting parseFlags to pairs fails 7 checks by name. The CLI refuses '--workdir --allow-missing-limits', '--workdir=', '--spec x', a stray arg, '--allow-missing-limits=yes', '--image=--privileged', each exit 2. Live limits bind in CI run 36637660238 (3d4197c): memory.max 2147483648, cpu.max '200000 100000', pids.max 512, and writes to /, /etc and /usr/bin are refused Read-only.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent review (fresh agent, not the builder): sandbox.mjs:201 parses flags by stepping two at a time, the bug egress.mjs:142-148 documents: with 'run --allow-missing-limits --workdir R', R is silently dropped and the cwd is bind-mounted read-write with :Z instead (reproduced). No live test proves --cpus binds (only memory.max and pids.max are read), and the warning at :251-253 still says no egress allowlist exists."
+                },
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent re-review (fresh agent, not the builder): the mechanics are fixed: parseFlags by name (reverting to pairs in a scratch copy fails 6 checks by name; CLI refuses '--workdir --allow-missing-limits', '--workdir=', stray args, exit 2), and CI 115620f log:1170 'live: the cpu ceiling is real (200000 100000)'. But the old note's third point still stands in the file: sandbox.mjs:11-15 still says egress is not done, '--network none is the only network setting' and 'E-2 puts an allowlist proxy in that gap. Until then'. And :19's usage advertises 'run [--spec F]', which the new parser refuses ('unknown flag --spec', exit 2, reproduced). Fix those two comment blocks."
+                }
+              ]
             }
           }
         },
@@ -155,6 +350,21 @@
               "verdict": "pass",
               "at": "2026-08-30",
               "note": "18 checks pass. The matcher refuses the three bypasses that look correct: evil-stripe.com does not match .stripe.com, api.anthropic.com.evil.example does not match api.anthropic.com, and a bare entry does not open its subdomains. Refusals return 403 with a reason rather than dropping. An allowed host on a disallowed port is still refused. Every refusal is logged."
+            },
+            "reviewer": {
+              "verdict": "fail",
+              "at": "2026-09-29",
+              "t": "2026-09-29T22:15:38.820Z",
+              "by": "root",
+              "via": "cli",
+              "note": "Independent re-review, round 3 (fresh agent, not the builder): the reset is fixed. egress.mjs:105 attaches the error handler before any branch; removing it fails egress.test by name, and 45 of my own CONNECTs to the CLI proxy (resets at 0-2 ms, allowed-but-unresolvable, [::1], empty host, garbage) left it alive and still answering 403. Still standing: nothing attempts the ac's 'repo cannot be POSTed anywhere'. No POST or exfil attempt exists in netns, egress or sandbox tests; the netns attacks are GETs. New: netns.mjs:81-85 and :207-211 say sandbox cannot pass --add-host, so a real agent run is not yet wired through the proxy. But runstore.mjs:280-287 passes --add-host via extraRunFlags, and egress-attribution.test asserts it. The comment is false.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent review (fresh agent, not the builder): egress.mjs:88-103: Node removes the server's socket error handler on CONNECT, and the deny path adds none, so a client that resets during a refusal throws an uncaught ECONNRESET and kills the CLI proxy (reproduced with one reset CONNECT); bail is only wired on the allow path. No test proves the ac's 'repo cannot be POSTed anywhere'."
+                }
+              ]
             }
           }
         },
@@ -174,6 +384,26 @@
               "verdict": "pass",
               "at": "2026-08-30",
               "note": "All five attacks run against a real container on an --internal network, with real output. Bypassing the proxy and dialling a raw IP returns Network unreachable rather than a DNS failure dressed up as one. A sibling container is unreachable. The host is unreachable via host.containers.internal, PROVEN AS A CONTROL by showing the same address succeeds from a normally-networked container."
+            },
+            "reviewer": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "t": "2026-09-29T22:15:49.135Z",
+              "by": "root",
+              "via": "cli",
+              "note": "Independent re-review, round 3 (fresh agent, not the builder): both points fixed. Attack (a) now runs through attackRun (sandbox.test.mjs:189-194) and its command is recorded. CI run 36637660238 (3d4197c) prints '$ for p in /nope /etc/... /usr/bin/... /work/../...; ...' then 'Read-only file system / DONE' and PASS. The _ping check (:208) now ends its line with an echo, so /^OK$/m can match ('OK\\n\\nDONE'). In the same run: memory EXIT=137 with oom_kill 1; the socket hunt finds nothing, and its control finds a mounted socket; the raw IP gives 'Failed to connect to 1.1.1.1:443', not a DNS error; the sibling network and the host are unreachable. Residual, not a fail: the log keeps only an attack's last two output lines. Full output is in the /tmp JSON report, and CI does not upload it.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent review (fresh agent, not the builder): ac attacks (b) exhaust memory and (d) reach the container socket are never attempted: there is only a read of memory.max and argv string checks for '.sock'. Attack 3 (netns.mjs:384-388) dials a hostname and passes on 'Could not resolve host', which proves DNS is off, not that there is no route; the raw-IP proof is in a comment only, and no output is recorded beyond stdout."
+                },
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent re-review (fresh agent, not the builder): (b), (d), raw IP now attacked for real: CI 115620f log:1174-1176 memory attack EXIT=137/oom_kill 1; 1177-1180 socket hunt finds none, and its control finds a mounted one; 964-966 raw-IP curl fails 'Failed to connect to 1.1.1.1:443', not DNS; netns commands/output are printed and in the JSON. Still standing: attack (a), write outside the repo mount (sandbox.test.mjs:164-171), goes through inside()+ok, not attackRun. Its command and output are in neither the report nor the log (log:1172 is a bare PASS). The ac and specs/sandbox.md say otherwise. Also, :215's /^OK$/m can never match a live _ping (reproduced: stdout is 'OKDONE'), so that clause does nothing."
+                }
+              ]
             }
           }
         },
@@ -194,27 +424,81 @@
           "title": "The sandbox is rebuilt from the spec every run",
           "owner": "backend",
           "est": "4h",
-          "status": "todo",
+          "status": "doing",
           "deps": [
             "E-1",
             "P-1"
           ],
           "spec": "docs/environments.md",
           "ac": "a run gets a container built from the spec and destroyed after, and a package installed by hand inside one is gone on the next run; nothing persists between runs except the repo",
-          "note": "THE ANSWER TO 'ENVIRONMENTS CHANGE' AT THIS LAYER IS THAT THEY DO NOT. Immutable rebuild makes drift structurally impossible rather than detectable: if something is needed, the spec changes and the image is rebuilt. Terraform and Ansible are the wrong shape here - a state file for a thing created fifty times an hour is overhead and a lock contention point, and convergence assumes a host that persists."
+          "note": "THE ANSWER TO 'ENVIRONMENTS CHANGE' AT THIS LAYER IS THAT THEY DO NOT. Immutable rebuild makes drift structurally impossible rather than detectable: if something is needed, the spec changes and the image is rebuilt. Terraform and Ansible are the wrong shape here - a state file for a thing created fifty times an hour is overhead and a lock contention point, and convergence assumes a host that persists. — Built: bin/environment.mjs resolves a run's image in one place (--image, else devcontainer image, else build.dockerfile BUILT every run, podman's layer cache deciding staleness, so a change to a COPY'd file is seen). Both adapters use it; each run records the image id. Fixed on the way: toLimits handed a Dockerfile path to podman as an image name. Devcontainer features are named in a warning, not installed. Nothing persists: --rm, read-only root, tmpfs. Checked by bin/environment.test.mjs; the persistence and rebuild proofs are live checks that run in CI (podman), skipped here. Mutations V1, V2, V12 fail by name. Gate verdicts not recorded.",
+          "gate": {
+            "qa": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "note": "Independent QA (fresh agent, not the builder): node bin/environment.test.mjs passes locally with live checks skipped (no podman); I relied on CI run 36620548711 for this exact commit 46927f2, whose log shows 'live: nothing written in one run survives into the next; the repo does' and 'live: a Dockerfile is rebuilt every run, a COPY'd file change included' PASS; mutations I made (build skipped on the second run; --rm removed from sandbox.buildArgs) each fail by name, and both adapters resolve the image through imageFor and use --rm/--read-only/tmpfs. Caveats outside the AC wording: devcontainer features are warned about, not installed, and writes to the workspace .git are persisted and unmeasured (see report)."
+            },
+            "reviewer": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "note": "Independent review (fresh agent, not the builder): resolveImage prefers --image, then image, then builds build.dockerfile every run, never handing podman a Dockerfile path; both adapters record imageId; nothing but /work is writable. Note: the id is read from the tag before podman run, and the run uses the tag, not the id, so a concurrent rebuild of the same devcontainer can make the recorded id wrong; running by id closes that."
+            }
+          }
         },
         {
           "id": "E-6",
           "title": "Environment drift: ask the container what it actually has",
           "owner": "devops",
           "est": "1d",
-          "status": "todo",
+          "status": "doing",
           "deps": [
             "E-5"
           ],
           "spec": "docs/environments.md",
           "ac": "a check compares the running environment's real package versions, service versions and reachable hosts against what the spec declared, and names every difference",
-          "note": "EASIER THAN DOC DRIFT AND WORTH DOING FIRST BECAUSE OF IT. A document's meaning is ambiguous; a container's contents are not. You can ask it what it has and diff that against the declaration with no interpretation involved. Same machinery as the doc drift gate, pointed at a target that cannot argue."
+          "note": "EASIER THAN DOC DRIFT AND WORTH DOING FIRST BECAUSE OF IT. A document's meaning is ambiguous; a container's contents are not. You can ask it what it has and diff that against the declaration with no interpretation involved. Same machinery as the doc drift gate, pointed at a target that cannot argue. — Built: environment.mjs check probes inside the run's own sandbox (and per-run egress proxy with --egress) and names every difference: declared toolchain missing or at another version, undeclared toolchain present, declared service not started, unknown feature unchecked, declared host unreachable, undeclared canary host REACHABLE (egress open). net none is one stated line, not a flood. Checked by bin/environment.test.mjs with a fake toolchain on PATH, plus a live check against node:22-alpine in CI. Mutations V3-V11 fail by name. specs/sandbox.md now governs bin/environment.mjs and says all this. Gate verdicts not recorded.",
+          "gate": {
+            "qa": {
+              "verdict": "fail",
+              "at": "2026-09-29",
+              "t": "2026-09-29T22:15:49.322Z",
+              "by": "root",
+              "via": "cli",
+              "note": "Independent re-QA, round 3 (fresh agent, not the builder): the earlier scenarios now hold end to end. I ran 'check --sandbox none' on a compose file plus an override file, with runServices app/db/cache/queue and a stub podman answering ps. postgres:17-alpine3.20 for 16-alpine3.20 gives service-version; redis:16 or localhost/postgres for postgres gives service-image; nothing running gives service-not-running; app is not listed; cache is named unchecked. Still missed: the running image is looked up by service label only (environment.mjs:360), not by compose project. If this project's db is stopped and another project's db (postgres:16) is up, the check reports no difference. Also, image mcr.microsoft.com/devcontainers/javascript-node:1-bookworm gives a false 'node 1 is declared but the environment has v22.11.0'.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent QA (fresh agent, not the builder): service versions are never compared: with a compose devcontainer (db: postgres:16, runServices [app, db]) 'node bin/environment.mjs check --sandbox none --devcontainer .devcontainer/devcontainer.json' only prints 'service db is declared ... nothing checked it', the compose file is never read (so no declared version exists to compare), and the dev container 'app' itself is misreported as an unstarted service; toolchain versions and host reachability (curl through a real egress.mjs proxy: allowed host yes, canary refused) do hold."
+                },
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent re-QA (fresh agent, not the builder): the old scenario is fixed. With compose (app, db: postgres:16, cache: build), runServices [app,db,cache] and service app, 'check --sandbox none' names db as not running and cache as having no image, and no longer lists app. Toolchains and the direct canary ('reached DIRECTLY') hold. But service drift is missed for common tags: declared postgres:16-alpine3.20 against running postgres:17-alpine3.20 gives 0 differences, because tagVersion reads both as 3.20. And declared postgres:16 against running redis:16 gives 0 differences, because the image name is never compared (compare() at environment.mjs:305-311, reproduced). The ac says every difference is named."
+                }
+              ]
+            },
+            "reviewer": {
+              "verdict": "fail",
+              "at": "2026-09-29",
+              "t": "2026-09-29T22:15:49.222Z",
+              "by": "root",
+              "via": "cli",
+              "note": "Independent re-review, round 3 (fresh agent, not the builder): both earlier points fixed. tagVersion (environment.mjs:146-152) reads node:22-alpine3.20 as 22 and postgres:17-alpine3.20 as 17, and compare :325 names another image (redis:16 for postgres:16, valkey for redis). New defects: (1) runningServices :360 filters only on com.docker.compose.service=<name>, never on the compose project. Any other project's running 'db' is taken as this one's, so a stopped db here reads as running and is compared against the wrong container. (2) A devcontainers tag carrying only the image's own version (javascript-node:1-bookworm, :1) declares node '1'. declared()+compare() then flag a correct v22.11.0 as tool-version drift (reproduced).",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent review (fresh agent, not the builder): environment.mjs:152-159 interpolates spec hosts unquoted into echo \"host ${h} $r\", and with --sandbox none the script runs via sh -c on the HOST, so a spec with hosts: $(touch${IFS}/path) ran that command on the host (reproduced). Also the canary is probed only through HTTPS_PROXY, so a network that routes around the proxy reads as closed, and check() skips the cgroup preflight, so --cpus kills the probe where cpu is not delegated."
+                },
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent re-review (fresh agent, not the builder): the old points are fixed. A spec host '$(touch${IFS}/tmp/pwned-e6)' is refused at parse, and probeScript refuses it too (BAD_HOST); no file was created. The canary is also asked with the proxy unset (:252-258). check() drops undelegatable limits (stub exec: no --cpus). Each fix mutated in a scratch copy fails by name. New defect: tagVersion (environment.mjs:141-144) takes the LAST number in a tag. So declared image node:22-alpine3.20 declares node '3.20' and flags a correct v22 as drift. Also :310 compares only that number, never the image name, which spec/sandbox.md says is compared, so a service running redis:16 for postgres:16 is no difference (reproduced via compare())."
+                }
+              ]
+            }
+          }
         }
       ]
     },
@@ -236,6 +520,21 @@
               "verdict": "pass",
               "at": "2026-08-30",
               "note": "73 checks. The mechanism is one anonymous pipe per secret via podman --preserve-fd, chosen after MEASURING what the alternatives leak on this box rather than assuming: -e shows the value twice in podman inspect and once in ps for a foreground run, --env-file shows it once in inspect, and --secret keeps it base64 in the filedriver store outliving the run. The decisive mutation swapped the chosen mechanism for the rejected -e form and the live inspect scan went red by name."
+            },
+            "reviewer": {
+              "verdict": "fail",
+              "at": "2026-09-29",
+              "t": "2026-09-29T22:21:29.786Z",
+              "by": "root",
+              "via": "cli",
+              "note": "Independent re-review, round 3 (fresh agent, not the builder): old points fixed: runstore.mjs:273 delivers --secret by name, harness.mjs:314 argv carries names only, raw logDir 0700 and removed, runstore.test H-0 checks a real run's archive and event log. New defect from that fix: harness.mjs:912 gives podman ITSELF the preset env, so HOME=/tmp/agent-home. A podman shim logged 'image inspect' with HOME=/root, 'run' with HOME=/tmp/agent-home. Rootless podman as a non-root user then refuses: 'cannot resolve /tmp/agent-home'. If another user pre-creates /tmp/agent-home, its .config/containers/containers.conf is honoured (events_logger=none took effect): host config injection. CI live tests use custom cli objects with no env, so miss it. Minor: a thrown run leaves the raw logDir.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent review (fresh agent, not the builder): the preserve-fd channel exists only in the standalone 'secrets.mjs exec' and is wired into nothing that runs work. runstore/verify/reconcile --secret only builds a redactor (runstore.mjs:238, 337); no secret ever reaches the default CLI adapter's container, whose only env route is policy.env -> '-e K=V' on argv (harness.mjs:289, 779), the exact mechanism secrets.mjs:29-42 measured leaking into ps and podman inspect. harness-config.mjs:120 tells users 'Pass secrets with --secret', which delivers nothing. The AC's 'test proves ... after a run' (secrets.test.mjs:395-414) hand-writes lines through makeRedactor into a temp file; it never calls harness.run or events.mjs, and events.mjs does not redact. Also: raw unredacted transcript.log/stderr.log plus a shadow git copy of the workspace persist world-readable (0755/0644) under /tmp/caretaker-runs/<runId> and are never removed (harness.mjs:918-941). harness.mjs:888-891 still says H-0 has no mechanism."
+                }
+              ]
             }
           }
         },
@@ -250,7 +549,49 @@
           ],
           "spec": "docs/architecture.md",
           "ac": "a run has a wall-clock ceiling, exceeding it kills the process tree and the container, and the event log records that it was killed rather than that it finished",
-          "note": "Boring, essential, and it was missing. A hung agent holds the lock forever - which happened on this box today: four wait loops from a deploy sat spinning for sixteen hours because the condition they polled matched their own command line. — Built (board status lagged): bin/harness.mjs kills the process group, then the container, at the wall-clock ceiling and settles on a bounded timer after SIGKILL; the verdict is `killed`, never completed. B-6's event log records a WARN end event with state killed. Checked by bin/harness.test.mjs ('a run that hangs is KILLED', 'a killed run's end event is a WARN that says killed', live 'a hung container run is KILLED' in CI). Gate verdicts not recorded."
+          "note": "Boring, essential, and it was missing. A hung agent holds the lock forever - which happened on this box today: four wait loops from a deploy sat spinning for sixteen hours because the condition they polled matched their own command line. — Built (board status lagged): bin/harness.mjs kills the process group, then the container, at the wall-clock ceiling and settles on a bounded timer after SIGKILL; the verdict is `killed`, never completed. B-6's event log records a WARN end event with state killed. Checked by bin/harness.test.mjs ('a run that hangs is KILLED', 'a killed run's end event is a WARN that says killed', live 'a hung container run is KILLED' in CI). Gate verdicts not recorded.",
+          "gate": {
+            "reviewer": {
+              "verdict": "fail",
+              "at": "2026-09-29",
+              "t": "2026-09-29T22:21:30.250Z",
+              "by": "root",
+              "via": "cli",
+              "note": "Independent re-review, round 3 (fresh agent, not the builder): the body-stall point is fixed: openai-compatible.mjs:409 reads the body under the deadline. Scratch server: turn 1 writes out.txt, turn 2 stalls or trickles the body, 1500ms ceiling -> killed at ~1540ms, diff kept, WARN end event 'killed'. Moving res.text() out of the try fails 2 tests by name; restored, sha256 checked. New defect, same class as round 1: the tool container starts with a blocking spawnSync with its own 120s limit, not the run's ceiling (:350). With a podman shim whose 'run -d' hangs, a 1500ms run returned after 120116ms, state unavailable, end event durationMs 0. Nothing ran rm -f caretaker-<runId>, though harness.mjs's measured fact 2 says a killed client leaves the container Up.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent review (fresh agent, not the builder): the CLI path is right (group kill, container rm -f with its own ceiling, bounded settle after SIGKILL, WARN end event with state killed; harness.test.mjs green). The openai-compatible adapter, a run path through the same seam, has no enforced ceiling. Tool calls are blocking spawnSync (openai-compatible.mjs:143-145, 159-165) with a 120s per-call timeout, and the deadline is checked only between turns (:308). Reproduced in a copy: a 1000ms ceiling with two 'sleep 4' calls in one turn took 8100ms. Under sandbox:none, 'sleep 9 & echo started' took 9070ms: the backgrounded grandchild holds spawnSync's pipes, and nothing kills its process group. That is the hazard harness.mjs:634-657 documents and fixes for the CLI path, and it is unbounded with a longer sleep. Both report state killed, but only after the fact."
+                },
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent re-review (fresh agent, not the builder): the old points are fixed. runBounded (openai-compatible.mjs:122-160) is async, group-kills, and each tool gets min(120s, time left) (:469). Scratch (atk/h9.mjs): 1000ms ceiling, two 'sleep 4' -> killed in 1039ms; 'sleep 171 &' and a redirected (sleep 172 &) are gone afterwards. New defect: the reply body is read outside the fetch try (:418 'await res.text()'). A server that sends headers and stalls the body past the ceiling makes the AbortSignal reject there, run() throws TimeoutError, and harness.mjs:1079 logs end state 'not-started', 'run did not start', with no diff measured, after turn 1 had written out.txt (atk/h9b.mjs). The log says not-started, not killed."
+                }
+              ]
+            },
+            "qa": {
+              "verdict": "fail",
+              "at": "2026-09-29",
+              "t": "2026-09-29T22:21:30.321Z",
+              "by": "root",
+              "via": "cli",
+              "note": "Independent re-QA, round 3 (fresh agent, not the builder): the old repro is fixed. Turn 2 reply with headers then a stalled body, or a body trickling a byte per 100ms, 1500ms ceiling: killed at 1538/1540ms, out.txt in the diff, end event {state:killed, level:warn}. Edge that breaks it: the openai-compatible container start (openai-compatible.mjs:350, spawnSync, timeout 120_000) ignores the ceiling and blocks the event loop. Fake podman on PATH whose 'run -d' hangs, timeoutMs 1500: run() returned after 120116ms. The verdict was 'unavailable', not killed. The end event says durationMs 0 'could not start podman'. The shim log shows no rm -f of the named container.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent QA (fresh agent, not the builder): the ceiling holds only on the cli adapter. On openai-compatible, a tool call runs under spawnSync with its own 120s limit and the deadline is checked only between turns. A run with a 1500ms ceiling whose model called run(\"sleep 171 & echo started\") returned after 120195ms, and the sleep was still alive afterwards, yet the verdict and end event said killed."
+                },
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent re-QA (fresh agent, not the builder): the old repro is fixed. 1500ms ceiling, run('sleep 171 & echo started') returns in ~300ms and the sleep is gone; 1000ms with trap TERM + sleep -> killed at 1037ms, process gone; 20 quick calls at 1200ms -> killed at 1238ms; server stalling headers -> killed at 1031ms. The edge case that breaks it: turn 1 writes out.txt, then turn 2's reply sends headers and stalls the body. With a 1500ms ceiling run() THREW TimeoutError at 1521ms (no verdict), and the only end event is {state:'not-started', detail:'run did not start: The operation was aborted due to timeout'}, with no diff. Cause: openai-compatible.mjs:418 res.text() is outside the try. Repro: atk/h9b.mjs."
+                }
+              ]
+            }
+          }
         },
         {
           "id": "H-10",
@@ -263,7 +604,49 @@
           ],
           "spec": "docs/vendors.md",
           "ac": "the default adapter shells out to an agent CLI running INSIDE the dev environment, so a subscription login works and tools execute sandboxed; an SDK adapter exists for API-key use with the model call above the environment; both satisfy the same seam, and the tool-use fixture scores any candidate on well-formed calls, stopping when done, and not inventing a tool",
-          "note": "CLI IS THE DEFAULT BECAUSE THAT IS WHERE SUBSCRIPTION AUTH LIVES. The SDKs are API-key only; `claude login` against a Pro or Max plan, and the ChatGPT equivalent, exist only in the CLIs. Defaulting to the SDK would quietly mean paying API rates on top of a subscription somebody already has.\n\nRUNNING THE CLI INSIDE THE DEV ENVIRONMENT KEEPS THE SANDBOX. The CLI needs the model API, which is exactly what the egress allowlist is for - one declared host - and its tools then execute inside the container, which is where they were wanted anyway. What is lost is clean layering: the CLI spans harness and dev environment. What is kept is the seam, which accommodates both hook points, and that is the point of putting it there.\n\nThe adapter is per-API rather than per-model: everything self-hosted speaks an OpenAI-compatible endpoint, so DeepSeek or Qwen behind vLLM is a config line. The discriminator is tool-use reliability, not benchmark score - a model that codes well and emits malformed tool calls burns the loop and produces nothing. — SDK half built: the openai-compatible adapter makes the model call in the harness process and executes tools inside the run's container via podman exec, so net:none works. bin/tool-fixture.mjs scores a candidate on well-formed calls, stopping, not inventing tools, and doing the task. The cli adapter stays the default. Gate verdicts not recorded."
+          "note": "CLI IS THE DEFAULT BECAUSE THAT IS WHERE SUBSCRIPTION AUTH LIVES. The SDKs are API-key only; `claude login` against a Pro or Max plan, and the ChatGPT equivalent, exist only in the CLIs. Defaulting to the SDK would quietly mean paying API rates on top of a subscription somebody already has.\n\nRUNNING THE CLI INSIDE THE DEV ENVIRONMENT KEEPS THE SANDBOX. The CLI needs the model API, which is exactly what the egress allowlist is for - one declared host - and its tools then execute inside the container, which is where they were wanted anyway. What is lost is clean layering: the CLI spans harness and dev environment. What is kept is the seam, which accommodates both hook points, and that is the point of putting it there.\n\nThe adapter is per-API rather than per-model: everything self-hosted speaks an OpenAI-compatible endpoint, so DeepSeek or Qwen behind vLLM is a config line. The discriminator is tool-use reliability, not benchmark score - a model that codes well and emits malformed tool calls burns the loop and produces nothing. — SDK half built: the openai-compatible adapter makes the model call in the harness process and executes tools inside the run's container via podman exec, so net:none works. bin/tool-fixture.mjs scores a candidate on well-formed calls, stopping, not inventing tools, and doing the task. The cli adapter stays the default. Gate verdicts not recorded.",
+          "gate": {
+            "reviewer": {
+              "verdict": "fail",
+              "at": "2026-09-29",
+              "t": "2026-09-29T22:21:29.974Z",
+              "by": "root",
+              "via": "cli",
+              "note": "Independent re-review, round 3 (fresh agent, not the builder): the design is sound on paper: token by name (--secret CLAUDE_CODE_OAUTH_TOKEN), nothing of ~/.claude mounted, header honest, credentialAdvice warns. But the default claude preset cannot start in the default rootless-podman sandbox: its HOME=/tmp/agent-home (harness.mjs:237) goes into podman's own env (:912), not only the container's. Shim run via runArchived: podman run saw HOME=/tmp/agent-home plus the token; real rootless podman under that HOME: 'cannot resolve /tmp/agent-home', or it uses whatever store and containers.conf another user planted there (reproduced). Also credentialAdvice (runstore.mjs:89) disagrees with egress.allowed (egress.mjs:55): --egress anthropic.com or com gets no warning, yet the proxy refuses api.anthropic.com.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent review (fresh agent, not the builder): the AC says the default CLI adapter runs inside the dev environment 'so a subscription login works'. Nothing makes it work. The container gets only the workspace mount (sandbox.mjs buildArgs). HOME is moved to a fresh tmpfs, /tmp/agent-home (harness.mjs:216, 224). No credential or login state is mounted or delivered, and the preserve-fd secret channel is not wired in (see H-0). So neither a 'claude login' session nor an API key can reach the in-container CLI, and every real podman run of the default adapter is unauthenticated. The header comment (harness.mjs:12-16) defends the default with a capability that does not exist. Also: tool-fixture.mjs:100 defaults to sandbox:none, so scoring an untrusted candidate model runs its shell commands on the host with host network by default. The SDK half and fixture scoring are otherwise sound; tests green."
+                },
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent re-review (fresh agent, not the builder): two of the old points are fixed. tool-fixture.mjs:108 now defaults to sandbox podman, and the harness header no longer claims a login reaches the container. The central point stands. The ac requires the in-container default CLI 'so a subscription login works', and harness.mjs:16-22 now says 'Carrying a subscription login into the container is not built'. Nothing mounts or delivers login state: CLI_PRESETS sets HOME=/tmp/agent-home (:226, :234), and grep finds no login wiring in harness, sandbox or runstore. :12-14 still gives subscription auth as the reason for the default, while the default sandbox (podman, :116) is where it does not work. The seam and SDK halves are otherwise sound."
+                }
+              ]
+            },
+            "qa": {
+              "verdict": "fail",
+              "at": "2026-09-29",
+              "t": "2026-09-29T22:21:30.050Z",
+              "by": "root",
+              "via": "cli",
+              "note": "Independent re-QA, round 3 (fresh agent, not the builder): fixture half still holds (tool-fixture, openai-compatible tests green). The subscription path is not demonstrable in the default sandbox. Driving runstore.runArchived with the default claude preset, sandbox podman and secrets {CLAUDE_CODE_OAUTH_TOKEN} through a logging podman shim: the container argv is correct (-e HOME -e CLAUDE_CODE_OAUTH_TOKEN, no values), but podman itself ran with HOME=/tmp/agent-home (harness.mjs:912). As a non-root user, 'podman run' under that HOME fails with 'cannot resolve /tmp/agent-home'; with /tmp/agent-home pre-created by another user, podman honoured that user's containers.conf. The token archive is clean (grep finds it nowhere). Edge: --egress anthropic.com passes credentialAdvice but the proxy refuses api.anthropic.com.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent QA (fresh agent, not the builder): the fixture does not score stopping when done. A scripted model that wrote upper.txt correctly and then made 45 more list_files turns scored pass with stopped:true (turns 48), because stopped means only that it stopped before maxTurns 50. Also, nothing lets a subscription login reach the CLI inside the container: HOME is a fresh /tmp/agent-home, net defaults to none, and PR #13 README says the container still needs \"a way for that CLI to sign in\"."
+                },
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent re-QA (fresh agent, not the builder): the fixture half is fixed. score() now requires tu.calls <= FIXTURE.maxCalls (6) for stopped (tool-fixture.mjs:59). The busy-model test (correct upper.txt, then 10 list_files) fails stopped. Removing the limit fails 'did not stop WHEN done' by name; restored, sha256 checked. openai-compatible.test green, live check SKIP here. The other half of the old note stands: nothing lets a subscription login reach the CLI inside the container. HOME is a fresh /tmp/agent-home, no login is mounted, net defaults to none (harness.mjs:117), and the header now says outright that it is not built. So the ac's 'so a subscription login works' is not demonstrated for the default in-container adapter."
+                }
+              ]
+            }
+          }
         },
         {
           "id": "H-1",
@@ -279,8 +662,20 @@
           "gate": {
             "qa": {
               "verdict": "fail",
-              "at": "2026-08-30",
-              "note": "The suite is GREEN in 30 consecutive runs but the flake is UNEXPLAINED, so this is not a pass. It failed 2 runs in 5 while four agents were running podman-heavy work on this box: once as 'returns near the ceiling rather than the sleep — 60112ms for an 800ms ceiling', and twice as assertions returning undefined, which means something threw before them rather than the assertion being false.\n\nNOT REPRODUCED SINCE, under any condition tried: 10 runs idle, 5 under six spinning CPU hogs at load 3.5 on 4 cores, 6 more with the candidate fix REVERTED under that same load, and 4 during 40 podman container create/destroy cycles. Thirty runs, zero failures, with and without the change.\n\nSO THE CHANGE IS HARDENING, NOT A PROVEN FIX, and is labelled that way in the code. It is defensible on its own:  fires only when the child has exited AND its stdio pipes are closed, and a backgrounded grandchild inherits those pipes, so if the group kill misses it the promise waits for the grandchild's full sleep. That is a real hazard whether or not it caused this. The result now settles on its own bounded timer after SIGKILL, reporting the exit code as unknown and the verdict as killed, because waiting for certainty about a process already SIGKILLed reintroduces the hang the feature exists to prevent.\n\nTHE LEADING HYPOTHESIS IS PODMAN UNDER CHURN rather than CPU. The netns agent independently reported a matching symptom: a DNS alias that resolved instantly after startup returned empty 5 of 5 times late in a run of ~20 podman cycles, reproducible in its full suite and not in isolation. Same shape - fine alone, wrong under sustained runtime churn.\n\nHeld rather than passed on purpose. A suite that fails 2 in 5 and then passes 30 times without anyone understanding why is not a suite anyone should trust, and marking it green would teach exactly the habit of re-running until it works."
+              "at": "2026-09-29",
+              "note": "Independent QA (fresh agent, not the builder): on 46927f2 the one vendor preset (claude --print --output-format json, no --permission-mode) has its Edits denied while exiting 0, so a real run returns verdict completed with an empty diff; that was measured on a real claude run and is fixed only in open, unmerged PR #13 (3ec029a, not an ancestor of this branch), and every in-repo seam check uses a shell-script fake. The vendor-import check holds, and the old flake is explained: I ran pre-d502820 harness.mjs on an 800ms ceiling and it took 60047ms; the current one took 850ms.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-08-30",
+                  "note": "The suite is GREEN in 30 consecutive runs but the flake is UNEXPLAINED, so this is not a pass. It failed 2 runs in 5 while four agents were running podman-heavy work on this box: once as 'returns near the ceiling rather than the sleep — 60112ms for an 800ms ceiling', and twice as assertions returning undefined, which means something threw before them rather than the assertion being false.\n\nNOT REPRODUCED SINCE, under any condition tried: 10 runs idle, 5 under six spinning CPU hogs at load 3.5 on 4 cores, 6 more with the candidate fix REVERTED under that same load, and 4 during 40 podman container create/destroy cycles. Thirty runs, zero failures, with and without the change.\n\nSO THE CHANGE IS HARDENING, NOT A PROVEN FIX, and is labelled that way in the code. It is defensible on its own:  fires only when the child has exited AND its stdio pipes are closed, and a backgrounded grandchild inherits those pipes, so if the group kill misses it the promise waits for the grandchild's full sleep. That is a real hazard whether or not it caused this. The result now settles on its own bounded timer after SIGKILL, reporting the exit code as unknown and the verdict as killed, because waiting for certainty about a process already SIGKILLed reintroduces the hang the feature exists to prevent.\n\nTHE LEADING HYPOTHESIS IS PODMAN UNDER CHURN rather than CPU. The netns agent independently reported a matching symptom: a DNS alias that resolved instantly after startup returned empty 5 of 5 times late in a run of ~20 podman cycles, reproducible in its full suite and not in isolation. Same shape - fine alone, wrong under sustained runtime churn.\n\nHeld rather than passed on purpose. A suite that fails 2 in 5 and then passes 30 times without anyone understanding why is not a suite anyone should trust, and marking it green would teach exactly the habit of re-running until it works."
+                }
+              ]
+            },
+            "reviewer": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "note": "Independent review (fresh agent, not the builder): read bin/harness.mjs end to end and ran bin/harness.test.mjs (green, 2 live skips). run() returns exactly SEAM_KEYS; the diff is measured with a shadow git dir outside the workspace, not reported; cost is null-not-zero with total derived; the log dir is refused inside the workspace; the prompt goes on stdin; adapter throws only when nothing ran and the end event is still written. No vendor SDK is imported anywhere in bin/ (boundary test honest about its package list). Minor: harness.mjs:18-20 and 880-897 are stale (say the SDK path is unimplemented and H-0 has no mechanism while openai-compatible.mjs exists); verify.mjs:132 names 'claude' as a default above the seam; extraRunFlags has no refusal for a container-socket mount. The CLI cannot authenticate in the container, but that is H-0/H-10's defect, not the seam's."
             }
           }
         },
@@ -295,7 +690,19 @@
           ],
           "ac": "a second agent CLI runs behind the same interface with no change above it; if the interface had to change, that change is recorded as what the first vendor had baked in",
           "spec": "docs/vendors.md",
-          "note": "A second frontier API would agree with the first about almost everything and prove almost nothing. An OpenAI-compatible local model stresses the seam properly: different tool-call quirks, NO PROMPT CACHING so the cost model changes completely, smaller context so selection has to actually work, and GPU contention instead of hosted rate limits. — Built: bin/openai-compatible.mjs, a second adapter behind the unchanged seam, for Ollama/vLLM/llama.cpp and anything OpenAI-compatible. Checked by bin/openai-compatible.test.mjs against a scripted server and mutation-checked; its live container half runs in CI. What the interface had to change is recorded in docs/vendors.md 'What the second vendor showed'. NOT yet run against a real local model: that needs a GPU box and one run of bin/tool-fixture.mjs. Gate verdicts not recorded. — Owner decision 2026-09-29: no local model. The second vendor is ChatGPT/OpenAI, through the codex CLI (ChatGPT sign-in, in the container) or the openai-compatible adapter against the OpenAI API. Built alongside it: harness settings (bin/harness-config.mjs), ~/.config/caretaker/harness.json choosing adapter/cli/model per job (builder, refuter, reconciler) plus custom CLIs; isolation keys, key values and a file inside the workspace are refused by name. Checked by bin/harness-config.test.mjs, mutations H1-H10 each fail it by name. Found while testing it: runstore.mjs run deadlocked on an import cycle through skills.mjs (exit 13), fixed by bin/statedir.mjs; and verify could not read a verdict that was a reply's first line, so an API refuter was always inconclusive, fixed. Still open: no run against real OpenAI yet. Gate verdicts not recorded."
+          "note": "A second frontier API would agree with the first about almost everything and prove almost nothing. An OpenAI-compatible local model stresses the seam properly: different tool-call quirks, NO PROMPT CACHING so the cost model changes completely, smaller context so selection has to actually work, and GPU contention instead of hosted rate limits. — Built: bin/openai-compatible.mjs, a second adapter behind the unchanged seam, for Ollama/vLLM/llama.cpp and anything OpenAI-compatible. Checked by bin/openai-compatible.test.mjs against a scripted server and mutation-checked; its live container half runs in CI. What the interface had to change is recorded in docs/vendors.md 'What the second vendor showed'. NOT yet run against a real local model: that needs a GPU box and one run of bin/tool-fixture.mjs. Gate verdicts not recorded. — Owner decision 2026-09-29: no local model. The second vendor is ChatGPT/OpenAI, through the codex CLI (ChatGPT sign-in, in the container) or the openai-compatible adapter against the OpenAI API. Built alongside it: harness settings (bin/harness-config.mjs), ~/.config/caretaker/harness.json choosing adapter/cli/model per job (builder, refuter, reconciler) plus custom CLIs; isolation keys, key values and a file inside the workspace are refused by name. Checked by bin/harness-config.test.mjs, mutations H1-H10 each fail it by name. Found while testing it: runstore.mjs run deadlocked on an import cycle through skills.mjs (exit 13), fixed by bin/statedir.mjs; and verify could not read a verdict that was a reply's first line, so an API refuter was always inconclusive, fixed. Still open: no run against real OpenAI yet. Gate verdicts not recorded.",
+          "gate": {
+            "reviewer": {
+              "verdict": "fail",
+              "at": "2026-09-29",
+              "note": "Independent review (fresh agent, not the builder): false comments defending a control. openai-compatible.mjs:94-96 says a symlink whose target is outside the workspace is refused on the host; hostExecutor.guard (:112-122) walks up past a DANGLING symlink to its parent, so write_file follows it out. Reproduced in a copy: ws/link -> ../outside/pwned.txt (not yet existing), write_file path 'link' -> 'wrote 7 bytes to link' and the file appeared outside the workspace. The header (:22-24 'tools run on the host, confined to the workspace') and the run warning (:253 'confined to the workspace by path checks only') claim confinement, but the run tool (:143-145) is an unconfined host shell. harness-config.mjs:120 tells users 'Pass secrets with --secret, which redacts them' as if that delivers them; --secret never reaches the CLI. Otherwise good: key read from the harness env, sent only in the Authorization header, the settings file is refused inside the workspace and refuses isolation keys; tests green."
+            },
+            "qa": {
+              "verdict": "fail",
+              "at": "2026-09-29",
+              "note": "Independent QA (fresh agent, not the builder): no second vendor has run. openai-compatible has only been exercised against a scripted local server, and the codex preset was never run and lacks --sandbox workspace-write (codex exec defaults to read-only, per PR #13). The interface changes are also not fully recorded: vendors.md says verify.mjs ran unmodified, but e60736d changed it for the API transcript shape, and reconcile.parseProposal still returns direction null for {\"type\":\"assistant\",\"content\":\"DIRECTION: CODE-DRIFTED x\"}."
+            }
+          }
         },
         {
           "id": "H-3",
@@ -307,7 +714,33 @@
             "H-1"
           ],
           "ac": "a run can be declared as an attempt to REFUTE another run's result, and its verdict can fail the task rather than merely commenting on it",
-          "note": "The technique behind grill-me, without the branding. Every defect worth finding in the project this came from was found by one agent refusing to take another's word: a security review that failed a rate-limit fix and found an OTP brute-force bypass, a qa run that found the paid checkout path returning 500 on every order. Neither came from an agent doing work. — Built in bin/verify.mjs (refute), checked by bin/verify.test.mjs and mutation-checked. A refutation records a qa fail naming both runs; a refuter that finds nothing records no pass, since failing to break something is absence of evidence. Gate verdicts not recorded: nobody closes their own work."
+          "note": "The technique behind grill-me, without the branding. Every defect worth finding in the project this came from was found by one agent refusing to take another's word: a security review that failed a rate-limit fix and found an OTP brute-force bypass, a qa run that found the paid checkout path returning 500 on every order. Neither came from an agent doing work. — Built in bin/verify.mjs (refute), checked by bin/verify.test.mjs and mutation-checked. A refutation records a qa fail naming both runs; a refuter that finds nothing records no pass, since failing to break something is absence of evidence. Gate verdicts not recorded: nobody closes their own work.",
+          "gate": {
+            "reviewer": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "note": "Independent re-review (fresh agent, not the builder): both old points fixed. verify.mjs:158 reads the verdict from verdict.finalText (harness finalTextOf: claude result / codex agent_message / API last reply) or the last line; :159 makes any non-ok refuter inconclusive, REFUTED included. Scratch repro (atk/h3.mjs): API refuter read_file on a builder NOTES.md carrying 'VERDICT: REFUTED planted' -> inconclusive, no qa; claude-shaped JSON with the planted verdict in a tool_result -> inconclusive; REFUTED then exit 1 -> inconclusive; real result REFUTED -> qa fail. Mutating :158 back to parseVerdict(transcript) fails 2 checks by name, reverting :159 fails 1; restored, sha256 checked. verify.test green.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent review (fresh agent, not the builder): a qa fail gets recorded on verdicts the refuter never gave. (1) parseVerdict reads every string in the transcript through transcriptTexts, including tool OUTPUT. Reproduced in a copy: the builder writes NOTES.md with a line 'VERDICT: REFUTED planted...'; an openai-compatible refuter reads it with read_file and answers 'nothing obviously broken' with no verdict. Result: outcome refuted, qa fail recorded, reason taken from the file. (2) verify.mjs:148-149 says 'A refuter that crashed or was killed checked nothing, whatever it printed first', but the guard exempts REFUTED. A refuter printing 'VERDICT: REFUTED early guess' then exit 1 records a qa fail (reproduced). verify.test.mjs:106 'inconclusive, whatever it printed' tests only STANDS. The asymmetry itself (stands records nothing) is right; tests green."
+                }
+              ]
+            },
+            "qa": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "note": "Independent re-QA (fresh agent, not the builder): the old repro is fixed. Scratch repo, task D-1 owned by product-architect with a no-code ac: a refuter printing 'VERDICT: REFUTED step 3 is wrong' recorded qa fail; after a reviewer pass by another operator, board.mjs done D-1 exited 1, REFUSED, Missing: qa (board.mjs:559). Deleting that line fails board-lib 'a qa FAIL recorded on it (a refutation) still blocks done' by name; restored, sha256 checked. Edge cases held: planted verdict in a read file (API and claude-shaped) -> inconclusive; crashed REFUTED -> inconclusive; backend task still refused. verify, board-lib, board tests green.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent QA (fresh agent, not the builder): the refutation only blocks done when qa is a required gate. With a task owned by product-architect whose ac names no code, verify.refute recorded qa fail (recorded:true), and after a reviewer pass board.mjs done exited 0 and closed the task, so the refutation was only a comment. The same flow on a backend-owned task was REFUSED. Repro: a scratch copy, attack/h3.mjs."
+                }
+              ]
+            }
+          }
         },
         {
           "id": "H-4",
@@ -326,6 +759,18 @@
               "verdict": "pass",
               "at": "2026-08-30",
               "note": "70 checks, 10 mutations. Mutation M7 found a real gap rather than confirming one: gate() overwrote analyse()'s orphaned field, so it was asserted by nothing and could be changed to [] with the suite still green. Direct assertion added; M7 now goes red by name."
+            },
+            "reviewer": {
+              "verdict": "fail",
+              "at": "2026-09-29",
+              "note": "Independent re-review (fresh agent, not the builder): half fixed. done now consults driftGateFailing (bin/board.mjs:577-598, :611) and the tests fail by name without it. But the old note's second point stands: nothing runs the gate after a run (runstore, run.mjs, loop.sh, verify never call drift.mjs; only drift.mjs:499 emits the event). Scratch repo (atk/h4.mjs): spec governs src/fee.js, an archived run for T-1 changes only src/fee.js, reviewer+qa pass, board.mjs done T-1 exits 0; drift check afterwards says FAIL drift 1. Also, after a real fail, 'drift check --task T-1 --path README.md' records a pass and driftGateFailing returns null: the latest event wins whatever paths it checked.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent review (fresh agent, not the builder): detection is sound (drift.mjs analyse/gate are pure and deterministic, reasons are mandatory, a dismissal is refused if it cannot be logged; drift.test.mjs green). But the AC's 'a task cannot close while a governed path has changed ...' is not enforced. board.mjs transition('done') -> missingGates (bin/board.mjs:498-515) checks only reviewer/qa/security verdicts and never reads the drift gate. Nothing runs the gate after a run: runstore.mjs, verify.mjs, run.mjs and loop.sh never call drift.mjs. So a drift fail is an exit code plus an Inbox line (readmodel.mjs:371), and 'board.mjs done' still closes the task."
+                }
+              ]
             }
           }
         },
@@ -339,19 +784,57 @@
             "H-4"
           ],
           "ac": "a reconciliation run receives the diff and the governing spec and returns a PROPOSED spec diff plus a stated direction, which a human accepts or rejects; nothing is committed to a spec without that acceptance",
-          "note": "THE DIRECTION IS THE POINT AND MUST BE RECORDED. 'We learned something, the spec should change' and 'the code drifted from what we decided' are opposite events with opposite fixes, and the tool must not guess which. Forcing the answer is where the value is; auto-applying either one destroys it. — Built in bin/reconcile.mjs (propose, accept, reject, show), checked by bin/reconcile.test.mjs and mutation-checked. The reconciler must state SPEC-BEHIND or CODE-DRIFTED; a SPEC-BEHIND diff is stored at propose time and applied only by accept, never committed; a diff touching anything but the drifted spec is invalid. Gate verdicts not recorded."
+          "note": "THE DIRECTION IS THE POINT AND MUST BE RECORDED. 'We learned something, the spec should change' and 'the code drifted from what we decided' are opposite events with opposite fixes, and the tool must not guess which. Forcing the answer is where the value is; auto-applying either one destroys it. — Built in bin/reconcile.mjs (propose, accept, reject, show), checked by bin/reconcile.test.mjs and mutation-checked. The reconciler must state SPEC-BEHIND or CODE-DRIFTED; a SPEC-BEHIND diff is stored at propose time and applied only by accept, never committed; a diff touching anything but the drifted spec is invalid. Gate verdicts not recorded.",
+          "gate": {
+            "reviewer": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "note": "Independent re-review (fresh agent, not the builder): both old points fixed. patchTargets (reconcile.mjs:86-106) asks git apply --numstat -z (same -p1 as accept) plus rename/copy from lines; propose (:209-210) marks invalid any proposal whose run changed workspace files. Scratch repo (atk/h5.mjs): '--- specs/pricing.md' headers -> target pricing.md, stray, invalid; reconciler sed on the spec -> invalid naming specs/pricing.md, also when it git-commits the edit (shadow-tree diff); a mode-only change on src/run.sh behind a spec hunk -> stray, invalid; legit SPEC-BEHIND leaves the spec untouched until accept. Mutating :210 or the rename-from loop fails reconcile.test by name; restored, sha256 checked. Note: the reconciler's edit is flagged, not reverted.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent review (fresh agent, not the builder): the only-the-drifted-spec control is bypassable, and so is propose-not-apply. (1) patchTargets (reconcile.mjs:76-83) strips a/ b/ only if present, but git apply always strips one component (-p1). Reproduced: '--- specs/pricing.md / +++ specs/pricing.md' validates as targets [specs/pricing.md], valid; accept then reports applied [specs/pricing.md] while git modified pricing.md at the repo root. (2) propose never looks at out.diff (:171-192). A reconciler that edits the spec in the working tree itself (sed on specs/pricing.md) and prints 'DIRECTION: CODE-DRIFTED' gives valid:true with no warning, and the spec is changed with no acceptance (reproduced). That defeats 'nothing reaches a spec without that acceptance'. Use git apply --numstat/--summary for targets, and refuse a proposal whose run changed files."
+                }
+              ]
+            },
+            "qa": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "note": "Independent re-QA (fresh agent, not the builder): both old repros fixed. Scratch repo (atk/h5.mjs): a reconciler that seds specs/pricing.md during propose now gets valid:false, 'changed specs/pricing.md in the workspace; a reconciler proposes, it does not apply', so accept refuses it (also when it commits the edit). A SPEC-BEHIND block hiding a GIT binary patch for src/fee.js and a rename src/run.sh->src/renamed.js gives targets [specs/pricing.md, src/fee.js, src/renamed.js, src/run.sh], stray, invalid. A clean proposal applies only on accept and reports applied [specs/pricing.md], with git status showing only that spec plus the parent's src/fee.js. reconcile.test green (47).",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent QA (fresh agent, not the builder): a spec changes without acceptance. (1) A reconciler that runs sed on specs/pricing.md during propose gets proposal valid:true with no problems and no decision, and the spec is already rewritten, because propose never inspects the reconciler run diff. (2) A SPEC-BEHIND block holding a GIT binary patch and a rename passed patchTargets as [\"specs/pricing.md\"], and accept then also rewrote src/fee.js and created src/renamed-by-reconciler.js while reporting applied: specs/pricing.md only."
+                }
+              ]
+            }
+          }
         },
         {
           "id": "H-6",
           "title": "Harvest decisions the transcript holds and no document does",
           "owner": "architect",
           "est": "2d",
-          "status": "todo",
+          "status": "doing",
           "deps": [
             "H-5"
           ],
           "ac": "after a run, decisions made in the transcript that appear in no spec or ADR are surfaced for a human to keep or discard",
-          "note": "Prompt-driven development means the PROMPT is the real spec, transiently. Intent gets settled in a conversation and lands nowhere. This is the graduate idea applied continuously instead of only at handoff."
+          "note": "Prompt-driven development means the PROMPT is the real spec, transiently. Intent gets settled in a conversation and lands nowhere. This is the graduate idea applied continuously instead of only at handoff. — Built: bin/harvest.mjs. Agents declare decisions on their own line (DECISION: <what> because <why>; prompt.txt and prompt.example.txt say so). After every archived run, runstore harvests them and checks each against every spec and ADR (recorded = 80% of its significant words in one document). The rest are a fifth Inbox kind, 'decision', with the keep/discard commands shown as text. keep writes a draft ADR citing the run; discard needs a reason; each once. What is harvested is what was DECLARED: reading intent from free prose would be a model's job and make this probabilistic. Checked by bin/harvest.test.mjs; mutations Hv3-Hv11 fail by name. Gate verdicts not recorded.",
+          "gate": {
+            "reviewer": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "note": "Independent review (fresh agent, not the builder): read bin/harvest.mjs and its wiring in runstore.mjs; harvest.test.mjs green. Only declared DECISION lines are extracted. The live recorder sees only redacted complete lines. 'Recorded' is an 80% significant-word match against specs and docs/decisions. keep writes a draft ADR with a sanitised slug and no path traversal; discard needs a reason; each is recorded once. A harvest failure never fails the run. Nits: extractDecisions goes through transcriptTexts, so DECISION lines in TOOL OUTPUT are harvested as the agent's own (reproduced: reading bin/harvest.mjs yields 'retry the upload twice...' from its header comment). That contradicts 'what is harvested is what was DECLARED', but a human triages it, so it is noise, not harm. runstore.mjs:275 harvests with root=workspace and the default 'specs' dir, ignoring config.specs."
+            },
+            "qa": {
+              "verdict": "fail",
+              "at": "2026-09-29",
+              "note": "Independent QA (fresh agent, not the builder): the 80% word-overlap test marks decisions that REVERSE the specs as already recorded, so they are never surfaced. On this repo corpus, recordedIn returns TECH.md for \"give the container open egress to the internet and drop the allowlist proxy\", ADR-0001 for \"run the sandbox as root with Docker instead of rootless podman\", and TECH.md for \"the builder may close its own task without a reviewer\"."
+            }
+          }
         },
         {
           "id": "H-7",
@@ -365,7 +848,26 @@
           ],
           "spec": "docs/memory.md",
           "ac": "a project declares whether the spec or the code is the authority, the drift gate blocks or harvests accordingly, and a single task can override it",
-          "note": "The three ways people actually work want the SAME machinery pointed in different directions. Spec-first: drift means the code is wrong, block. Build-as-you-go: drift means the spec is behind, harvest and propose. Handoff: reconcile before anyone inherits it. Two of those are one code path with the arrow reversed, which is the reason not to build three products. — Built: drift.mjs directionFor and gate({direction}), --direction or --config with a task's driftDirection override. spec blocks, code harvests without blocking, reconcile blocks until a human decides. Checked in bin/reconcile.test.mjs. Gate verdicts not recorded."
+          "note": "The three ways people actually work want the SAME machinery pointed in different directions. Spec-first: drift means the code is wrong, block. Build-as-you-go: drift means the spec is behind, harvest and propose. Handoff: reconcile before anyone inherits it. Two of those are one code path with the arrow reversed, which is the reason not to build three products. — Built: drift.mjs directionFor and gate({direction}), --direction or --config with a task's driftDirection override. spec blocks, code harvests without blocking, reconcile blocks until a human decides. Checked in bin/reconcile.test.mjs. Gate verdicts not recorded.",
+          "gate": {
+            "reviewer": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "note": "Independent review (fresh agent, not the builder): directionFor gives task.driftDirection over config drift.direction over 'spec', and refuses unknown values by name. gate({direction}) fixes ok for code (conflicts and spec errors still block), lists harvest, and keeps drift rows. The CLI takes --direction over --config and reads the task override from the named board. reconcile passes the direction to the reconciler as context. reconcile.test.mjs and drift.test.mjs green. Notes: 'blocks' means a failing gate verdict/exit code only, because nothing makes done consult the gate (failed under H-4). 'reconcile blocks until a human decides' is not wired to decisions: accepting or rejecting a proposal does not unblock; only resolving or dismissing the drift does."
+            },
+            "qa": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "note": "Independent re-QA (fresh agent, not the builder): the old repro is fixed (drift.mjs:679-682 reads ops/caretaker/config.json under --repo when no --config). Scratch git repo, config drift.direction code, src/a.js changed: 'check --path src/a.js' exit 0; graduate's form 'check --no-events --specs specs' (git diff) exit 0, direction code, harvest [specs/p.md]; '--task T-1' exit 0; '--task T-2' with driftDirection spec exit 1; '--direction spec' exit 1; from / with --repo exit 0; reconcile exit 1; direction 'sideways' exit 2 naming it; no config falls back to spec, exit 1. Deleting :681 fails reconcile.test 'with no --config, the project's own config sets the direction'; restored, sha256 checked.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent QA (fresh agent, not the builder): the project declaration is read only when the caller passes --config. With drift.direction \"code\" in ops/caretaker/config.json, drift.mjs check --path src/a.js exits 1, both in the form graduate.mjs emits for CI (check --no-events --specs specs) and in the README form with --task. Only --config ... --task gives exit 0. So a code-leads project gets a CI gate that blocks every drift."
+                }
+              ]
+            }
+          }
         },
         {
           "id": "H-8",
@@ -396,7 +898,19 @@
             "H-1"
           ],
           "ac": "a project can point at any repo following skills/<category>/<name>/SKILL.md and have those skills available to a run; no second format is invented",
-          "note": "Built in bin/skills.mjs, checked by bin/skills.test.mjs and mutation-checked. It reads skills/<category>/<name>/SKILL.md and the flat <name>/SKILL.md layout as published, with no new fields. config.skills lists paths or owner/repo[@ref]; remote sources are fetched once by `skills.mjs fetch`, never at run time; duplicate names are refused. For a run: mounted read-only at the claude CLI's skills path; the openai-compatible adapter lists them and offers read_skill. Never copied into the workspace. Gate verdicts not recorded."
+          "note": "Built in bin/skills.mjs, checked by bin/skills.test.mjs and mutation-checked. It reads skills/<category>/<name>/SKILL.md and the flat <name>/SKILL.md layout as published, with no new fields. config.skills lists paths or owner/repo[@ref]; remote sources are fetched once by `skills.mjs fetch`, never at run time; duplicate names are refused. For a run: mounted read-only at the claude CLI's skills path; the openai-compatible adapter lists them and offers read_skill. Never copied into the workspace. Gate verdicts not recorded.",
+          "gate": {
+            "reviewer": {
+              "verdict": "fail",
+              "at": "2026-09-29",
+              "note": "Independent review (fresh agent, not the builder): path traversal from untrusted skill metadata onto the host. stage() copies each skill to join(into, sk.name) (skills.mjs:153), and sk.name is the SKILL.md frontmatter 'name' (:97), taken from a third-party repo unvalidated. Reproduced in a copy: a skill with 'name: ../../victim/planted' and a harness.json beside its SKILL.md was staged; cpSync wrote victim/planted/SKILL.md and victim/planted/harness.json OUTSIDE the staging dir. Staging runs on the host before any sandbox, into /tmp/caretaker-skills-PID-TS. A name like ../../home/USER/.config/caretaker drops a harness.json that points endpoint (with the API key) at an attacker, and ~/.ssh is reachable the same way. Require the name to match the directory name, or /^[a-z0-9][a-z0-9-]*$/. The rest is sound: standard layout read with no new fields, fetch-never-at-run-time, duplicates refused, read-only mount, read_skill confined; skills.test.mjs green."
+            },
+            "qa": {
+              "verdict": "fail",
+              "at": "2026-09-29",
+              "note": "Independent QA (fresh agent, not the builder): stage() joins the frontmatter name onto the staging path. A repo in the skills/<cat>/<name>/SKILL.md layout with name: ../../../s1-escaped made stageForRun write /tmp/s1-escaped/SKILL.md outside the staging dir on the host, and that skill was silently not available to the run (staged() listed only \"good\"). So pointing at an untrusted repo can write host paths, and it loses skills without an error."
+            }
+          }
         },
         {
           "id": "S-2",
@@ -443,12 +957,34 @@
           "title": "Estimate in tokens, not hours",
           "owner": "backend",
           "est": "1d",
-          "status": "todo",
+          "status": "doing",
           "deps": [
             "P-2"
           ],
           "ac": "a task's estimate is in tokens, actuals come from the run log automatically, and a calibration factor per task type re-estimates the open work with no human input",
-          "note": "Hours are what humans spend and require a human to report, so the calibration loop never closes. Tokens are measured exactly at the end of every run. Hours stay as a secondary display for people who think in days."
+          "note": "Hours are what humans spend and require a human to report, so the calibration loop never closes. Tokens are measured exactly at the end of every run. Hours stay as a secondary display for people who think in days. — Built: bin/kpis.mjs tokenEstimates. A task may carry estTokens (400k, 1.2m); actuals are the run log's rows for it. Per task type (owner), closed work gives a factor (actual/estimated tokens) and a tokens-per-hour rate; open work is re-estimated from them with no human input, each figure naming its basis, falling back to all closed work, and hour-only tasks converted at the rate. Shown on the web Metrics page. Checked by bin/kpis.test.mjs; mutations K2-K5 fail by name. Nothing here has token actuals yet, so the board shows 'no basis' until run.mjs rows accumulate. Gate verdicts not recorded.",
+          "gate": {
+            "reviewer": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "note": "Independent review (fresh agent, not the builder): checked kpis.mjs tokenEstimates (per-owner factor and tok/h, fallback to all closed work, basis strings, dropped excluded) against kpis.test; parseTokens; no false comments found. Nits: estHours(t) ignores cfg.dayHours (kpis.mjs:92,108); remaining.tokens sums full estimates of doing tasks without subtracting actualSoFar; no board task carries estTokens yet, as the note says."
+            },
+            "qa": {
+              "verdict": "fail",
+              "at": "2026-09-29",
+              "t": "2026-09-29T22:18:07.334Z",
+              "by": "root",
+              "via": "cli",
+              "note": "Independent re-review, round 3 (fresh agent, not the builder): fixed for runstore: a run given --task writes a task-tagged row through run.mjs (drift-after-run.test passes; disabling the write at runstore.mjs:402 fails both checks by name, restored and checksummed). Still stands: the unattended loop logs run.mjs end --name cron-loop with no --task (loop.sh:122,157), so loop work never calibrates, and a task closed by the loop has no actual and is skipped (kpis.mjs:83). New: the kpis CLI reads raw rows (kpis.mjs:261) and actualsByTask sums r.tokens (:64), not the parts. Scratch: row {task:T-1,in:10,out:10,tokens:400000} gives factor 4000 and re-estimates open work at 400000; the web path (readRuns) gives 20.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent QA (fresh agent, not the builder): actuals do not come from the run log automatically. Nothing writes a task-tagged token row: loop.sh logs run.mjs end --name cron-loop with no --task, and runstore-archived runs (run.json carries task and cost) are not read by kpis, since readmodel passes runs.jsonl rows only. So the calibration never gets an actual without a human typing run.mjs end --task. tokenEstimates itself is correct, and bin/kpis.test.mjs passes."
+                }
+              ]
+            }
+          }
         },
         {
           "id": "B-3",
@@ -460,33 +996,143 @@
             "P-1"
           ],
           "ac": "a task carries a spec path rendered as a link on its card, and a check compares each doc's claimed updated: date against the last commit that touched it and names the ones that lie",
-          "note": "Built: freshness.mjs names every doc whose updated: is older than its own last commit, and the web Specs page shows stale, lying and undated docs. The task's spec already shows on the web work item. On its first run it caught docs/board.md claiming 2026-08-30 after today's edits. Gate verdicts not recorded."
+          "note": "Built: freshness.mjs names every doc whose updated: is older than its own last commit, and the web Specs page shows stale, lying and undated docs. The task's spec already shows on the web work item. On its first run it caught docs/board.md claiming 2026-08-30 after today's edits. Gate verdicts not recorded.",
+          "gate": {
+            "reviewer": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "t": "2026-09-29T22:18:15.117Z",
+              "by": "root",
+              "via": "cli",
+              "note": "Independent re-review, round 3 (fresh agent, not the builder): specHref (board.mjs:302-310) and specMeta (dashboard.mjs:635-643) now allow only [\\w./-] paths with no leading / or .., and check the computed href for a scheme. The ops/caretaker copies are identical. Fed docs/javascript:alert(1), JaVaScRiPt:, data:, a quote/img payload, ../ climbs, //evil.com and a tab through render() and board.mjs build in a clone: all come out as escaped text. docs/.//evil.com becomes a harmless relative 'evil.com'. Reverting to the old guard fails 'a scheme that only appears after the relative path is taken…' and the dashboard-lib check by name (restored, sha256 OK). The freshness lying check is correct. Nit: the web Activity card shows the spec as text.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent review (fresh agent, not the builder): freshness.mjs itself is correct (stale/lying/undated, same-day not a lie), but the first half of the AC is unmet and the note overclaims it: the spec path is rendered as plain text, not a link (web/src/pages/WorkItem.tsx:105 <span className=mono>), and no card shows it at all (board.mjs taskBlock :276-310, dashboard cards, web Dashboard)."
+                },
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent re-review (fresh agent, not the builder): old points fixed (board.md/board.html cards link the spec, WorkItem links governing specs; freshness, board-facts, dashboard-lib tests pass). New defect in the control the commit claims (a URL is 'never a link'): specHref checks for a scheme BEFORE path.relative, so spec 'docs/javascript:alert(document.cookie)' relativises from docs/ to href=\"javascript:alert(document.cookie)\" (bin/board.mjs:302-305, bin/dashboard.mjs:613-617). Reproduced end to end in a scratch clone with board.mjs build (docs/board.md) and via render() for board.html, which has no CSP. Check the scheme on the computed href too, or prefix ./."
+                }
+              ]
+            },
+            "qa": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "t": "2026-09-29T22:18:15.216Z",
+              "by": "root",
+              "via": "cli",
+              "note": "Independent re-review, round 3 (fresh agent, not the builder): both earlier points are fixed. docs/board.md and board.html cards link the spec relative to the page (memory.md, ../specs/sandbox.md), and 12 hostile values through board.mjs build and dashboard render() in a clone (docs/javascript:, mixed-case and data: schemes, a quote/img XSS payload, .., //host, a tab) all render as escaped text, never an href. The mutation back to the old guard fails board-facts and dashboard-lib by name. freshness names lying docs (test green; 0 lying on this repo). Minor: the web Activity.tsx card and a non-governing spec on WorkItem are still plain text.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent QA (fresh agent, not the builder): the spec path is not rendered as a link on any card. docs/board.html and docs/board.md never print t.spec (grep for spec in dashboard.mjs and board.mjs taskBlock finds nothing), and the web WorkItem.tsx:105 shows it as plain mono text with no href. The freshness half holds: bin/freshness.test.mjs passes, and disabling the lying comparison fails it by name."
+                },
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent re-review (fresh agent, not the builder): the old finding is fixed: board.md and board.html cards show 'spec <a href=../specs/…>' and the web WorkItem links a governing spec to /specs?path=; tests pass. But the non-path edge case the tests cover (https:, javascript:, ../, /) is bypassable: a spec of 'docs/javascript:alert(document.cookie)' renders href=\"javascript:alert(document.cookie)\" on the card, since the scheme test runs before path.posix.relative strips 'docs/' (bin/board.mjs:302-305, bin/dashboard.mjs:613-617). Reproduced in a scratch clone with board.mjs build and dashboard render(). Minor: the web board card (Activity.tsx) shows the spec as text, not a link."
+                }
+              ]
+            }
+          }
         },
         {
           "id": "B-4",
           "title": "KPIs: delivery and AI, and the anti-KPIs left out on purpose",
           "owner": "backend",
           "est": "2d",
-          "status": "todo",
+          "status": "doing",
           "deps": [
             "B-2",
             "P-2"
           ],
           "ac": "the dashboard reports deploy frequency, lead time, change failure rate and time to restore from git and the board; and tokens per closed task, cost per merged diff line, first-pass gate rate, rework rate, model mix, estimate calibration and human intervention rate from the run log",
-          "note": "Lines of code, agents spawned and tasks-per-day without effort weighting are deliberately absent. Each rewards exactly the wrong behaviour."
+          "note": "Lines of code, agents spawned and tasks-per-day without effort weighting are deliberately absent. Each rewards exactly the wrong behaviour. — Built: bin/kpis.mjs. Delivery from git (a deploy is a first-parent merge; lead time branch-first-commit to merge; change failure = merge reverted after landing, a branch-internal revert is not one; time to restore merge to revert). AI: tokens per closed task, tokens per merged line (dollars only if cfg.pricing prices every model), first-pass and rework, model mix, estimate calibration, human intervention (questions, triage or spec not approved). Anti-KPIs listed with reasons. All null with a reason when not recorded. In the Metrics API and page, and node bin/kpis.mjs. Checked by bin/kpis.test.mjs on a scratch repo with dated merges and reverts, plus serve.test; mutations K1, K6-K12 fail by name. Gate verdicts not recorded.",
+          "gate": {
+            "reviewer": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "note": "Independent re-review (fresh agent, not the builder): all three points fixed in bin/kpis.mjs:201-210,148. Scratch probe: the old case (one 1M-token run from March, 100 merged lines) now gives tokensPerMergedLine null with basis '0 of 1 run(s) with tokens fall in the 30-day window'; a real-shaped log with a start row, an in-window priced end row, an out-of-window run and an untimed run gives 20 tok/line and $0.0002/line, both hand-checked. readmodel.mjs:699 and the CLI pass gitFacts, which now carries since/until. firstAt is chosen by Date.parse. In a scratch clone, dropping the window filter fails 5 kpis tests by name; dropping the tokens filter fails 4.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent review (fresh agent, not the builder): cost per merged line is wrong: tokensPerMergedLine and dollarsPerMergedLine divide ALL-TIME run-log tokens by merged lines in the git window (kpis.mjs:194-206; readmodel.mjs:691 passes unranged rows with a 7/14/30-day window), so one old 1M-token run over a 7-day window gave 100100 tok/line. And dollars is null whenever the log has any start row (kpis.mjs:196-197 needs every row priced; run.mjs start rows carry no tokens), so $/line never appears on a real log. Test RUNS have no start rows and no timestamps, so neither is caught. Nit: lead time sorts %aI strings with mixed offsets lexically (:146)."
+                }
+              ]
+            },
+            "qa": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "note": "Independent re-review (fresh agent, not the builder): the old repro now gives tokensPerMergedLine null, with a basis saying 0 of 1 runs fall in the window. Edge cases checked in a scratch probe: facts with no since (the old test shape) give null, not all-time; a start row without tokens no longer blocks pricing; an untimed row is left out and counted; a row priced only by a total leaves $ null with a basis that says why. node bin/kpis.mjs on this repo runs (12 merges, 18900 lines, no run log, so reported as not recorded). kpis.test passes, and 5 tests fail by name when the window filter is mutated out in a scratch clone.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent QA (fresh agent, not the builder): cost per merged diff line divides all-time run-log tokens by merged lines in the git window. ai({phases:[]},[{t:'2026-03-01T00:00:00Z',tokens:1e6}],{days:30,merges:[{lines:100,...}],reverts:[]}) gives 10000 tokens/line with zero spend in the window, and readmodel.metrics and the CLI do the same, since rows are unwindowed. The other KPIs and the anti-KPIs check out in bin/kpis.test.mjs; they show on the web Metrics page, not docs/board.html."
+                }
+              ]
+            }
+          }
         },
         {
           "id": "B-5",
           "title": "Externalise before compaction, continuously",
           "owner": "backend",
           "est": "1d",
-          "status": "todo",
+          "status": "doing",
           "deps": [
             "H-6"
           ],
           "spec": "docs/memory.md",
           "ac": "reasoning is written to the artifact it explains as a run proceeds rather than at the end, so a compacted or killed session loses nothing that was already decided",
-          "note": "Compaction is lossy and unavoidable, so the principle is externalise early rather than avoid compacting. Measured in the project this came from: everything that survived was written where it attaches to the artifact - commit message, board note, decision record. Everything that lived only in the conversation is gone, including reasoning that took hours to reach."
+          "note": "Compaction is lossy and unavoidable, so the principle is externalise early rather than avoid compacting. Measured in the project this came from: everything that survived was written where it attaches to the artifact - commit message, board note, decision record. Everything that lived only in the conversation is gone, including reasoning that took hours to reach. — Built: runstore's live mirror hands each redacted line to harvest.liveRecorder, which appends any DECISION to the run's decisions.live.jsonl as it is written; a killed run keeps what it had decided (tested with a run killed mid-sleep). The agent prompt now says to write things where they attach as you go. LIMIT: it is as live as the adapter's output. The openai-compatible adapter logs every turn as it happens; the claude CLI preset uses --output-format json, one result at exit, so a killed claude run loses its unprinted turns. Switching that preset to stream-json is the fix and needs a real claude CLI to verify. Mutations Hv1, Hv2 fail by name. Gate verdicts not recorded.",
+          "gate": {
+            "reviewer": {
+              "verdict": "fail",
+              "at": "2026-09-29",
+              "t": "2026-09-29T22:18:20.389Z",
+              "by": "root",
+              "via": "cli",
+              "note": "Independent re-review, round 3 (fresh agent, not the builder): old points fixed: the claude preset uses stream-json --verbose (flags checked against claude --help, no model call); loop.sh harvests a pass whose claude exits 137; the StringDecoder mutation fails the runstore test by name. New defect from the stream-json switch: harvest walks EVERY string in every event (transcript.mjs:12-14, harvest.mjs:70), including tool_result text the agent only read. Scratch loop with a fake CLI whose Bash tool output held 'DECISION: disable the egress proxy for speed': both fixture lines were harvested as pending decisions for the Inbox while the agent decided nothing. Also: if loop.sh itself is killed, nothing is archived and the raw stream stays in /tmp.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent review (fresh agent, not the builder): the live mirror + liveRecorder path works for runstore runs, but ops/caretaker/prompt.txt:18-23 (changed in this commit) tells the agent a DECISION line 'reaches a human's Inbox'. Its only consumer, bin/loop.sh, runs claude directly with no runstore archive or harvest and deletes the output at :126, so in the loop every declared decision is lost, the opposite of the AC. Either route loop.sh through runstore or make the prompt say the DECISION line is harvested only for archived runs. Nit: startMirror decodes each chunk alone (runstore.mjs:115), so a multibyte char such as the em dash split across polls becomes U+FFFD."
+                },
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent re-review (fresh agent, not the builder): a successful loop pass now archives and harvests its output (harvest.mjs import; loop.test passes). But the AC case, a killed session, still loses its decisions in the loop: loop.sh:95-99 exits before the harvest on any nonzero rc and rm's the output, keeping only its last 2000 bytes, unredacted, in loop.log. Scratch clone, fake CLI printing a DECISION then exit 137: no run archived, nothing reaches the Inbox. The prompt's 'harvests these ... when it ends' holds only for a clean exit. The multibyte nit also stands: runstore.mjs:114 decodes each chunk alone, and an em dash split across two pumps reached onLine as U+FFFD (reproduced)."
+                }
+              ]
+            },
+            "qa": {
+              "verdict": "fail",
+              "at": "2026-09-29",
+              "t": "2026-09-29T22:18:25.750Z",
+              "by": "root",
+              "via": "cli",
+              "note": "Independent re-review, round 3 (fresh agent, not the builder): tests pass (loop 16, runstore 54, harness 87). A pass killed at claude (exit 137) is now archived and its DECISION harvested. Broke it two ways in scratch copies of loop.sh with a fake stream-json CLI: (1) a tool_result carrying grep output ' *  DECISION: store every secret in plain text…' and 'DECISION: disable the egress proxy…' made harvest.json list both as the pass's pending decisions (transcript.mjs walks user/tool events too). (2) timeout -s KILL on loop.sh after a DECISION was streamed: no run archived, nothing reached the Inbox, and the unredacted stream stayed in /tmp/caretaker-loop-out.*. The loop harvests at the end, not as the pass proceeds.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent QA (fresh agent, not the builder): the AC holds only for adapters that print as they go. The claude preset (harness.mjs CLI_PRESETS, --print --output-format json) emits one result at exit, so mid-run DECISION lines never reach the mirror, killed or not. ops/caretaker/loop.sh, the unattended path, bypasses runstore entirely, so it gets no live record. Decisions also land in the run archive's decisions.live.jsonl rather than the artifact they explain. The killed-run test passes, but only with a shell fake that echoes."
+                },
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent re-review (fresh agent, not the builder): two of the old points still stand. (1) The claude preset still uses --print --output-format json (harness.mjs:214-219), so it prints one result at exit and a killed claude run records no decision. The note lists this as a LIMIT; it is not fixed. (2) The loop is still not live. It harvests only after a clean exit. In a scratch clone, loop.sh with a fake CLI that prints a DECISION and exits 137 archives no run and sends nothing to the Inbox (loop.sh:95-99 deletes the output). A clean pass is now harvested at the end, and loop.test and runstore.test pass. The AC case (killed, loses nothing) fails on both real paths."
+                }
+              ]
+            }
+          }
         },
         {
           "id": "B-6",
@@ -497,7 +1143,26 @@
           "deps": [],
           "spec": "docs/events.md",
           "ac": "every run appends JSONL to a day-rotated events file, tail -f and jq give the per-task, per-run and failures-only views with no extra tooling, and a half-written final line is skipped rather than throwing",
-          "note": "The organising key is a FIELD, never a folder. A run spans tasks, a task spans runs, a PR maps to neither, so any directory hierarchy locks in an assumption that breaks once there is history in the old shape. level is the field that gets skipped and then missed: without it an autonomous run logs too little to debug and too much to read, on the same day. — Built in #6 (merged): bin/events.mjs is the one writer and reader, day-rotated by each line's own t, level required, a half-written line skipped and counted. Checked by bin/events.test.mjs. Gate verdicts not recorded."
+          "note": "The organising key is a FIELD, never a folder. A run spans tasks, a task spans runs, a PR maps to neither, so any directory hierarchy locks in an assumption that breaks once there is history in the old shape. level is the field that gets skipped and then missed: without it an autonomous run logs too little to debug and too much to read, on the same day. — Built in #6 (merged): bin/events.mjs is the one writer and reader, day-rotated by each line's own t, level required, a half-written line skipped and counted. Checked by bin/events.test.mjs. Gate verdicts not recorded.",
+          "gate": {
+            "reviewer": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "note": "Independent re-review (fresh agent, not the builder): docs/events.md:32-35 now gives the true reason for -F (today's file may not exist yet) and says a tail does not cross midnight UTC. Checked: GNU tail -F on a missing file waits and reports 'has appeared; following new file'. events.mjs path resolves to today's dated name. The example (:11) no longer names pricing. 'Only what broke' now includes level error. events.test passes and reads the views from the doc: in a scratch clone, reverting that filter to .verdict==\"fail\" fails 'the views tested are the views docs/events.md documents' by name. events.mjs is unchanged since the earlier sound review.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent review (fresh agent, not the builder): events.mjs is sound (strict write, lenient read, fragment-terminating O_APPEND single write, day by own t). Fails on the doc it governs: docs/events.md:32 says 'tail -F rather than -f, because the file changes name at midnight UTC'. That is false: tail -F follows the NAME it was given, and $(node bin/events.mjs path) is resolved once, so the documented live watch goes silent at 00:00 UTC. -F is right for a different reason (today's file may not exist yet). A correct choice defended with a wrong reason, and the tailable view it describes breaks daily. Nit: the example event (:11) uses pricing.ts/pricing.md."
+                }
+              ]
+            },
+            "qa": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "note": "Independent QA (fresh agent, not the builder): bin/events.test.mjs passes and harness.run appends start/end events per run. By hand, the three documented jq -R 'fromjson?' views read a file with a fragment, tail -F showed a live append, and read() skipped and counted the fragment. Removing the fragment-terminating newline, or making parse throw, turns the test red. Minor: the documented failures view selects only .verdict=fail, so an errored run (level error, no verdict) is missing from it."
+            }
+          }
         },
         {
           "id": "B-7",
@@ -510,7 +1175,7 @@
           ],
           "spec": "docs/events.md",
           "ac": "task status is computed by replaying events rather than stored, and the board and the log cannot disagree because the board IS the log folded up",
-          "note": "Same reasoning that made gate verdicts append: a record keeping only the latest value cannot answer how many attempts it took, and that turned out to matter more than the current state."
+          "note": "Same reasoning that made gate verdicts append: a record keeping only the latest value cannot answer how many attempts it took, and that turned out to matter more than the current state. — Owner decision 2026-09-29: deferred. board.json stays authoritative for now; revisit once the event log has history worth projecting from."
         },
         {
           "id": "B-8",
@@ -523,7 +1188,49 @@
           ],
           "spec": "docs/vendors.md",
           "ac": "the run log records in/cached/write/out/turns/model per run, the total is DERIVED from the parts rather than stored beside them, and the dashboard shows output share, context churn, tokens per turn, rework spend and spend by model",
-          "note": "THE TOTAL HIDES THE ONLY ACTIONABLE PART. A run reporting 400k tokens is unreadable; the same run as 380k cache reads, 15k fresh input and 5k output says immediately that the cost is context REPLAY rather than work, and those want opposite fixes - better context selection versus a smaller task.\n\nRework spend is the one number that bought nothing, and it only became computable once gate verdicts started appending. Cost is a PROJECTION rather than a stored figure, because a subscription run and a self-hosted run both have zero marginal token cost while still spending tokens as effort. — Built (board status lagged): bin/run.mjs records in/cached/write/out/turns/model and DERIVES the total, refusing a total that disagrees with its parts; dashboard.mjs shows output share, context churn, tokens per turn, rework spend and spend by model. Gate verdicts not recorded."
+          "note": "THE TOTAL HIDES THE ONLY ACTIONABLE PART. A run reporting 400k tokens is unreadable; the same run as 380k cache reads, 15k fresh input and 5k output says immediately that the cost is context REPLAY rather than work, and those want opposite fixes - better context selection versus a smaller task.\n\nRework spend is the one number that bought nothing, and it only became computable once gate verdicts started appending. Cost is a PROJECTION rather than a stored figure, because a subscription run and a self-hosted run both have zero marginal token cost while still spending tokens as effort. — Built (board status lagged): bin/run.mjs records in/cached/write/out/turns/model and DERIVES the total, refusing a total that disagrees with its parts; dashboard.mjs shows output share, context churn, tokens per turn, rework spend and spend by model. Gate verdicts not recorded.",
+          "gate": {
+            "reviewer": {
+              "verdict": "fail",
+              "at": "2026-09-29",
+              "t": "2026-09-29T22:18:34.113Z",
+              "by": "root",
+              "via": "cli",
+              "note": "Independent re-review, round 3 (fresh agent, not the builder): fixed: rework uses the verdict instant t (same-day fail then pass with t: 100 of 5100 wasted, not 100%), tasks counts only spend sent back, and tokenStats/readRuns re-derive from the parts (rowTokens, dashboard.mjs:315). Still stands: run.mjs:176 (and ops/caretaker/run.mjs:176) stores tokens beside the parts, against the ac's 'rather than stored beside them', and not every reader re-derives. bin/kpis.mjs:261 parses runs.jsonl raw and kpis.mjs:64-65,203-206 sum r.tokens. Scratch: {task:T-1,in:10,out:10,tokens:400000} gives kpis tokens/closed task 400000 and factor 4000, while the dashboard says 20. Two readers, two totals.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent review (fresh agent, not the builder): the rework-spend number is wrong as labelled. dashboard.mjs:308-327 counts every token of any task that ever failed a gate, including the attempt that passed, and tasks = every such task whether or not it ran again. The page (:1067-1071) says 'tokens on N tasks that failed a gate and ran again. The one number here that bought nothing'. The test's own fixture asserts 120000 for T-001, which had a single run. Also the only run-log writer, bin/loop.sh:105-119, sums the usage parts into --tokens and drops in/cached/write/out/turns/model, so the composition panel is empty on real data. run.mjs derives and checks the total but still stores it beside the parts (AC says rather than)."
+                },
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent re-review (fresh agent, not the builder): fixed: loop.sh passes in/cached/write/out/turns/model, and run.test covers derivation and refusal. Still stands: (1) the AC says the total is derived 'rather than stored beside' the parts, yet run.mjs:163-178 still writes tokens next to them and tokenStats sums r.tokens (dashboard.mjs). {in:10,out:10,tokens:400000} gives total 400000, compTotal 20. (2) rework spend still counts the passing attempt whenever the fail and the retry share a date, which is the normal case here: reworkSpend with a qa fail and a pass on the same day, plus a 5000-token passing run, reports 100% wasted. Its tasks count also includes tasks with no later run. The label now admits the same-day case, but the number is still wrong."
+                }
+              ]
+            },
+            "qa": {
+              "verdict": "fail",
+              "at": "2026-09-29",
+              "t": "2026-09-29T22:18:34.196Z",
+              "by": "root",
+              "via": "cli",
+              "note": "Independent re-review, round 3 (fresh agent, not the builder): dashboard-lib, board-facts, run and loop tests pass. Verified: tokenStats([{in:10,out:10,tokens:400000}]).total is 20; reworkSpend with t-stamped same-day fail then pass counts only the pre-fail run. Legacy verdicts without t still count a same-day retry as 100% rework, and every verdict on this board predates t. Still broken: the stored total survives (run.mjs:176) and the kpis CLI believes it. node bin/kpis.mjs on a scratch repo whose one row is {in:10,out:10,tokens:400000} reports tokens/closed task 400000 and calibration factor 4000 (kpis.mjs:261 reads raw rows, :64 sums r.tokens). The total is not derived everywhere it is read.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent QA (fresh agent, not the builder): the total is stored beside the parts, not derived in place of them. run.mjs end --in 15000 --cached 380000 --out 5000 writes tokens:400000 next to them, and tokenStats/kpis read r.tokens, so a row whose total and parts disagree is believed. loop.sh, the only automated writer, throws away the usage breakdown it parses and logs --tokens only, with no model or turns. No test covers run.mjs derivation or refusal. rework spend also counts the passing attempt's tokens as waste."
+                },
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent re-review (fresh agent, not the builder): the first point from the old QA still stands. run.mjs still stores tokens beside the parts (run.mjs:176), and readers believe it. dashboard tokenStats([{in:10,out:10,tokens:400000}]) gives total 400000 against a composition total of 20, and readRuns does not re-derive it. Rework still counts the passing attempt when it falls on the day of the fail: a same-day fail, a 100-token failed run and a 5000-token passing run report wasted 5100 (100%). Fixed: loop.sh now logs the breakdown, turns and a single model (loop.test passes), and run.test covers derivation and a refused mismatch."
+                }
+              ]
+            }
+          }
         }
       ]
     },
@@ -573,7 +1280,49 @@
           ],
           "spec": "docs/architecture.md",
           "ac": "a graduate command emits a workflow file built from the commands the gates really ran, a docs site from the specs really written, and a decision index from the ADRs really recorded; nothing in the output is a template placeholder",
-          "note": "Every scaffolder emits CI at init, when it knows nothing about the project. During a build CI is friction; at handoff its absence is what makes a project unmaintainable. — Built: bin/graduate.mjs all writes graduate/.github/workflows/ci.yml, graduate/site/ and graduate/DECISIONS.md, never over the project's own files. Each CI step carries the evidence it came from: tests in bin/, a real npm test script (npm's default is not evidence), a drift gate only if drift gate runs are in the event log (a refutation naming drift is not one), the board-current step if the config names a board markdown. No evidence, no workflow, and the skip says why. The site shows each spec with freshness (stale / date lies / current). Checked by bin/graduate.test.mjs; mutations M1-M7 each fail it by name. E-4 is not done, so nothing here has been graduated onto a real box. Gate verdicts not recorded."
+          "note": "Every scaffolder emits CI at init, when it knows nothing about the project. During a build CI is friction; at handoff its absence is what makes a project unmaintainable. — Built: bin/graduate.mjs all writes graduate/.github/workflows/ci.yml, graduate/site/ and graduate/DECISIONS.md, never over the project's own files. Each CI step carries the evidence it came from: tests in bin/, a real npm test script (npm's default is not evidence), a drift gate only if drift gate runs are in the event log (a refutation naming drift is not one), the board-current step if the config names a board markdown. No evidence, no workflow, and the skip says why. The site shows each spec with freshness (stale / date lies / current). Checked by bin/graduate.test.mjs; mutations M1-M7 each fail it by name. E-4 is not done, so nothing here has been graduated onto a real box. Gate verdicts not recorded.",
+          "gate": {
+            "reviewer": {
+              "verdict": "fail",
+              "at": "2026-09-29",
+              "t": "2026-09-29T22:18:42.200Z",
+              "by": "root",
+              "via": "cli",
+              "note": "Independent re-review, round 3 (fresh agent, not the builder): old points fixed: install follows the repo (npm install with deps and no lockfile, nothing with neither); --out at a file gives OUT_NOT_DIR, exit 2; --out . .. bin/.. ops are refused; the branch comes from origin/HEAD. Still stands: a step comes from phrasing, not a run. RAN/NEGATED (graduate.mjs:278-282) test the sentence, not the command. A passing qa note 'Looks good and passes, but I skipped npm run deploy and node bin/b.test.mjs is broken so I left it alone' yields a ci.yml running npm run deploy on every push and PR, and b.test.mjs, which exits 1. 'Pass: node bin/b.test.mjs exits 1…' also becomes a step.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent review (fresh agent, not the builder): graduate.mjs:22-23 claims output is 'never over the project's own files', but graduate() writes wherever --out points with no guard (:316-335). In a scratch clone, graduate all --out . overwrote .github/workflows/ci.yml with a generated one that drops the podman image pull (the live sandbox/egress attacks), the web build and the installed-copy check, with no warning. Refuse an out dir that resolves to the repo root, or to any existing tracked file. Nits: branches [main], ubuntu-24.04 and node 22 are fixed template values, not derived; the drift step is found by matching the detail text /drift|governed/ (:193)."
+                },
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent re-review (fresh agent, not the builder): the old point is fixed: in a scratch repo --out ., .., '', bin/../, ops, ops/caretaker/events and a symlink to the root are all refused, exit 2, nothing written (graduate.mjs:413-416). New defect against the ac 'built from the commands the gates really ran': :266 prefixes every npm step with 'npm ci', which no gate ran and which exits EUSAGE with no package-lock.json (run in scratch: 'npm ci can only install with an existing package-lock.json'), so a lockfile-less repo gets a CI that is red on every push. Nits: --out naming an existing file crashes with a raw ENOTDIR stack; branches [main] is still a fixed value, not the repo's branch."
+                }
+              ]
+            },
+            "qa": {
+              "verdict": "fail",
+              "at": "2026-09-29",
+              "t": "2026-09-29T22:18:42.287Z",
+              "by": "root",
+              "via": "cli",
+              "note": "Independent re-review, round 3 (fresh agent, not the builder): graduate.test green; on this repo graduate all --out /tmp/x writes a ci.yml whose three test steps each cite a pass note, the site and DECISIONS.md with no placeholders. In scratch repos the mention-vs-run point still stands. 'I did not run…' and 'I would not recommend anyone run npm run build' are now dropped. But 'Looks good and passes, but I skipped npm run deploy and node bin/b.test.mjs is broken' gave steps 'npm run deploy' (scripts.deploy ./deploy-prod.sh) and 'node bin/b.test.mjs' (exits 1). 'Pass: node bin/b.test.mjs exits 1 on this branch' gave that step too. 'skipped', 'broken' and 'exits 1' are not negations to NEGATED (graduate.mjs:282).",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent QA (fresh agent, not the builder): the workflow is built from file presence and a regex, not from commands a gate ran. A scratch repo with only a never-run, failing bin/never-run.test.mjs, one hand-emitted gate event whose detail says drift, and a config naming boardMarkdown gets a ci.yml with tests, drift gate and board steps. It calls bin/drift.mjs and ops/caretaker/board.mjs, which do not exist there. The docs site and decision index hold, and bin/graduate.test.mjs passes."
+                },
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent re-QA (fresh agent, not the builder): partly fixed: board and drift steps no longer come from a config key or a regex (a real drift summary event with no drift.mjs is skipped and said), and a named file the repo lacks is skipped. The core point still stands: steps come from any mention in a note, not a run. Scratch repo whose only gate note is a FAIL reading 'I did not run node bin/never-run.test.mjs, and npm run build was never tried; do not run npm test either' gets a ci.yml with all three steps, each citing that note as 'named as run'; never-run.test.mjs exits 1 (NAMED regex, graduate.mjs:217). The npm steps also add 'npm ci', which fails with no lockfile. Site and decision index hold; graduate.test green."
+                }
+              ]
+            }
+          }
         },
         {
           "id": "G-2",
@@ -603,7 +1352,19 @@
           "status": "doing",
           "deps": [],
           "ac": "docs/decisions/0002-an-optional-web-client.md says accepted or rejected, and records whether any W-task may start before H-1 passes qa",
-          "note": "Spec: specs/caretaker-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Accepted 2026-09-29 by Five. It records that no W-task starts before H-1's qa gate passes. PR #9 carries W-tasks while H-1's latest qa verdict is still fail. Resolving that is a decision, not a build step."
+          "note": "Spec: specs/caretaker-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Accepted 2026-09-29 by Five. It records that no W-task starts before H-1's qa gate passes. PR #9 carries W-tasks while H-1's latest qa verdict is still fail. Resolving that is a decision, not a build step.",
+          "gate": {
+            "reviewer": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "note": "Independent review (fresh agent, not the builder): ADR-0002 is marked accepted (2026-09-29, by Five) and records the ordering call explicitly: no W-task starts before H-1's qa gate passes. AC met. Notes: its line 'The proposed tasks are still not on the board' is now overtaken (they are), and the ordering it records is being contradicted by W-1..W-17 being built while H-1's latest qa is still fail; that needs a superseding decision or the W-tasks wait, not a quiet pass."
+            },
+            "qa": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "note": "Independent QA (fresh agent, not the builder): read docs/decisions/0002-an-optional-web-client.md at 46927f2. Frontmatter status: accepted, and the Decision section says Accepted on 2026-09-29 by Five and records the ordering call explicitly: No W-task starts before H-1's qa gate passes; C-1/C-2/C-3/C-6 may start now; C-4/C-5 wait on H-1 and B-6. Both halves of the AC hold. Outside this AC: the board contradicts that recorded call (W-1..W-17 are doing while H-1 is todo with qa fail), and the ADR's closing line that the tasks are still not on the board is stale."
+            }
+          }
         },
         {
           "id": "C-1",
@@ -613,7 +1374,19 @@
           "status": "doing",
           "deps": [],
           "ac": "board.mjs exports its domain functions behind an entry guard, a golden test proves the CLI's output and exit codes unchanged, and the read-modify-write is locked",
-          "note": "Spec: specs/caretaker-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built in PR #9, which also carries C-1, C-2, C-3, C-6 and U-2. Gate verdicts not recorded: nobody closes their own work."
+          "note": "Spec: specs/caretaker-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built in PR #9, which also carries C-1, C-2, C-3, C-6 and U-2. Gate verdicts not recorded: nobody closes their own work.",
+          "gate": {
+            "reviewer": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "note": "Independent review (fresh agent, not the builder): frozen testdata/board.pre-c1.mjs matches git 15a73a2 (mod rename); golden test covers every pre-C1 command and refusal; import reads nothing; lock uses O_EXCL + stale-pid/ino takeover + temp-and-rename; 40 parallel notes kept 3/3 runs. Nits: the 12-writer race test caught a lock-free board.mjs only 3 of 6 runs (weak detector); build() runs outside the lock so board.md can briefly lag; a holder alive past LOCK_STALE_MS loses the lock and its finally then removes the successor's lock (board.mjs:117,171)."
+            },
+            "qa": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "note": "Independent QA (fresh agent, not the builder): bin/board-lib.test.mjs passes; the frozen testdata/board.pre-c1.mjs equals 15a73a2:bin/board.mjs (renamed), and mutating the REFUSED text, removing withLock, or dropping the isEntry guard each turns the golden, 12-writer race, or import checks red by name. A live lock holder is waited on and refused after 5s, and a 60s-old lock is taken over."
+            }
+          }
         },
         {
           "id": "C-2",
@@ -623,7 +1396,19 @@
           "status": "doing",
           "deps": [],
           "ac": "dashboard.mjs exports pure metric functions, and a back-to-back test proves docs/board.html is unchanged",
-          "note": "Spec: specs/caretaker-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built in PR #9, which also carries C-1, C-2, C-3, C-6 and U-2. Gate verdicts not recorded: nobody closes their own work."
+          "note": "Spec: specs/caretaker-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built in PR #9, which also carries C-1, C-2, C-3, C-6 and U-2. Gate verdicts not recorded: nobody closes their own work.",
+          "gate": {
+            "reviewer": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "note": "Independent review (fresh agent, not the builder): frozen testdata/dashboard.pre-c2.mjs matches git e52fde1; back-to-back HTML, stdout and history identical; metrics() and the listed pure functions exported; render/history/write behind isEntry. Nits (pre-existing, not C-2): readGit commitsPerTask only matches T-NNN ids so cycle time is empty for this board (dashboard.mjs:467); pctTasks counts dropped tasks while board.mjs excludes them, so the two surfaces headline different percentages."
+            },
+            "qa": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "note": "Independent QA (fresh agent, not the builder): bin/dashboard-lib.test.mjs passes against a frozen pre-C-2 copy that matches 83a3107^ (renamed); all spec-named functions are exported and read no fs or clock beyond a defaulted now. Mutating esc(), the rework sum, and the isEntry guard each fails the back-to-back page diff or the import checks by name."
+            }
+          }
         },
         {
           "id": "C-3",
@@ -635,7 +1420,26 @@
             "C-1"
           ],
           "ac": "a pure stageOf and commandsFor derive a work item's stage and allowed commands, with missingGates imported from board.mjs as the only gate definition",
-          "note": "Spec: specs/caretaker-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built in PR #9, which also carries C-1, C-2, C-3, C-6 and U-2. Gate verdicts not recorded: nobody closes their own work."
+          "note": "Spec: specs/caretaker-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built in PR #9, which also carries C-1, C-2, C-3, C-6 and U-2. Gate verdicts not recorded: nobody closes their own work.",
+          "gate": {
+            "reviewer": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "note": "Independent review (fresh agent, not the builder): stageOf checked row by row against TECH.md Lifecycle; rule 10-before-9 reorder is commented and justified; required gates come only from missingGates (no gate literals, substitution test moves the stage); commandsFor offers nothing core would refuse and never a verdict. Nits: STAGES omits ready and dropped though stageOf returns them; after a fail plus a rerun with a diff the task never reaches verify because rule 6 requires no verdict at all (spec-literal)."
+            },
+            "qa": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "note": "Independent re-review (fresh agent, not the builder): the old finding is fixed. bin/lifecycle.test.mjs:65-69 now asserts that a plain task with reviewer pass and security fail stays in review, waiting on qa, not rework. In a scratch clone, replacing lifecycle.mjs:72 with \"reviewer qa security\".split(\" \") fails that test by name. So does [...GATE_CMDS] imported from board.mjs. A literal array also fails 'names no gate in code'. Each restore was checked by sha256 against the working tree. So the guard lifecycle.mjs:16-17 cites now holds. lifecycle.test passes.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent QA (fresh agent, not the builder): the code honours missingGates, but the guard lifecycle.mjs:16-17 cites does not hold. Replacing line 72 with const required = \"reviewer qa security\".split(\" \") (or GATE_CMDS from board.mjs) still passes bin/lifecycle.test.mjs, yet it moves a plain task with reviewer pass and security fail from review to build (rework). Add a row asserting that task stays in review."
+                }
+              ]
+            }
+          }
         },
         {
           "id": "C-4",
@@ -648,7 +1452,19 @@
             "H-0"
           ],
           "ac": "a run started through the runner is archived under stateDir with run.json, diff.patch and redacted transcripts, a live redacted mirror while it runs, and a refusal when stateDir is inside the workspace",
-          "note": "Spec: specs/caretaker-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built on this branch in bin/runstore.mjs, checked by bin/runstore.test.mjs and mutation-checked. Needs security as well as reviewer and qa. Gate verdicts not recorded."
+          "note": "Spec: specs/caretaker-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built on this branch in bin/runstore.mjs, checked by bin/runstore.test.mjs and mutation-checked. Needs security as well as reviewer and qa. Gate verdicts not recorded.",
+          "gate": {
+            "reviewer": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "note": "Independent review (fresh agent, not the builder): runstore.mjs archives run.json/diff.patch/redacted transcript+stderr under stateDir/runs/<id>, never shadow/, live mirror redacts whole lines only, STATE_IN_WORKSPACE refused before running, no-redactor and bad-id refusals; runstore.test green and mutation-checked here (mirror redaction removed -> red by name). Nits: run.json redaction (runstore.mjs:219) is untested (removing it stays green); --parent is validated only after the run so a typo loses the archive (:173); relative cfg.stateDir resolves against cwd, not the repo (statedir.mjs:14); checkStateDir uses resolve not realpath; the raw transcript and shadow copy stay in TMPDIR world-readable (harness behaviour, outside C-4)."
+            },
+            "qa": {
+              "verdict": "fail",
+              "at": "2026-09-29",
+              "note": "Independent QA (fresh agent, not the builder): the archive, diff.patch, redacted transcripts and live mirror hold (node bin/runstore.test.mjs green), but the refusal when stateDir is inside the workspace does not. checkStateDir tests path.relative(...).startsWith('..') on unresolved paths, so a directory whose name starts with two dots is treated as outside: checkStateDir('/tmp/ws/..state','/tmp/ws') is ACCEPTED, and runArchived('/tmp/qa-w-ws2', p, {sandbox:'none'}, {stateDir:'/tmp/qa-w-ws2/..state'}) completed and wrote run.json, transcript.log and diff.patch into /tmp/qa-w-ws2/..state/runs/r_13f6811e, i.e. inside the workspace the next agent gets at /work. Symlinks also bypass it (no realpath): a stateDir that is a symlink into the workspace, or a workspace given by a symlinked path, are both accepted. The test only tries ws/state and ws itself. The same containment idiom is in harness.mjs:923 and harness-config.mjs:85."
+            }
+          }
         },
         {
           "id": "C-5",
@@ -661,7 +1477,19 @@
             "C-4"
           ],
           "ac": "a run started with a proxy gets its own network and proxy, and its allowed and refused hosts land in that run's archive, redacted; the live check runs in CI",
-          "note": "Spec: specs/caretaker-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built on this branch, opt-in: netns.withRunEgress and runstore --egress, checked by bin/egress-attribution.test.mjs (live half in CI). ADR-0003 is a draft. Also fixed: the proxy died on its first event when --log was unwritable. Needs security. Gate verdicts not recorded."
+          "note": "Spec: specs/caretaker-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built on this branch, opt-in: netns.withRunEgress and runstore --egress, checked by bin/egress-attribution.test.mjs (live half in CI). ADR-0003 is a draft. Also fixed: the proxy died on its first event when --log was unwritable. Needs security. Gate verdicts not recorded.",
+          "gate": {
+            "reviewer": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "note": "Independent review (fresh agent, not the builder): withRunEgress creates fm-int-<id> (internal, DNS off) and fm-egress-<id> with the archive dir as the only writable mount, tears both down in finally and records a failed teardown instead of throwing; sandbox:none refused; egress.jsonl redacted with the run's secrets at archive; proxy survives an unwritable --log. egress-attribution.test green here (live half skipped: no podman), mutations of the redaction, the sandbox refusal and the try/catch each go red by name; CI pulls the images. Notes: while a run is in flight egress.jsonl is raw and /runs/:id/egress serves it with only the KEY_SHAPES pass; ADR-0003 is still draft; netns.mjs:81-85 'WHAT THIS DOES NOT DO' is half-stale now that runstore wires --add-host through the harness."
+            },
+            "qa": {
+              "verdict": "fail",
+              "at": "2026-09-29",
+              "note": "Independent QA (fresh agent, not the builder): per-run network and proxy wiring holds (node bin/egress-attribution.test.mjs green offline; live half skipped here, no podman, reported passing in CI at 63c0a8a, and netns.mjs/egress.mjs are unchanged since). But the hosts do not land in the archive redacted: the proxy appends raw lines into <stateDir>/runs/<id>/egress.jsonl and only archive() redacts them, after the run. (1) While the run is in flight the file is raw, and the web API serves it (egress.jsonl is in RUN_FILES; Run detail live-tails it) with only the KEY_SHAPES pass. A harness that calls readmodel.runFile mid-run got host hunter2prodpassword.evil.example for a run whose secret DB_PASS=hunter2prodpassword; after the run the same line reads [redacted:DB_PASS].evil.example. (2) If harness.run throws (it throws HarnessError on several paths), runArchived never reaches archive(), and egress.jsonl stays unredacted in the archive for good: same demo with a throwing harness left hunter2prodpassword.evil.example on disk. The test only checks the archive after a clean run."
+            }
+          }
         },
         {
           "id": "C-6",
@@ -673,7 +1501,26 @@
             "C-1"
           ],
           "ac": "ask, answer, triage, spec-approve, spec-reject, pr and drop are append-only board commands carrying by and at",
-          "note": "Spec: specs/caretaker-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built in PR #9, which also carries C-1, C-2, C-3, C-6 and U-2. Gate verdicts not recorded: nobody closes their own work."
+          "note": "Spec: specs/caretaker-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built in PR #9, which also carries C-1, C-2, C-3, C-6 and U-2. Gate verdicts not recorded: nobody closes their own work.",
+          "gate": {
+            "reviewer": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "note": "Independent review (fresh agent, not the builder): ask/answer/triage/spec-approve/spec-reject/pr/drop each stamp by (operator or OS user) and ISO at, refuse closed tasks, reasons required where the spec says; spec review keyed on git blob with path-escape check; pre-C1 CLI preserves the new fields. Nits: pr replaces rather than appends (spec shape is a single object); answer is accepted on a done/dropped task; core transition start/todo on a dropped task resurrects it while leaving the dropped record."
+            },
+            "qa": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "note": "Independent re-review (fresh agent, not the builder): the old finding is fixed. On a scratch clone's board, pr P-1 three times keeps /pull/1 and /pull/2 in pr.history, each with its own by and ISO at. drop, start, drop, todo, drop keeps both earlier drops in dropped.history. Only recordPr and drop write these (board.mjs:784-804); readmodel only reads them. board-facts.test passes, including the pre-C-1 CLI preserving the new fields. Nit: history entries keep url/why, by and at but drop the replaced record's via (cli or web), the same whitelist style gate history uses.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent QA (fresh agent, not the builder): pr and drop are not append-only. On a scratch board, pr T-1 .../pr/1 then pr T-1 .../pr/2 leaves only pr/2, and drop, start, drop replaces the first dropped {why,by,at}. The earlier by/at are lost (board.mjs recordPr says 'A later pr replaces it'). ask, answer, triage and spec review do append, with by from cfg.operator and ISO at."
+                }
+              ]
+            }
+          }
         },
         {
           "id": "W-1",
@@ -685,7 +1532,26 @@
             "C-1"
           ],
           "ac": "serve binds loopback only, exchanges a one-time token for an HttpOnly SameSite=Strict cookie, checks Host and Origin exactly, sends a strict CSP, and serves only allowlisted run files; each control is attacked in a test",
-          "note": "Spec: specs/caretaker-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built in PR #9, which also carries C-1, C-2, C-3, C-6 and U-2. Gate verdicts not recorded: nobody closes their own work. Needs security."
+          "note": "Spec: specs/caretaker-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built in PR #9, which also carries C-1, C-2, C-3, C-6 and U-2. Gate verdicts not recorded: nobody closes their own work. Needs security.",
+          "gate": {
+            "reviewer": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "note": "Independent re-review (fresh agent, not the builder): the old finding is fixed. serve.test.mjs:252-258 now asserts the target is one level above dist and tries /..%2fdocs%2fboard.json, /%2e%2e/... and /assets/..%2f..%2f...; commenting out the prefix check at serve.mjs:205 turns serve.test red by name on two of them (restored, sha256 verified). Scratch attack against startServer with dist=<fx>/web/dist: ..%2f to a file one up, ..%2fdist-evil (sibling prefix), ..%5c, %00, //etc/passwd, %2fetc%2fpasswd all 404 or the app shell; malformed %E0%A4%A is a 500 and the server stays up. serve, web-boundary tests and tsc green. Other controls unchanged from the earlier review.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent review (fresh agent, not the builder): the controls themselves are right (loopback-only bind, 256-bit in-process token, timingSafeEqual on /auth and cookie, HttpOnly SameSite=Strict port-named cookie, 302 to /, exact Host on every request, exact Origin + application/json + X-Caretaker on POST, no CORS, CSP, run-id regex, fixed names, realpath under the archive), and mutating host, X-Caretaker, content-type, cookie compare, realpath and sandbox CSP each turns serve.test red. But the static-traversal attack is decorative: serve.test.mjs:252 requests /..%2f..%2fdocs%2fboard.json, which from dist=<root>/dist resolves to the fixture's PARENT, so it can never hit board.json. Deleting the prefix check at serve.mjs:170 leaves the suite green, and with it deleted /..%2fdocs%2fboard.json returns the board (reproduced in a copy). The AC says each control is attacked in a test; this one is not. Fix: one level of ../ and assert 404."
+                }
+              ]
+            },
+            "qa": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "note": "Independent QA (fresh agent, not the builder): node bin/serve.test.mjs green. Then ran node bin/serve.mjs against a copy of this repo and attacked it with curl: Hosts 127.0.0.1.:port, LOCALHOST:port, [::1]:port, empty Host and evil.com:port all 421, even for static files; no cookie 401 on /api, the stream and /board.html; wrong or short token 403; cookie is caretaker_<port>, HttpOnly, SameSite=Strict, Path=/, and /auth 302s to /; writes with no/foreign/other-port/https/null Origin, form or text/plain content type, or no X-Caretaker refused (test); CSP present on 200, 302, 401, 403, 404, 421 and SSE responses, board.html gets CSP sandbox; bad run ids, ../ in id or name, shadow/, a symlink out of the archive and encoded ../ static traversal all fail to leak; binding 0.0.0.0, 192.168.1.5 and :: refused naming ssh -L; token absent from /proc argv and environ. In Chromium the built client loads with no CSP violation and a transcript <script> renders as text. Note for security: one-time holds only as printed once. The bootstrap URL can be replayed for the life of the process (three /auth calls each set the cookie), and the cookie value is the token itself, as TECH.md specifies."
+            }
+          }
         },
         {
           "id": "W-2",
@@ -699,7 +1565,29 @@
             "C-3"
           ],
           "ac": "every read route goes through readmodel.mjs and carries sources, so absent data renders as not recorded",
-          "note": "Spec: specs/caretaker-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built in PR #9, which also carries C-1, C-2, C-3, C-6 and U-2. Gate verdicts not recorded: nobody closes their own work."
+          "note": "Spec: specs/caretaker-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built in PR #9, which also carries C-1, C-2, C-3, C-6 and U-2. Gate verdicts not recorded: nobody closes their own work.",
+          "gate": {
+            "reviewer": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "t": "2026-09-29T22:16:53.897Z",
+              "by": "root",
+              "via": "cli",
+              "note": "Independent re-review, round 3 (fresh agent, not the builder): the old point is fixed at the source. readmodel.mjs:135 eventLog() now runs every event through redactShapes, so every route that reads the log gets it. In a scratch repo I planted an event with an sk-ant key and a Bearer token and curled all 12 read routes: no raw key anywhere; /events, /snapshot, /work/T-1 and /runs/:id show [redacted:anthropic] and [redacted:bearer]; every JSON route carries sources, and with the events dir removed events is null with sources.events absent. Mutating the redaction out of :135 fails serve.test '...and on /api/v1/events' and '/snapshot' by name (restored, sha256 OK). tsc clean.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent review (fresh agent, not the builder): routes do go through readmodel and carry sources, and the numbers are dashboard.metrics'/kpis.mjs's. But the event log is served unredacted over REST while the same records are redacted on the stream: readmodel.mjs:128 eventLog() feeds /events (:700), /snapshot (:641), /work/:id (:331), /runs/:id (:477) and /specs (:590) raw, whereas serve.mjs:81 runs redactShapes on every streamed line. Reproduced: an event with detail 'leaked sk-ant-…' came back verbatim from /events, /snapshot, /work/W-2 and /inbox, and serve.test's 'a key in a streamed event is redacted' passes over the same record. Events are written unredacted on disk (TECH Findings 4), so the second pass is the only one; apply redactShapes to event records on the REST path too, and test it there."
+                }
+              ]
+            },
+            "qa": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "note": "Independent QA (fresh agent, not the builder): every route handler in bin/serve.mjs calls a readmodel.mjs function and none opens a data file itself. Against a copy of this repo with runs.jsonl, the archive and agentsDir absent, curl of snapshot, work, work/W-2, inbox, runs, agents, specs, metrics, events and settings each returned a sources object naming them absent, and the stream's hello event carries sources too. Absent data comes back as null or as a 404 saying not recorded (snapshot.tokensPerClosedTask null, runs null, the raw transcript/diff/egress/stderr routes 404 not recorded: no <file> in the run archive), and in Chromium those pages say Not recorded. Gaps, not blocking: the raw byte-ranged file routes return text with no sources (TECH.md defines them as raw), 404 bodies carry none, serve.test.mjs asserts sources on one route only, and snapshot's m.medDays || null would turn a real 0 into null."
+            }
+          }
         },
         {
           "id": "W-3",
@@ -711,7 +1599,26 @@
             "W-1"
           ],
           "ac": "the stream tails append-only files from a byte offset, holds a partial line, and resumes from Last-Event-ID with no gap or duplicate",
-          "note": "Spec: specs/caretaker-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built in PR #9, which also carries C-1, C-2, C-3, C-6 and U-2. Gate verdicts not recorded: nobody closes their own work."
+          "note": "Spec: specs/caretaker-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built in PR #9, which also carries C-1, C-2, C-3, C-6 and U-2. Gate verdicts not recorded: nobody closes their own work.",
+          "gate": {
+            "reviewer": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "note": "Independent review (fresh agent, not the builder): tailFile reads from a byte offset, holds a partial final line, skips and counts unparseable lines; ids carry every file's offset so a Last-Event-ID reconnect resumes each file with no gap or duplicate, files that appear later are read from 0; invalidate on board rewrite and archive listing change; fs.watch plus a stat poll; heartbeat. serve.test's half-line, one-event and resume checks are green. Nits: the hello event carries no id, so a client that saw no log line reconnects without Last-Event-ID and skips events appended while it was away (REST refetch covers the page, not the live feed); a single line longer than the 8 MiB read window stalls the tail at that offset forever (serve.mjs:63-90); the per-run stream has no heartbeat."
+            },
+            "qa": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "note": "Independent re-review (fresh agent, not the builder): the old gap is fixed. openStream starts a fresh client at lineStart() (serve.mjs:313), not the size. Scratch client over HTTP against startServer: QA's repro (event 0, 25 bytes of event 1, connect, finish 1, append 2) now delivers [1,2]; a client that saw only hello reconnects with hello's id (runs.jsonl:210) and gets the 2 lines written while away; after a 9 MiB line, the next line still arrives; Last-Event-ID from mid-batch gives 7,8,9 with no dup; a new events file is read from 0; a UTF-8 char split across writes arrives intact. Mutating lineStart back to size, and dropping hello's id, each fail serve.test by name (restored, sha256 OK).",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent QA (fresh agent, not the builder): the Last-Event-ID resume holds (serve.test.mjs green, and multi-file cursors carry each file's offset), but the stream does not hold a partial line for a client that connects while one is half-written. openStream starts a fresh client at statSync(path).size, which can be mid-line; when the line completes, tailFile reads only its tail, JSON.parse fails, and the line is skipped and counted, never emitted. Reproduced against node bin/serve.mjs on a copy of the repo with /tmp/qa-w-sse.mjs: wrote event 0, appended the first 25 bytes of event 1, connected a fresh client, completed event 1, then appended event 2. The client received only [qa event 2], so event 1 is a gap. The REST fetch before connecting cannot have included it, because it was incomplete. Starting a fresh client at the last newline would fix it. The test only half-writes after the client connects."
+                }
+              ]
+            }
+          }
         },
         {
           "id": "W-4",
@@ -724,7 +1631,26 @@
             "C-6"
           ],
           "ac": "POST commands dispatch only to board.mjs exports; a core refusal returns 409 with core's own words",
-          "note": "Spec: specs/caretaker-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built in PR #9, which also carries C-1, C-2, C-3, C-6 and U-2. Gate verdicts not recorded: nobody closes their own work. Needs security."
+          "note": "Spec: specs/caretaker-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built in PR #9, which also carries C-1, C-2, C-3, C-6 and U-2. Gate verdicts not recorded: nobody closes their own work. Needs security.",
+          "gate": {
+            "reviewer": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "note": "Independent re-review (fresh agent, not the builder): the old finding is fixed. transition() now appends transitions[] {cmd, by, at, via} when opts.by is set (board.mjs:624) and command() passes opts for start/todo/done/block/note (:821-824); readmodel.command sets by=operator, via=web and still computes driftFailing for done. Over HTTP against startServer on a scratch repo: note, block, todo, start and an accepted done each recorded by five via web; a refused done returned 409 with core's missing list and left board.json byte-identical; the CLI records via cli. So ui.tsx:282 and Settings.tsx:73 are now true. Nit: only block is asserted; dropping by/via for start/todo/done (keeping driftFailing) leaves serve, getting-started and board-lib green (restored, sha256 OK).",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent review (fresh agent, not the builder): dispatch is right: 12 allowlisted commands to board.command under board.mutate's lock, verdicts 400, core refusal 409 verbatim, unknown task 404. But TECH §1 Identity says a web mutation records by=operator with via:web so browser and CLI actions can be told apart, and 5 of the 12 do not: start, block, todo, note and done go through transition() (board.mjs:524), which takes no opts, so readmodel.mjs:735-740 builds {by, via} and it is dropped. Reproduced in a copy: a web note and a web block left no by/via on the task, and a web 'done' would be indistinguishable from a CLI close. The UI then says the opposite: ui.tsx:282 prints 'Recorded by the operator, via web.' under every command form (including note and block) and Settings.tsx:119 says 'recorded as by on every command, with via web'. Record by/via for transitions in core, or stop claiming it."
+                }
+              ]
+            },
+            "qa": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "note": "Independent QA (fresh agent, not the builder): readmodel.command only accepts the fixed COMMANDS list and calls board.mutate, board.command, board.specInfo and board.build, all board.mjs exports. Against a copy of the repo over HTTP: qa, recordVerdict, build, __proto__, constructor and an array cmd all return 400 and leave board.json byte-identical (same md5 before and after). done on W-1 returns 409 {refused:{missing:[reviewer,qa],docsOnly:false}}, the same list the CLI refusal prints. An empty ask returns 409 with core's a question is required. An unknown task is 404. serve.test.mjs checks the refusal equals missingGates verbatim and that an accepted ask records by the operator via web. Outside this AC: core stringifies a non-string arg (args.text:{a:1} was stored as [object Object]), and start/done/note/block/todo from the web go through transition() with no by/via, so TECH.md section 1's via: web holds only for the C-6 commands."
+            }
+          }
         },
         {
           "id": "W-5",
@@ -736,7 +1662,34 @@
             "W-2"
           ],
           "ac": "web/ builds, and bin/web-boundary.test.mjs fails if web/src imports bin/, a vendor SDK, innerHTML, or names a gate or stage outside the label map",
-          "note": "Spec: specs/caretaker-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built in PR #9, which also carries C-1, C-2, C-3, C-6 and U-2. Gate verdicts not recorded: nobody closes their own work."
+          "note": "Spec: specs/caretaker-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built in PR #9, which also carries C-1, C-2, C-3, C-6 and U-2. Gate verdicts not recorded: nobody closes their own work.",
+          "gate": {
+            "reviewer": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "note": "Independent review (fresh agent, not the builder): web/ builds (tsc --noEmit + vite build, in a copy); api/client.ts is the one typed client, same-origin, writes send application/json and X-Caretaker; store.ts is one resource-keyed cache refetched on invalidate and one EventSource. web-boundary.test plants each banned pattern and sees it caught by rule name before scanning the tree (24 files clean); gate names are read from core's missingGates and stages from lifecycle.STAGES rather than retyped; the vendor list matches harness.test's. Nits: 'ready' and 'dropped' are not in STAGES, so a literal of either outside labels.ts is not caught; the scan covers web/src only, not web/index.html or vite.config.ts."
+            },
+            "qa": {
+              "verdict": "fail",
+              "at": "2026-09-29",
+              "t": "2026-09-29T22:16:58.717Z",
+              "by": "root",
+              "via": "cli",
+              "note": "Independent re-review, round 3 (fresh agent, not the builder): web/ builds (npm run build in a copy) and the three gate cases from the last note are caught. But the note's <span>human</span> still passes: the JSX-text and template checks (web-boundary.test.mjs:82) test GATES only, so a stage word in display text or `stage is human` stays green, and the AC says gate or stage. New, the same destructuring gap with a default: const { reviewer = null } = t.gates and const { qa = {}, reviewer = {} } = t.gates ?? {} both pass, because :72 wants : , or } after the name, not =. I ran each through violations() from the test itself. Current tree is clean.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent QA (fresh agent, not the builder): web/ builds (npm run build in a copy, tsc plus vite, clean) and the boundary test catches bin/ imports, vendor SDK imports including a side-effect import, and innerHTML/dangerouslySetInnerHTML. It does not fail when web/src names a gate or stage outside labels.ts, except as a quoted string literal. Planted one at a time in a copy's web/src/pages/QaPlant.tsx, node bin/web-boundary.test.mjs stayed green for: t.gates.security?.verdict (property access), { reviewer: true, qa: true } (object keys), <span>human</span> (JSX text), and a template literal needing security. The first two are the natural way to hardcode a gate rule in the client, which is what the check exists to stop. The current tree has none of these (grep), so this is a gap in the enforcement, not a present violation."
+                },
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent re-review (fresh agent, not the builder): partly fixed. web/ typechecks (tsc --noEmit clean) and web-boundary.test is green; in a copy of bin/ + web/src, t.gates.security?.verdict, { reviewer: true, qa: true }, ready/dropped and t.gates[`security`] are now caught. But two of the old note's four gaps still pass, planted one at a time in web/src/pages/Plant.tsx: <span>human</span> and <span>security</span> (JSX text), and `needs security` (template literal) stay green. So does const { security, qa } = t.gates (destructuring, web-boundary.test.mjs:81 only matches .name and name:), a natural way to hardcode a gate rule. The commit skipped unquoted stage words deliberately, but the AC says names a gate or stage, and the gate cases have no such excuse."
+                }
+              ]
+            }
+          }
         },
         {
           "id": "W-6",
@@ -748,7 +1701,19 @@
             "W-5"
           ],
           "ac": "each page renders only server-given stage, reasons and commands, and says not recorded where a source is absent",
-          "note": "Spec: specs/caretaker-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built in PR #9, which also carries C-1, C-2, C-3, C-6 and U-2. Gate verdicts not recorded: nobody closes their own work."
+          "note": "Spec: specs/caretaker-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built in PR #9, which also carries C-1, C-2, C-3, C-6 and U-2. Gate verdicts not recorded: nobody closes their own work.",
+          "gate": {
+            "reviewer": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "note": "Independent review (fresh agent, not the builder): Dashboard, Activity, Work item, Inbox, Specs and Settings render the server's lifecycle, reason, missingGates, requiredGates and commands; buttons and the Inbox's actions come only from commands; no verdict buttons; agent text is rendered as text nodes (no innerHTML, PR urls shown as text not links); absent sources say not recorded; read/unread only in localStorage; no Resolve button. Notes: the 'via web' claims in ui.tsx:282 and Settings.tsx:119 are false until W-4 records by/via on transitions; the Dashboard feed dedupes stream and REST events by t|detail, so a record with a key shows twice (redacted and raw) until W-2 is fixed; WorkItem computes open questions client-side (display only)."
+            },
+            "qa": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "note": "Independent QA (fresh agent, not the builder): read Dashboard, WorkItem, Inbox, Specs, Settings (and Activity). Stage, reason, missing gates, offered commands and Inbox actions all come from the API: buttons map t.commands and item.actions, and labels.ts only maps names to words and colors. Loaded each page in Chromium against a copy of this repo with runs.jsonl, the archive and agentsDir absent. Dashboard says tokens per closed task is not recorded (no run log), and Closed vs started is Not recorded. The work item's Runs tab says not recorded and names the run log. Settings lists each source present or absent with its path. Specs shows Not recorded branches for no git and no event log. No verdict button anywhere. Actions on W-2 matched /api/v1/work/W-2 commands exactly. No page errors and no external requests."
+            }
+          }
         },
         {
           "id": "W-7",
@@ -762,7 +1727,49 @@
             "C-5"
           ],
           "ac": "the run pages show archived runs' identity, diff, transcript, egress and parent/child, and not recorded for anything unarchived",
-          "note": "Spec: specs/caretaker-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Pages built in PR #9. Their data arrives with C-4 and C-5 on this branch."
+          "note": "Spec: specs/caretaker-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Pages built in PR #9. Their data arrives with C-4 and C-5 on this branch.",
+          "gate": {
+            "reviewer": {
+              "verdict": "fail",
+              "at": "2026-09-29",
+              "t": "2026-09-29T22:17:06.759Z",
+              "by": "root",
+              "via": "cli",
+              "note": "Independent re-review, round 3 (fresh agent, not the builder): the old point is fixed for the CLI adapter. readmodel.mjs:490 derives egress.state from run.json and RunDetail.tsx picks the reason; host, proxied, network and unknown are true. But sealed ignores the adapter. For adapter openai-compatible the harness makes the model call from the host, above the container (harness.mjs:28-29), so a net:none run still sent its prompts and tool output to policy.endpoint, unproxied and unrecorded. RunDetail.tsx:68 then says 'the run had no route out, so there is nothing to record'. run.json keeps policy.adapter and endpoint, so readmodel can tell: say the model calls went from the host to <endpoint> and were not recorded.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent review (fresh agent, not the builder): Runs, Run detail and Agents read the server's folded runs (legacy apart, reconstructed labelled, no end recorded after staleRunHours) and show not recorded per section. But the Egress tab mislabels every host: egress.mjs records are {t, kind: allowed|refused|error, host, port, reason|why} (egress.mjs:83,91,106,116), while RunDetail.tsx:86 parses decision/allowed, which never exist, so line 367 computes allowed=false for every row and line 378 prints 'refused' in a red chip for hosts the proxy ALLOWED; the refusal reason is never shown. On the one page meant to show what a run reached, allowed traffic reads as blocked. Also stale: RunDetail.tsx:352 says egress waits on C-5, which is built; TECH says 'no proxy was attached to this run'."
+                },
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent re-review (fresh agent, not the builder): the old points are fixed. RunDetail.tsx:372-385 reads kind and shows reason/why, and the C-5 text is gone. The replacement text states a false reason, the defect class RULES.md calls the most expensive. RunDetail.tsx:355 says 'No egress proxy was attached to this run. A run with no proxy has no route out.' But a sandbox:none run has the host's network with no egress control (harness.mjs:826-829 warns exactly that), and a proxied run that made no connection has no egress.jsonl, because egress.mjs:221 creates it on the first event, while run.json records egress {network, proxy, allow} (runstore.mjs:212). /api/v1/runs/<id> exposes neither egress nor policy, so the page cannot tell. Fix: pass run.json's egress/sandbox through and say which case it is, or say only 'not recorded'."
+                }
+              ]
+            },
+            "qa": {
+              "verdict": "fail",
+              "at": "2026-09-29",
+              "t": "2026-09-29T22:17:06.842Z",
+              "by": "root",
+              "via": "cli",
+              "note": "Independent re-review, round 3 (fresh agent, not the builder): built web/ in a copy, archived runs with runstore.archive() and drove Chromium. These held: allowed/refused not-allowlisted/error ECONNRESET rows; the no-log reason for proxied, sandbox none, net none and slirp4netns runs; child of r_0a0a0a0a; an in-flight run with a raw egress.jsonl served 404 and read 'no archived record'; unknown run Not recorded; zero off-origin requests. One edge is false: r_01010101, archived with policy {adapter: openai-compatible, endpoint: https://llm.example.com/v1, sandbox: podman}, shows 'No proxy was attached and the network was none: the run had no route out, so there is nothing to record'. That adapter calls the endpoint from the host, so there was traffic and none of it was recorded.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent QA (fresh agent, not the builder): identity, diff, transcript, parent/child and not recorded for unarchived files all render (Chromium against runstore.archive() fixtures: r_0a0a0a0a lists child r_0b0b0b0b, the child says child of r_0a0a0a0a, the transcript shows <script> as text, transcript.live.log says not recorded, an unknown run says Not recorded). But the egress tab shows every allowed host as refused. egress.mjs writes {kind:'allowed'|'refused'|'error', host, port, reason}, and RunDetail.tsx reads e.allowed ?? e.decision === 'allowed', neither of which exists. With egress.jsonl holding kind:allowed example.com and kind:refused evil.example, the page rendered: example.com 443 refused | evil.example 443 refused. It also drops the refusal reason. The child run's empty egress text still says egress waits for C-5, which is built."
+                },
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent re-review (fresh agent, not the builder): the old points are fixed. Built web/, served runstore.archive() fixtures, drove Chromium. The egress tab now shows allowed (pass chip), 'refused not-allowlisted', 'error ECONNRESET' and 'refused plain-http'. The C-5 text is gone. Parent/child and an unknown run's Not recorded still render. But the egress tab is wrong on two edge cases. r_0c0c0c0c, archived with egress {network, proxy, allow} and no traffic (egress.mjs creates egress.jsonl on the first event), renders 'No egress proxy was attached to this run'. r_0b0b0b0b, sandbox:none on the host network, renders 'A run with no proxy has no route out, so there is nothing to record'. Both are false, on the page meant to say what a run could reach."
+                }
+              ]
+            }
+          }
         },
         {
           "id": "W-14",
@@ -774,7 +1781,19 @@
             "C-1"
           ],
           "ac": "install.sh --upgrade replaces the tool files only, keeps backups, and rolls back if the new board cannot read the repo's; an old install becomes one the server opens",
-          "note": "Spec: specs/caretaker-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built on this branch, checked by bin/install.test.mjs and mutation-checked. Gate verdicts not recorded."
+          "note": "Spec: specs/caretaker-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built on this branch, checked by bin/install.test.mjs and mutation-checked. Gate verdicts not recorded.",
+          "gate": {
+            "reviewer": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "note": "Independent review (fresh agent, not the builder): install.sh --upgrade refuses a repo with no install, replaces only board.mjs, dashboard.mjs, run.mjs, loop.sh and RULES.md, backs each replaced file up under .upgrade-backup-<time>, checks the new board by running status and rolls back on failure, and never writes config.json, prompt.txt or the board. install.test upgrades the real pre-C-1 board into one readmodel.open accepts and sees the owner's task; removing the rollback restore or the status check goes red by name. Nits: the header says upgrade 'never opens' config and board, but the status check reads both (never WRITES is what is true, install.sh:17-18 vs :49-51); a rollback does not delete files the upgrade newly created; set -u without -e means a failed backup copy is not fatal; two upgrades in one second share a backup dir."
+            },
+            "qa": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "note": "Independent QA (fresh agent, not the builder): node bin/install.test.mjs green. Independently: installed into /tmp/qa-w-inst with bash install.sh, swapped in bin/testdata/board.pre-c1.mjs and deleted run.mjs. serve.mjs then refused with predates the web API and exit 1. bash install.sh --upgrade replaced board.mjs and run.mjs, kept the old board.mjs in .upgrade-backup-<time>/, and sha256sum -c confirmed docs/board.json, config.json and prompt.txt unchanged. serve.mjs then started and served the board. A bad checkout whose board.mjs throws on load rolled back with ROLLED BACK and exit 1. Minor, not blocking: rollback restores only files that had a backup, so a tool file the old install lacked stays new. A cp failure mid-loop exits without rolling back. The check runs board.mjs status under the caller's FACTORY_CONFIG, if set. serve's refusal suggests cp rather than install.sh --upgrade."
+            }
+          }
         },
         {
           "id": "W-15",
@@ -787,7 +1806,35 @@
             "C-2"
           ],
           "ac": "the Metrics page shows the same numbers docs/board.html does, from the same functions",
-          "note": "Spec: specs/caretaker-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built in PR #9, which also carries C-1, C-2, C-3, C-6 and U-2. Gate verdicts not recorded: nobody closes their own work."
+          "note": "Spec: specs/caretaker-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built in PR #9, which also carries C-1, C-2, C-3, C-6 and U-2. Gate verdicts not recorded: nobody closes their own work.",
+          "gate": {
+            "reviewer": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "note": "Independent review (fresh agent, not the builder): the Metrics page shows dashboard.mjs's tokenStats, reworkSpend, gateStats and quality over the range, kpis.mjs's delivery and AI figures each null with a reason, the anti-KPIs, and not recorded with no run log. Nits: GateBars computes a pass percentage in the browser (Metrics.tsx:31) while board.html shows a fail percentage, and with rounding the two can sum to 101; a client-side derived figure is what TECH §5 says the UI never does, so ship the rate from the server. The per-day chart draws days with runs but no breakdown as 0 (disclosed in its footnote)."
+            },
+            "qa": {
+              "verdict": "fail",
+              "at": "2026-09-29",
+              "t": "2026-09-29T22:17:12.015Z",
+              "by": "root",
+              "via": "cli",
+              "note": "Independent re-review, round 3 (fresh agent, not the builder): the gate half is fixed. serve.test now counts gateStats from the board in range and all time, and mutating allTime.gateStats to the ranged board fails two checks by name. The first-pass half of the same point still stands. I mutated readmodel.mjs:722 to allTime: { ..., quality: dash.quality(rangedPhases, GATES) }, and serve, tui, verify, runstore, install and harvest all stayed green (restored, sha256 OK). In serve.test's own fixture that moves the served figure from 50% (1 of 2) to 100% (2 of 2), per dashboard.quality. That is the page's 'All time: N% of M' first-pass line, the number it shows against board.html, and nothing compares it to dash.metrics().quality.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent QA (fresh agent, not the builder): the Metrics page's gate figures differ from docs/board.html on this very repo. Generated board.html with node ops/caretaker/dashboard.mjs in a copy: it shows reviewer 1 pass 0 fail, qa 11 pass 1 fail (8%), and 91% first-pass over 11 tasks and 13 attempts. GET /api/v1/metrics?days=7, 14 and 30 all return gateStats of 0/0 for every gate and quality.gated 0. Every verdict is dated 2026-08-30, just outside the widest 30-day range. In Chromium the page at 30d shows Pass rate per gate: No verdict recorded in this range, and First-pass rate: a dash. The API returns allTime.gateStats, but the page never renders it, so board.html's per-gate numbers appear at no range setting. Only a first-pass footnote shows all-time. There is no test comparing /metrics with board.html: serve.test.mjs checks snapshot and kpis only."
+                },
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "t": "2026-09-29T21:41:40.315Z",
+                  "note": "Independent re-review (fresh agent, not the builder): the display is fixed. On a copy of this repo, board.html (dashboard.mjs) shows reviewer 30 pass/37 fail 55%, qa 28/41 59%, first-pass 17% of 48. In Chromium, /metrics at 7d, 14d and 30d shows 'All time: reviewer 45% of 67 · qa 41% of 69' and 'All time: 17% of 48', which agree, from core's passPct/failPct. But the old note's last point still stands: no test holds /metrics to board.html's numbers. I mutated readmodel.mjs:689 to gateStats over d.phases.slice(1) and :691 to compute allTime over the ranged board, and serve, tui and dashboard-lib all stayed green (restored, sha256 OK). The AC's 'same numbers' is checked by hand only; serve.test.mjs:305-312 compares snapshot and kpis, not metrics.gateStats or allTime."
+                }
+              ]
+            }
+          }
         },
         {
           "id": "W-16",
@@ -799,7 +1846,43 @@
             "W-5"
           ],
           "ac": "the command menu offers exactly what commandsFor returns, and Getting started walks a new repo to its first closed task",
-          "note": "Spec: specs/caretaker-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built in PR #9, which also carries C-1, C-2, C-3, C-6 and U-2. Gate verdicts not recorded: nobody closes their own work."
+          "note": "Spec: specs/caretaker-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built in PR #9, which also carries C-1, C-2, C-3, C-6 and U-2. Gate verdicts not recorded: nobody closes their own work.",
+          "gate": {
+            "reviewer": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "t": "2026-09-29T22:17:17.243Z",
+              "by": "root",
+              "via": "cli",
+              "note": "Independent re-review, round 3 (fresh agent, not the builder): the old point is fixed. recordVerdict (board.mjs:645) now stores by and via and keeps them in history. The CLI passes the operator with via cli; a refutation passes the refuting run. So step 5's 'who made it and when' is now true of the task record. getting-started.test asserts it: in a copy, dropping the by/via argument from the CLI call fails '...the verdicts included' by name (restored, cmp OK). The walk test, tsc and web-boundary are green. The command menu still takes only item.commands from commandsFor (CommandMenu.tsx:42). Aside for W-6, not this AC: readmodel's gateHistory drops by from the latest attempt, and the Gates tab shows no who at all.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent review (fresh agent, not the builder): the command menu half is right: CommandMenu.tsx lists pages, work items, runs and, on a work item, exactly item.commands from commandsFor, adds none of its own, and choosing one opens the same CommandForm the page uses. The Getting started half does not meet the AC 'walks a new repo to its first closed task': GettingStarted.tsx:14-43 covers building the client, starting the server, ssh -L and the server's promises (PRODUCT.md §10), but never installs into a repo (install.sh), never shows the board, and never reaches a closed task: no board.mjs done, no gate verdicts, no refusal. Either the page walks install to first close, or the AC is narrowed to what PRODUCT §10 asks for, by someone other than the builder."
+                },
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "t": "2026-09-29T21:43:20.145Z",
+                  "note": "Independent re-review (fresh agent, not the builder): the old point is fixed. GettingStarted.tsx now walks install, refused done, start, reviewer+qa, done, and getting-started.test runs those blocks from the page. In a copy, dropping the reviewer line, marking the refusal ok, or removing data-walk each fail it by name. By hand in a fresh git repo the walk closes T-001, and a second install refuses. The command menu on /work/T-1 lists exactly commandsFor. New defect, a false claim: step 5 says 'Every move above is on the task with who made it and when', but recordVerdict (board.mjs:656) stores verdict/at/t/note with no by. The walk left gate.reviewer and gate.qa with no author, so the step that says 'Someone else checks it' is the one move with no who. The test named '…every move on it recorded, with who made it' checks transitions only. Fix the sentence, or record by on verdicts."
+                }
+              ]
+            },
+            "qa": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "t": "2026-09-29T21:43:32.247Z",
+              "note": "Independent re-review (fresh agent, not the builder): both halves now work. Chromium on the built client: /start renders the five-step walk. Ctrl-K on /work/T-1 lists exactly Block, Reset to todo, Ask, Record PR, Add note, Drop, which is /api/v1/work/T-1's commandsFor order, plus pages, items and runs. By hand in a fresh git repo: install.sh wrote T-001, done was REFUSED naming reviewer and qa, start, reviewer, qa and done then closed it with start and done transitions, and a second install refused. getting-started.test is green. In a copy, dropping the reviewer step, flipping the refusal to ok, or stripping data-walk each fail it by name. Nit (in the reviewer verdict): step 5's 'with who made it' is false for the verdicts, which carry no by.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent QA (fresh agent, not the builder): the command menu half holds. In Chromium on /work/W-2, /work/W-0 and /work/B-1, Ctrl-K listed exactly the commands /api/v1/work/<id> returned from commandsFor, in order (W-2: block, todo, answer q1, ask, pr, note, drop; B-1: todo, note), plus pages, items and runs, and no command of its own. The Getting started half does not. web/src/pages/GettingStarted.tsx has four cards: build the client, start the server, ssh -L, and what the server promises. It never mentions install.sh, adding a task, recording gate verdicts from the CLI, or done. Rendered text confirmed, so it does not walk a new repo to its first closed task."
+                }
+              ]
+            }
+          }
         },
         {
           "id": "W-17",
@@ -811,7 +1894,34 @@
             "W-5"
           ],
           "ac": "the client makes no external request and uses no color outside theme.css, enforced by the boundary test",
-          "note": "Spec: specs/caretaker-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built in PR #9, which also carries C-1, C-2, C-3, C-6 and U-2. Gate verdicts not recorded: nobody closes their own work."
+          "note": "Spec: specs/caretaker-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built in PR #9, which also carries C-1, C-2, C-3, C-6 and U-2. Gate verdicts not recorded: nobody closes their own work.",
+          "gate": {
+            "reviewer": {
+              "verdict": "pass",
+              "at": "2026-09-29",
+              "note": "Independent review (fresh agent, not the builder): theme.css holds every color as the TECH §4 tokens; Inter and Anton are bundled from @fontsource (Latin files only) and the built dist has no external stylesheet, font or script (only library namespace and error-doc strings); the wordmark is Anton text; the boundary test catches a planted https URL, CSS url(http…), hex, rgb() and named color and the real tree is clean. Nit: the no-build fallback page in serve.mjs:177-184 uses inline style attributes, which its own CSP (default-src 'self', no unsafe-inline) blocks, so that page renders unstyled."
+            },
+            "qa": {
+              "verdict": "fail",
+              "at": "2026-09-29",
+              "t": "2026-09-29T22:17:22.483Z",
+              "by": "root",
+              "via": "cli",
+              "note": "Independent re-review, round 3 (fresh agent, not the builder): both old points are fixed. web/index.html is scanned: a Google Fonts link planted in a copy fails the real-tree check by name. HTTPS:// and HtTpS:// are caught. Runtime is clean: Chromium made zero off-origin requests. Still passing, planted in the copy's real files: <script src=//cdn.example.com/x.js> (unquoted, valid HTML) in index.html. The test stays green and vite build ships it into dist/index.html, because web-boundary.test.mjs:89 wants a quote or url( before //. Also color(srgb 1 0 0) in a .css file or a style (:91 lists rgb, hsl, hwb, lab, lch, oklab and oklch, but not color()), and in index.html <rect fill=\"red\"> or bgcolor=\"red\".",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent QA (fresh agent, not the builder): at runtime the client holds. Chromium loaded every page with zero requests off 127.0.0.1, Inter Variable and Anton loaded from dist, and the wordmark is CARETAKER in Anton. The current web/src has no color outside theme.css (grep). But the boundary test does not enforce either half. Planted one at a time in a copy's web/src, node bin/web-boundary.test.mjs stayed green for: fetch('//evil.example.com/x') (protocol-relative), new WebSocket('wss://evil.example.com/'), @import url(//fonts.googleapis.com/...) in a .css file, .qa { color: red; background: white; } in a .css file other than theme.css (unquoted named colors are never checked), and style={{ color: 'tomato' }} or 'Red' (unlisted or capitalised names). web/index.html is outside the scanned tree."
+                },
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent re-review (fresh agent, not the builder): mostly fixed. In a copy of bin/ + web/src, planted one at a time, these are now caught: fetch(\"//evil.example.com/x\"), new EventSource(\"//...\"), wss://, url(\"//...\") and @import \"//...\" in CSS, .x{color:white}, .x { color: RED; }, style color tomato/RED/backticked, <rect fill=\"red\">. Still open from the old note: web/index.html is not scanned (files(SRC) at web-boundary.test.mjs:103). Adding <link rel=stylesheet href=\"https://fonts.googleapis.com/...\"> and <style>body{color:red}</style> to the copy's web/index.html leaves the test green, and that is the usual way an external font gets in. New: the URL regex is case-sensitive, so fetch(\"HTTPS://evil.example.com/x\") passes too. The CSP still blocks both at runtime, but the AC says the boundary test enforces it."
+                }
+              ]
+            }
+          }
         }
       ]
     }

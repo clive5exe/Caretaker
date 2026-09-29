@@ -161,7 +161,7 @@ export function loadSpecs(specsDir, { repo = "." } = {}) {
     // The globs are used even when the parse failed: a spec with one bad line
     // still tells us what it claims, and dropping its claims would turn its
     // paths into false "unowned" rows on top of the error already reported.
-    specs.push({ id, governs: (spec?.governs ?? []).map(norm), errors: ok ? [] : errors });
+    specs.push({ id, governs: (spec?.governs ?? []).map(norm), hosts: spec?.hosts ?? [], errors: ok ? [] : errors });
   }
   return { specs, skipped };
 }
@@ -347,6 +347,7 @@ export function analyse({
   return {
     ok,
     resolver: resolver.kind,
+    considered,
     counts: {
       specs: specSet.size,
       changed: changedSet.size,
@@ -496,8 +497,14 @@ export function eventLines(report, { at, run = null, task = null, stage = "revie
     lines.push({ ...base, kind: "drift", level: "info",
       detail: `dismissed ${d.finding} on ${d.path}${d.by ? ` by ${d.by}` : ""}: ${d.reason}` });
   }
+  // Which paths this verdict is ABOUT (H-4, independent re-review): a later
+  // pass that checked only README.md cleared a fail on src/fee.js, because the
+  // latest event won whatever it looked at. `checked` is every governed path
+  // considered; `flagged`, on a fail, the paths that failed it.
+  const flagged = [...new Set([...report.drift.map((d) => d.path), ...report.conflicts.filter((c) => c.changed && !c.dismissed).map((c) => c.path)])].sort();
   lines.push({ ...base, kind: "gate", level: report.ok ? "info" : "error",
-    verdict: report.ok ? "pass" : "fail", detail: summary(report) });
+    verdict: report.ok ? "pass" : "fail", detail: summary(report),
+    checked: report.considered ?? [], ...(report.ok ? {} : { flagged }) });
   return lines;
 }
 
@@ -515,10 +522,47 @@ export function writeEvents(dir, lines) {
   return appendEvents(dir, oneLine)[0] ?? null;
 }
 
+/**
+ * H-4: the drift gate over ONE run's change, recorded against its task and
+ * run, so `done` sees it without anyone remembering to run a check
+ * (independent re-review: nothing ran the gate after a run). `changed` is
+ * the run's measured diff. The project's config decides the direction, the
+ * specs directory and where events go. Returns the report, and the file its
+ * events went to.
+ */
+export function gateForRun({ repo, changed, task, run = null, configPath = null }) {
+  const root = resolve(repo);
+  const cfgPath = configPath ?? join(root, "ops", "caretaker", "config.json");
+  let cfg = {};
+  try {
+    cfg = JSON.parse(readFileSync(cfgPath, "utf8"));
+  } catch {
+    cfg = {};
+  }
+  let taskRec = null;
+  try {
+    const board = JSON.parse(readFileSync(join(root, cfg.board ?? "docs/board.json"), "utf8"));
+    taskRec = (board.phases ?? []).flatMap((p) => p.tasks ?? []).find((t) => t.id === task) ?? null;
+  } catch {
+    taskRec = null;
+  }
+  const specsDir = cfg.specs ?? "specs";
+  const { specs } = loadSpecs(specsDir, { repo: root });
+  let tree = null;
+  try {
+    tree = treeFromGit(root);
+  } catch {
+    tree = null;
+  }
+  const report = gate({ specs, changed: changed.map(norm), tree, ignore: [`${norm(specsDir)}/**`], task, direction: directionFor(cfg, taskRec) });
+  const logged = writeEvents(join(root, cfg.events ?? "ops/caretaker/events"), eventLines(report, { run, task }));
+  return { report, logged };
+}
+
 /* --------------------------------------------------------------------- git */
 
 const git = (repo, args) =>
-  execFileSync("git", ["-C", resolve(repo), ...args], { encoding: "utf8" })
+  execFileSync("git", ["-C", resolve(repo), ...args], { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 })
     .split("\n")
     .map(norm)
     .filter(Boolean);
@@ -672,6 +716,14 @@ if (isEntry) {
   // The direction: --direction wins; otherwise the project's config, with the
   // task's own override read from the board that config names.
   let direction = opt.direction ?? "spec";
+  // With no --config, the project's own config, where install puts it: a
+  // project that declared `drift.direction: "code"` got a CI gate blocking
+  // every drift, because only an explicit --config was read (independent
+  // review). Absent, the default direction applies.
+  if (!opt.config) {
+    const found = join(resolve(repo), "ops", "caretaker", "config.json");
+    if (existsSync(found)) opt.config = found;
+  }
   if (!opt.direction && opt.config) {
     let cfg;
     try {

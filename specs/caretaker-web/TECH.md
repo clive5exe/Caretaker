@@ -11,8 +11,9 @@ governs: bin/serve.mjs, bin/readmodel.mjs, bin/lifecycle.mjs, web/src/api/**
 
 # Caretaker Web v1 — architecture and technical spec
 
-Accepted with ADR-0002 on 2026-09-29. **Nothing here is implemented yet.** It
-covers:
+Accepted with ADR-0002 on 2026-09-29, and built: `bin/serve.mjs`,
+`bin/readmodel.mjs`, `bin/lifecycle.mjs` and `web/`, each checked by the tests
+named in its section. It covers:
 
 1. the local server
 2. the API boundary
@@ -169,6 +170,13 @@ Fixing them is a rule change and gets its own task (see Findings).
 - `dashboard.mjs` exports pure functions: `estHours`, `held`, `eta`,
   `quality`, `gateStats`, `tokenStats`, `reworkSpend`, `cycle`, `byOwner`, and
   a `metrics(board, runs, gitFacts, cfg, now)` that composes them.
+- `gateStats` returns `[gate, { pass, fail, passPct, failPct }]`. The
+  percentages are null with no attempt, and fail is 100 minus the rounded pass.
+- `reworkSpend` returns `{ wasted, total, pct, tasks, unplaced }`. `wasted` is a
+  failed task's tokens up to its last failed verdict: its instant `t` where
+  recorded, else the end of its date. `tasks` counts tasks with any wasted
+  tokens. A run or failure with no time is `unplaced`, never counted as
+  rework. A row's tokens are the sum of its parts when it has any.
 - Rendering, the `history.jsonl` append and the file write move behind
   `isEntry`.
 - **Test.** Generate the page with the old and new code back to back on a
@@ -271,9 +279,12 @@ after they exist and are tested in core.
 | `answer <id> <qid> "text"` | `answer {text, by, at}` on that question |
 | `triage <id> accept\|reject "why"` | `triage[] {decision, why, by, at}` |
 | `spec-approve <id>` / `spec-reject <id> "why"` | `specReview[] {path, blob, decision, why, by, at}`, keyed on the spec's git blob sha, so editing the spec reopens approval |
-| `pr <id> <url>` | `pr {url, by, at}` |
-| `drop <id> "why"` | `status: "dropped"` plus the reason. `dropped` already exists as a status (`board.mjs:49`), but no command sets it. |
+| `pr <id> <url>` | `pr {url, by, at, history?}`: a later pr is current, and the one it replaced moves to `history` with its by and at |
+| `drop <id> "why"` | `status: "dropped"` plus `dropped {why, by, at, history?}`; a task reopened and dropped again keeps the earlier drop in `history`. `dropped` already exists as a status (`board.mjs:49`), but no command sets it. |
 
+- The status commands (`start`, `block`, `todo`, `note`, `done`) append
+  `transitions[] {cmd, by, at, via}`, from the CLI and the web alike. A refused
+  `done` records nothing.
 - All fields are optional and additive, so existing readers ignore them.
 - `ops/caretaker/prompt.txt` currently says to write a needed decision "into the
   task note". It changes to `ask`, so the question becomes a fact the Inbox can
@@ -360,6 +371,10 @@ POST a board mutation.
 - It applies `secrets.KEY_SHAPES` redaction as a best-effort second pass, on
   whole lines only, because a key can be split across read chunks.
 - Byte offsets used for resuming stay offsets into the file on disk.
+- The event log is written to disk unredacted, so the read model redacts every
+  event it loads, and every route that serves events (`/events`, `/snapshot`,
+  `/work/:id`, `/runs/:id`, `/specs`, `/inbox`) gets them redacted, not only
+  the stream.
 
 **Identity.** v1 is single-operator. `by` on a web mutation is the configured
 operator, recorded with `via: "web"` so the log can tell browser actions from
@@ -382,17 +397,18 @@ zero.
 | route | returns | backed by |
 |---|---|---|
 | `GET /snapshot` | headline metrics, active phase, executing runs, inbox count | `dashboard.metrics` (C-2), readmodel |
-| `GET /work` | tasks with `lifecycle`, `reason`, `rework`, `missingGates`, `commands`, run count, tokens | `board.load`, `lifecycle.stageOf`/`commandsFor`, `board.missingGates` |
+| `GET /work` | tasks with `lifecycle`, `reason`, `rework`, `missingGates`, `commands`, run count, tokens, `specPath` | `board.load`, `lifecycle.stageOf`/`commandsFor`, `board.missingGates` |
 | `GET /work/:id` | one task in full: gate history, notes, questions, spec review, pr, runs | same |
 | `GET /inbox` | derived items: `{ kind, task, since, action }` | readmodel over the facts in §Inbox |
 | `GET /runs?task=&state=&agent=&model=` | runs, folded by id | `runs.jsonl` plus `<stateDir>/runs/*/run.json` |
-| `GET /runs/:id` | one run: identity, parent, children, verdict, cost, diff summary, drift events for it | same, plus the event log |
-| `GET /runs/:id/transcript?from=<byte>`, `/stderr?from=`, `/diff`, `/egress` | raw text or JSONL, byte-ranged | the run archive (C-4, C-5) |
+| `GET /runs/:id` | one run: identity, parent, children, verdict, cost, diff summary, drift events for it, and `egress.state` (host, proxied, sealed, network or unknown) from its archived record, plus `egress.modelCalls` for the openai-compatible adapter, whose model calls leave from this machine and are not in the egress log | same, plus the event log |
+| `GET /runs/:id/transcript?from=<byte>`, `/stderr?from=`, `/diff`, `/egress` | raw text or JSONL, byte-ranged. `/egress` only once the run is archived: until then the proxy's log is unredacted | the run archive (C-4, C-5) |
 | `GET /agents` | roles, models, runs and tokens aggregate, current work | `agentsDir` frontmatter (as `dashboard.mjs` `agents()` reads it), runs |
 | `GET /specs` | specs, `governs`, parse errors, and `freshness` (stale, lying, undated; null outside git) | `drift.loadSpecs`, `freshness.freshness` |
 | `GET /specs/ownership` | the ownership map, unowned, orphaned | `drift.buildOwnership`, `findOrphaned`, `treeFromGit` |
 | `GET /specs/drift` | recent drift and gate events, dismissals | the event log, `kind in (drift, gate)` |
 | `GET /settings` | read-only config, `stateDir`, sources, binding | config, server |
+| `GET /metrics?days=7\|14\|30` | the Metrics page's figures over the range, and `kpis`: delivery from git, AI figures, open work in tokens, the anti-KPIs; each null with a reason when not recorded | `dashboard.mjs` functions, `kpis.mjs` (B-2, B-4) |
 
 **Folding runs.**
 - `start` and `end` rows with the same `run` id become one run.
@@ -450,15 +466,21 @@ GET /api/v1/runs/:id/stream     one run's redacted live transcript
   already says a half-written last line is the normal state of an appended
   file.
 - An unparseable complete line is skipped and counted, never thrown.
+- A line longer than the 8 MiB read window is skipped and counted too, rather
+  than held: holding it would stall that file forever.
+- A fresh client starts just after each file's last complete line, not at its
+  size, which is mid-line while a writer is part-way through one.
 
 **Events.**
 - `event: log`, carrying one redacted record.
 - `event: invalidate`, with data `{resource: "board"}` when `board.json`
   changes. It is rewritten rather than appended, so clients refetch.
-- A comment heartbeat every 15 seconds.
+- A comment heartbeat every 15 seconds, on the main stream and on each run's
+  transcript stream.
 
 **Resuming.** Event ids are `<file>:<byteOffset>`, so a reconnect with
-`Last-Event-ID` resumes with no gap and no duplicate.
+`Last-Event-ID` resumes with no gap and no duplicate. `hello` carries the
+starting cursor too, so a client that drops before any log event still resumes.
 
 **Why SSE and not WebSockets:**
 - Data flows one way.
@@ -559,9 +581,22 @@ It fails if `web/src`:
 - imports any vendor SDK (the same list `drift.test.mjs` bans)
 - contains `innerHTML` or `dangerouslySetInnerHTML`
 - names a gate or a lifecycle stage outside the single display-label module
-  `web/src/api/labels.ts`
-- contains an `http://` or `https://` URL, which would be an external request
-- contains a color literal outside `web/src/theme.css`
+  `web/src/api/labels.ts`: every stage `stageOf` returns, `ready` and `dropped`
+  included, as a string; a gate also as a property, key or destructured name
+  (`gates.security`, `{ qa: … }`, `const { qa } = …`), and in display text (JSX
+  text, template literals; a stage name when it is the whole text). Getting
+  started's walk blocks are CLI commands run by their own test, and are exempt
+  by name
+- `web/index.html` is scanned too, including its colour attributes (`fill=`,
+  `bgcolor=`) and unquoted `src=//host`; URLs are matched in any case, and
+  `color()` and `color-mix()` count as colour literals
+- contains an `http://`, `https://`, `ws://`, `wss://` or protocol-relative
+  (`//host`, `url(//host)`) URL, which would be an external request
+- contains a color literal outside `web/src/theme.css`: hex, a color
+  function, or any CSS named color in any case
+
+With no web build, `serve` answers with a plain page that carries no inline
+style, since its own CSP would block one.
 
 ---
 
@@ -574,7 +609,9 @@ The browser displays; core decides.
 - **Every button comes from `commands`,** the list `lifecycle.commandsFor`
   returns. If core would refuse a command, core does not offer it.
 - **Every click round-trips to core, which checks again.** "Close" only ever
-  calls `done`, and `done` re-runs `missingGates`. The board can change between
+  calls `done`, and `done` re-runs `missingGates` and refuses while the drift
+  gate's latest verdict for the task is a fail (`board.driftGateFailing`, which
+  the read model passes in, as the CLI does). The board can change between
   render and click, so a stale page can offer a command. That is harmless,
   because the refusal comes back verbatim.
 
@@ -670,15 +707,19 @@ To avoid a name collision, the API field is `lifecycle`, not `stage`.
 |---|---|---|---|
 | `question` | a `questions[]` entry has no `answer` | answered | `answer` |
 | `spec-approval` | rule 8 above holds | approved, or rejected with a reason | `spec-approve` / `spec-reject` |
-| `gate-failure` | the latest `security` verdict is `fail`; **or** the latest drift `gate` event for the task has `verdict:"fail"` and no later pass; **or** some required gate has at least `cfg.inbox.reworkThreshold` fails (default 2) | a later pass, or the task is dropped | open the work item; drift shows the CLI command |
+| `gate-failure` | the latest `security` verdict is `fail`; **or** the drift gate is open for the task: a `fail` whose flagged paths no later pass has checked (`board.driftOpen`, the same rule `done` uses; runstore records one after every run for a task); **or** some required gate has at least `cfg.inbox.reworkThreshold` fails (default 2) | a later pass that checked the flagged paths, or the task is dropped | open the work item; drift shows the CLI command |
 | `pr-review` | `lifecycle === "human"` and a `pr` is recorded | `done` (nothing records a merge yet) | review outside Caretaker, then `done` |
+| `decision` | an archived run's `harvest.json` has a decision with no `recordedIn`, and `harvest-decisions.jsonl` has no entry for it (`harvest.pending`) | kept (a draft ADR is written) or discarded with a reason | the `harvest.mjs keep` / `discard` command, shown as text |
 
 - **A single qa fail is not an Inbox item.** It sends the task back to build.
 - **A refutation (H-3, `bin/verify.mjs`) is a qa fail like any other.** Its
   gate event carries `source: "refute"` and is excluded from the drift-gate
   rule, so it never gets a drift-dismissal command and never masks a drift
   failure. Repeated refutations reach the Inbox through the rework threshold.
-- **Dropped tasks never appear.**
+- **Dropped tasks never appear.** A decision is the exception to "open tasks
+  only": it is about the run, and a decision made on a task that has since
+  closed still lands nowhere until someone keeps or discards it. Its `task` is
+  null when the run named none.
 - Items are ordered by `since`: the `at` of the fact that created them, or the
   date for legacy verdicts.
 

@@ -41,7 +41,7 @@ import {
   readFileSync, writeFileSync, appendFileSync, existsSync, readdirSync, mkdirSync, realpathSync,
 } from "node:fs";
 import { execFileSync } from "node:child_process";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, posix, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -186,6 +186,14 @@ export function gateStats(phases, GATES) {
       }
     }
   }
+  // The percentages are computed HERE, once, and fail is 100 minus pass:
+  // rounding each on its own let the page's fail% and the web's pass% sum to
+  // 101 (independent review), and a browser computing its own is a second copy.
+  for (const v of m.values()) {
+    const n = v.pass + v.fail;
+    v.passPct = n ? Math.round((v.pass / n) * 100) : null;
+    v.failPct = n ? 100 - v.passPct : null;
+  }
   return [...m.entries()];
 }
 
@@ -232,7 +240,7 @@ export function quality(phases, GATES) {
  * precision this page has no right to.
  */
 export function tokenStats(runList) {
-  const list = (runList ?? []).filter((r) => Number.isFinite(r.tokens));
+  const list = (runList ?? []).map((r) => ({ ...r, tokens: rowTokens(r) })).filter((r) => Number.isFinite(r.tokens));
   if (!list.length) return null;
   const byTask = new Map();
   for (const r of list) {
@@ -299,32 +307,66 @@ export function tokenStats(runList) {
 }
 
 /**
+ * A run row's tokens: the SUM OF ITS PARTS when it has any, else its total.
+ * run.mjs refuses a total that disagrees with its parts, but a row written by
+ * anything else may carry both, and the parts are the measured numbers
+ * (independent review: {in:10, out:10, tokens:400000} counted 400000).
+ */
+export function rowTokens(r) {
+  const parts = ["in", "cached", "write", "out"].filter((k) => Number.isFinite(r?.[k]));
+  return parts.length ? parts.reduce((n, k) => n + r[k], 0) : r?.tokens;
+}
+
+/**
  * Tokens spent on work that had to be done again.
  *
  * THE ONE ACTIONABLE WASTE NUMBER. Everything else on this page describes what
- * the spend WAS; this says which part of it bought nothing, because the task
- * failed a gate and ran again. Only computable since verdicts started appending.
+ * the spend WAS; this says which part went on attempts a gate sent back: a
+ * failed task's runs up to its last failed verdict. Only computable since
+ * verdicts started appending.
  */
 export function reworkSpend(phases, runList, GATES) {
   if (!runList) return null;
-  const failed = new Set();
+  // Per task that failed a gate: its LAST failed verdict. Runs up to it are
+  // the attempts sent back; the run that then passed bought the work and is
+  // not rework. A verdict recorded by board.mjs now carries `t`, the
+  // instant, so a retry on the same day is placed after the failure; an older
+  // one has only its date, and a run on that day counts as rework.
+  const lastFail = new Map();
+  const key = (e) => (typeof e.t === "string" && Number.isFinite(Date.parse(e.t)) ? e.t : /^\d{4}-\d{2}-\d{2}/.test(e.at ?? "") ? `${e.at.slice(0, 10)}T23:59:59.999Z` : "");
   for (const p of phases) {
     for (const t of p.tasks ?? []) {
-      const everFailed = GATES.some((g) => {
+      for (const g of GATES) {
         const r = (t.gate ?? {})[g];
-        return r && (r.verdict !== "pass" || (r.history ?? []).some((h) => h.verdict !== "pass"));
-      });
-      if (everFailed) failed.add(t.id);
+        if (!r) continue;
+        for (const e of [...(r.history ?? []), r]) {
+          if (e.verdict === "pass") continue;
+          const k = key(e);
+          if (!lastFail.has(t.id) || k > lastFail.get(t.id)) lastFail.set(t.id, k);
+        }
+      }
     }
   }
   let wasted = 0;
   let total = 0;
+  let unplaced = 0;
+  const hit = new Set();
   for (const r of runList) {
-    if (!Number.isFinite(r.tokens)) continue;
-    total += r.tokens;
-    if (r.task && failed.has(r.task)) wasted += r.tokens;
+    const tok = rowTokens(r);
+    if (!Number.isFinite(tok)) continue;
+    total += tok;
+    if (!r.task || !lastFail.has(r.task)) continue;
+    // A run or a failure with no time cannot be placed either side of it.
+    const at = Number.isFinite(Date.parse(r.t)) ? Date.parse(r.t) : null;
+    const fail = lastFail.get(r.task) ? Date.parse(lastFail.get(r.task)) : null;
+    if (at === null || fail === null) unplaced += tok;
+    else if (at <= fail) {
+      wasted += tok;
+      hit.add(r.task);
+    }
   }
-  return { wasted, total, pct: total ? Math.round((wasted / total) * 100) : 0, tasks: failed.size };
+  // Tasks whose spend was sent back, not every task that ever failed.
+  return { wasted, total, pct: total ? Math.round((wasted / total) * 100) : 0, tasks: hit.size, unplaced };
 }
 
 /**
@@ -487,7 +529,9 @@ export function readRuns(root, cfg) {
     .filter(Boolean)
     .map((l) => {
       try {
-        return JSON.parse(l);
+        const r = JSON.parse(l);
+        const tok = rowTokens(r);
+        return Number.isFinite(tok) && tok !== r.tokens ? { ...r, tokens: tok } : r;
       } catch {
         return null; // a half-written last line is normal in an appended file
       }
@@ -587,6 +631,17 @@ function gateRail(t) {
   }).join("")}</div>`;
 }
 
+/** B-3: a task's spec, as a link relative to this page; text when it is not a plain path inside the repo. */
+function specMeta(t, pageRel) {
+  if (!t.spec) return "";
+  const s = String(t.spec);
+  // Plain path characters only, and the result checked too: "docs/javascript:x"
+  // relative to docs/ came out as a javascript: link (independent review).
+  const rel = /^[\w.\/-]+$/.test(s) && !s.startsWith("/") && !s.split("/").includes("..") ? posix.relative(posix.dirname(pageRel), s) : null;
+  const href = rel && !/^[a-z][a-z0-9+.-]*:/i.test(rel) && !rel.startsWith("/") ? rel : null;
+  return `<span class="es">spec ${href ? `<a href="${esc(href)}">${esc(s)}</a>` : esc(s)}</span>`;
+}
+
 function taskCard(t) {
   const h = held(t, GATES);
   const hrs = hoursOf.get(t.id);
@@ -594,6 +649,7 @@ function taskCard(t) {
     t.owner ? `<span class="ow">${esc(t.owner)}</span>` : "",
     t.est ? `<span class="es">${esc(t.est)}</span>` : `<span class="es no">no estimate</span>`,
     t.deps?.length ? `<span class="es">after ${esc(t.deps.join(", "))}</span>` : "",
+    specMeta(t, cfg.out ?? "docs/board.html"),
   ]
     .filter(Boolean)
     .join("");
@@ -737,7 +793,7 @@ const gateRows = gateStats
       `<tr><td>${esc(g)}</td><td class="num">${v.pass}</td><td class="num ${
         v.fail ? "worse" : ""
       }">${v.fail}</td><td class="num">${
-        v.pass + v.fail ? Math.round((v.fail / (v.pass + v.fail)) * 100) : 0
+        v.failPct ?? 0
       }%</td></tr>`,
   )
   .join("");
@@ -1067,8 +1123,9 @@ footer{margin-top:34px;color:var(--faint);font-size:13px;line-height:1.7;
            ${reworkSpend?.wasted ? `<div><p class="k">Rework</p>
              <p class="v worse">${reworkSpend.pct}%</p>
              <p class="w">${reworkSpend.wasted.toLocaleString("en-US")} tokens on
-               ${reworkSpend.tasks} task${reworkSpend.tasks === 1 ? "" : "s"} that failed a gate and
-               ran again. The one number here that bought nothing.</p></div>` : ""}
+               ${reworkSpend.tasks} task${reworkSpend.tasks === 1 ? "" : "s"} that failed a gate, spent
+               up to each one's last failure: the attempts that were sent back. An older verdict
+               with a date only counts a retry on that day here too.</p></div>` : ""}
          </div>
          <p class="cav">Composition is computed from ${tokenStats.detailedCount} run(s) that
            reported a breakdown; runs logging only a total are counted in the totals elsewhere but

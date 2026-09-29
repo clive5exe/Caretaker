@@ -37,6 +37,7 @@ import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import * as events from "./events.mjs";
 import { cliLabel } from "./harness.mjs";
+import { transcriptTexts } from "./transcript.mjs";
 import { load as loadHarnessSettings, policyFlags, policyFor } from "./harness-config.mjs";
 import { RUN_ID, runArchived, stateDirFor } from "./runstore.mjs";
 import { requireSecrets } from "./secrets.mjs";
@@ -54,38 +55,24 @@ const VERDICT_LINE = /^[ \t>*`_-]*VERDICT:[ \t]*(REFUTED|STANDS)\b[ \t:—-]*(.*
 
 /**
  * Read the refuter's verdict from its transcript. The LAST verdict line wins,
- * because an agent may quote the instruction before answering it. A JSON line
- * is read as the strings it holds; any other line with `\n` escapes unfolded.
- * Both are properties of JSON, not of any vendor.
+ * because an agent may quote the instruction before answering it. The text is
+ * read as transcript.mjs reads any transcript, knowing no vendor's shape.
  */
 export function parseVerdict(text) {
-  const raw = String(text ?? "");
   let last = null;
-  // A transcript line that is JSON is read as the strings it holds, in order —
-  // whatever the field names, so no vendor's output shape is known here. A
-  // reply that IS the verdict line then starts a line, as the rule requires,
-  // instead of sitting after `"content":"`.
-  const texts = [];
-  const walk = (v) => {
-    if (typeof v === "string") texts.push(v);
-    else if (v && typeof v === "object") for (const x of Array.isArray(v) ? v : Object.values(v)) walk(x);
-  };
-  for (const line of raw.split("\n")) {
-    try {
-      const v = JSON.parse(line);
-      if (v && typeof v === "object") {
-        walk(v);
-        continue;
-      }
-    } catch {}
-    texts.push(line.replace(/\\n/g, "\n"));
-  }
+  const texts = transcriptTexts(text);
   for (const t of texts) {
     for (const m of t.matchAll(VERDICT_LINE)) last = m;
   }
   if (!last) return { outcome: "inconclusive", reason: "no VERDICT: REFUTED or VERDICT: STANDS line in the transcript" };
   const reason = last[2].replace(/\\"/g, '"').replace(/["}\]]+$/, "").trim();
   return { outcome: last[1] === "REFUTED" ? "refuted" : "stands", reason: reason || null };
+}
+
+/** The last non-empty line of a transcript's text, whatever its shape. */
+export function lastLine(raw) {
+  const lines = transcriptTexts(raw).join("\n").split("\n").map((l) => l.trim()).filter(Boolean);
+  return lines.at(-1) ?? "";
 }
 
 /** The refuter's instructions. The acceptance criterion is the bar; the patch is the evidence. */
@@ -163,9 +150,16 @@ export async function refute({ cfgPath, parent, workspace, policy = {}, secrets 
   );
   const child = out.verdict.runId;
   const transcript = readFileSync(join(out.archived, "transcript.log"), "utf8");
-  let { outcome, reason } = parseVerdict(transcript);
-  if (!out.verdict.ok && outcome !== "refuted") {
-    // A refuter that crashed or was killed checked nothing, whatever it printed first.
+  // The verdict is the REFUTER'S OWN, from its final message. Read from the
+  // whole transcript, a file the refuter merely looked at could carry a
+  // "VERDICT: REFUTED" and fail someone's task (independent review). With no
+  // known final message (a custom CLI), only the transcript's last line
+  // counts, which is where the prompt tells it to put the verdict.
+  let { outcome, reason } = parseVerdict(out.verdict.finalText ?? lastLine(transcript));
+  if (!out.verdict.ok) {
+    // A refuter that crashed or was killed checked nothing, whatever it printed
+    // first, a REFUTED included: a fail recorded from a run that did not
+    // finish would stand on nothing.
     outcome = "inconclusive";
     reason = `the refuting run did not complete (${out.verdict.state}${out.verdict.reason ? `: ${out.verdict.reason}` : ""})`;
   }
@@ -175,7 +169,7 @@ export async function refute({ cfgPath, parent, workspace, policy = {}, secrets 
   let recorded = false;
   if (outcome === "refuted") {
     const note = `refuted by run ${child}, checking run ${parent}: ${reason ?? "no reason given"}`;
-    const res = board.mutate(ctx, (d) => board.recordVerdict(d, parentRec.task, "qa", "fail", note));
+    const res = board.mutate(ctx, (d) => board.recordVerdict(d, parentRec.task, "qa", "fail", note, { by: `refuter run ${child}`, via: "refute" }));
     recorded = Boolean(res?.ok);
     if (!recorded) warnings.push(`the qa fail could not be recorded: ${res?.error ?? "unknown error"}`);
     try {

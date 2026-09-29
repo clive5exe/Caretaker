@@ -482,29 +482,57 @@ const tokenStats = (() => {
  * Tokens spent on work that had to be done again.
  *
  * THE ONE ACTIONABLE WASTE NUMBER. Everything else on this page describes what
- * the spend WAS; this says which part of it bought nothing, because the task
- * failed a gate and ran again. Only computable since verdicts started appending.
+ * the spend WAS; this says which part went on attempts a gate sent back: a
+ * failed task's runs up to its last failed verdict. Only computable since
+ * verdicts started appending.
  */
 const reworkSpend = (() => {
+  // B-8, mirrored: a row's tokens are the sum of its parts when it has any.
+  const rowTokens = (r) => {
+    const parts = ["in", "cached", "write", "out"].filter((k) => Number.isFinite(r?.[k]));
+    return parts.length ? parts.reduce((n, k) => n + r[k], 0) : r?.tokens;
+  };
   if (!runList) return null;
-  const failed = new Set();
+  // Per task that failed a gate: its LAST failed verdict. Runs up to it are
+  // the attempts sent back; the run that then passed bought the work and is
+  // not rework. A verdict recorded by board.mjs now carries `t`, the
+  // instant, so a retry on the same day is placed after the failure; an older
+  // one has only its date, and a run on that day counts as rework.
+  const lastFail = new Map();
+  const key = (e) => (typeof e.t === "string" && Number.isFinite(Date.parse(e.t)) ? e.t : /^\d{4}-\d{2}-\d{2}/.test(e.at ?? "") ? `${e.at.slice(0, 10)}T23:59:59.999Z` : "");
   for (const p of phases) {
     for (const t of p.tasks ?? []) {
-      const everFailed = GATES.some((g) => {
+      for (const g of GATES) {
         const r = (t.gate ?? {})[g];
-        return r && (r.verdict !== "pass" || (r.history ?? []).some((h) => h.verdict !== "pass"));
-      });
-      if (everFailed) failed.add(t.id);
+        if (!r) continue;
+        for (const e of [...(r.history ?? []), r]) {
+          if (e.verdict === "pass") continue;
+          const k = key(e);
+          if (!lastFail.has(t.id) || k > lastFail.get(t.id)) lastFail.set(t.id, k);
+        }
+      }
     }
   }
   let wasted = 0;
   let total = 0;
+  let unplaced = 0;
+  const hit = new Set();
   for (const r of runList) {
-    if (!Number.isFinite(r.tokens)) continue;
-    total += r.tokens;
-    if (r.task && failed.has(r.task)) wasted += r.tokens;
+    const tok = rowTokens(r);
+    if (!Number.isFinite(tok)) continue;
+    total += tok;
+    if (!r.task || !lastFail.has(r.task)) continue;
+    // A run or a failure with no time cannot be placed either side of it.
+    const at = Number.isFinite(Date.parse(r.t)) ? Date.parse(r.t) : null;
+    const fail = lastFail.get(r.task) ? Date.parse(lastFail.get(r.task)) : null;
+    if (at === null || fail === null) unplaced += tok;
+    else if (at <= fail) {
+      wasted += tok;
+      hit.add(r.task);
+    }
   }
-  return { wasted, total, pct: total ? Math.round((wasted / total) * 100) : 0, tasks: failed.size };
+  // Tasks whose spend was sent back, not every task that ever failed.
+  return { wasted, total, pct: total ? Math.round((wasted / total) * 100) : 0, tasks: hit.size, unplaced };
 })();
 
 /* -------------------------------------------------------------------- render */
@@ -683,7 +711,8 @@ const gateRows = gateStats
       `<tr><td>${esc(g)}</td><td class="num">${v.pass}</td><td class="num ${
         v.fail ? "worse" : ""
       }">${v.fail}</td><td class="num">${
-        v.pass + v.fail ? Math.round((v.fail / (v.pass + v.fail)) * 100) : 0
+        // W-15, mirrored: fail% is 100 minus the rounded pass%, as core computes it.
+        v.pass + v.fail ? 100 - Math.round((v.pass / (v.pass + v.fail)) * 100) : 0
       }%</td></tr>`,
   )
   .join("");
@@ -1013,8 +1042,9 @@ footer{margin-top:34px;color:var(--faint);font-size:13px;line-height:1.7;
            ${reworkSpend?.wasted ? `<div><p class="k">Rework</p>
              <p class="v worse">${reworkSpend.pct}%</p>
              <p class="w">${reworkSpend.wasted.toLocaleString("en-US")} tokens on
-               ${reworkSpend.tasks} task${reworkSpend.tasks === 1 ? "" : "s"} that failed a gate and
-               ran again. The one number here that bought nothing.</p></div>` : ""}
+               ${reworkSpend.tasks} task${reworkSpend.tasks === 1 ? "" : "s"} that failed a gate, spent
+               up to each one's last failure: the attempts that were sent back. An older verdict
+               with a date only counts a retry on that day here too.</p></div>` : ""}
          </div>
          <p class="cav">Composition is computed from ${tokenStats.detailedCount} run(s) that
            reported a breakdown; runs logging only a total are counted in the totals elsewhere but

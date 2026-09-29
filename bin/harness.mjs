@@ -9,15 +9,26 @@
  *
  * ── the two adapters ──────────────────────────────────────────────────────
  *
- * `cli` (DEFAULT) shells out to an agent CLI running INSIDE the dev-environment
- * container. It is the default because that is where subscription auth lives:
- * the SDKs take an API key and nothing else, while `claude login` against a Pro
- * or Max plan exists only in the CLI. Defaulting to the SDK would quietly bill
- * API rates on top of a subscription somebody already pays for.
+ * `cli` (DEFAULT) shells out to an agent CLI, INSIDE the dev-environment
+ * container unless sandbox is none. It is the default because the CLI is where
+ * subscription auth lives (a Claude Pro or Max plan).
  *
- * `sdk` is API-key, model call above the container. It is NOT IMPLEMENTED here
- * and says so loudly rather than returning a plausible-looking empty result.
- * See `sdkAdapter` for exactly what is missing.
+ * WHAT REACHES THAT CLI, stated because the default's reason depends on it:
+ * on the host (sandbox none) it is your own login. In the container, HOME is a
+ * fresh tmpfs and nothing of your ~/.claude is mounted. A subscription reaches
+ * it as a long-lived token from `claude setup-token`, given to the run BY NAME
+ * (`--secret CLAUDE_CODE_OAUTH_TOKEN`): the name goes on podman's argv, the
+ * value through its environment, never into `ps`, and the transcript is
+ * redacted with it. An API key goes the same way (`--secret ANTHROPIC_API_KEY`).
+ * Either way the CLI reaches the API only through the run's egress proxy
+ * (`--egress api.anthropic.com`); the default network is none, which has no
+ * route. runstore says so before a run that has no credential or no route
+ * (credentialAdvice). The agent can read the token it runs with, as with any
+ * credential a CLI uses; the allowlist is what keeps it from going elsewhere.
+ *
+ * `openai-compatible` makes the model call from the harness, above the
+ * container, and runs the tools inside it. `sdk` is registered and NOT
+ * IMPLEMENTED, and says so rather than returning a plausible empty result.
  *
  * ── what this costs, stated rather than hidden ────────────────────────────
  *
@@ -61,15 +72,17 @@
  *   node bin/harness.mjs adapters
  */
 import { spawn, spawnSync } from "node:child_process";
-import { createWriteStream, existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
+import { chmodSync, createWriteStream, existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { randomBytes } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { DEFAULT_DIR as DEFAULT_EVENTS_DIR, STAGES, append as appendEvents } from "./events.mjs";
 import { buildArgs, checkLimits, delegatedControllers } from "./sandbox.mjs";
 import { readDevcontainer, toLimits } from "./spec.mjs";
 import { openaiCompatibleAdapter } from "./openai-compatible.mjs";
+import { EnvironmentError, imageId, resolveImage } from "./environment.mjs";
+import { within } from "./paths.mjs";
 
 /**
  * The seam, as data. Exported so a test can assert the shape rather than trust
@@ -107,6 +120,9 @@ const DEFAULTS = {
   graceMs: 5000,
   sandbox: "podman",
   net: "none",
+  // E-5: the network an image BUILD gets. None: the Dockerfile is agent-editable
+  // (environment.mjs buildArgv says why). Per run, on the command line only.
+  buildNetwork: "none",
   image: null,
   devcontainer: ".devcontainer/devcontainer.json",
   logDir: null,
@@ -138,6 +154,22 @@ const DEFAULTS = {
  */
 export const cliLabel = (cli) =>
   cli === undefined ? DEFAULTS.cli : typeof cli === "string" ? cli : cli?.name ? `custom:${cli.name}` : "custom";
+
+/**
+ * The image a containerised run uses (E-5): policy.image, else devcontainer
+ * `image`, else its `build.dockerfile` built now. Returns the id it resolved
+ * to as well, so the run records the environment it actually ran in.
+ */
+export function imageFor(policy, dev, warnings, { exec } = {}) {
+  try {
+    const r = resolveImage({ image: policy.image ?? null, dev, devcontainerPath: policy.devcontainer, runtime: policy.sandbox, exec, buildNetwork: policy.buildNetwork ?? "none" });
+    warnings.push(...r.warnings);
+    return { image: r.image, built: r.built, imageId: imageId(r.image, { runtime: policy.sandbox, exec }) };
+  } catch (e) {
+    if (e instanceof EnvironmentError) throw new HarnessError(e.message, { code: e.code });
+    throw e;
+  }
+}
 
 const newRunId = () => `r_${randomBytes(4).toString("hex")}`;
 
@@ -184,11 +216,17 @@ export const CLI_PRESETS = {
   claude: {
     bin: "claude",
     /** stdin carries the prompt; `-` is not needed, --print reads stdin. */
+    // stream-json, not json: json prints one result AT EXIT, so a killed run
+    // left nothing for the live mirror or the decision harvest (B-5,
+    // independent re-review). stream-json writes each event as it happens,
+    // and ends with the same `result` event json would have printed alone.
+    // --print needs --verbose to stream.
     argv: ({ model }) => [
       "claude",
       "--print",
       "--output-format",
-      "json",
+      "stream-json",
+      "--verbose",
       ...(model ? ["--model", model] : []),
     ],
     /**
@@ -269,7 +307,11 @@ export function buildContainerArgv({
     "--name",
     containerName,
   ];
-  for (const [k, v] of Object.entries(env)) extra.push("-e", `${k}=${v}`);
+  // NAMES ONLY. `-e NAME` makes podman take the value from its own
+  // environment (execWithTimeout's `env`), so a key never sits in argv, where
+  // `ps` and `podman inspect` show it to every user on the box. secrets.mjs
+  // measured that leak; this path used to reproduce it.
+  for (const k of Object.keys(env)) extra.push("-e", k);
   extra.push(...extraRunFlags);
   return spliceRunFlags(base, extra);
 }
@@ -475,6 +517,24 @@ function jsonCandidates(text) {
   return out;
 }
 
+/**
+ * The agent's OWN final message, from a CLI's JSON output, or null when the
+ * output has no shape this knows. Read here, in the harness, because it is
+ * vendor shape: claude prints `{"type":"result","result":"..."}`; codex
+ * `--json` ends with an `agent_message` item. Anything the agent merely READ
+ * (a file, a tool's output) is not in it, which is the point: a verdict or a
+ * decision an agent quotes from the work it is checking is not its own.
+ */
+export function finalTextOf(transcriptText) {
+  const docs = jsonCandidates(String(transcriptText ?? ""));
+  for (let i = docs.length - 1; i >= 0; i--) {
+    const d = docs[i];
+    if (typeof d?.result === "string") return d.result;
+    if (d?.item?.type === "agent_message" && typeof d.item.text === "string") return d.item.text;
+  }
+  return null;
+}
+
 /** Deep search for the first numeric value under any of `names`. */
 function findNumber(node, names, depth = 0) {
   if (node === null || typeof node !== "object" || depth > 6) return null;
@@ -490,7 +550,11 @@ function findNumber(node, names, depth = 0) {
 
 export function parseUsage(transcriptText, { billing = null, source = "transcript-json" } = {}) {
   const cost = emptyCost(billing);
-  const docs = jsonCandidates(transcriptText ?? "");
+  // A streamed transcript carries usage per message as well as the run's
+  // total on its final `result` event: the result is read first, so a
+  // message's own usage is never taken for the run's.
+  const all = jsonCandidates(transcriptText ?? "");
+  const docs = [...all.filter((d) => d?.type === "result").reverse(), ...all.filter((d) => d?.type !== "result")];
   if (!docs.length) return cost;
 
   let found = false;
@@ -545,7 +609,7 @@ export function parseUsage(transcriptText, { billing = null, source = "transcrip
  * output, and the TUI's job is to tail the file — so nothing here writes the
  * agent's bytes to this process's stdout.
  */
-function execWithTimeout({ file, args, cwd, stdinData, stdoutPath, stderrPath, timeoutMs, graceMs, onKill }) {
+function execWithTimeout({ file, args, cwd, env, stdinData, stdoutPath, stderrPath, timeoutMs, graceMs, onKill }) {
   return new Promise((res) => {
     const startedAt = Date.now();
     /*
@@ -562,7 +626,7 @@ function execWithTimeout({ file, args, cwd, stdinData, stdoutPath, stderrPath, t
     };
     let child;
     try {
-      child = spawn(file, args, { cwd, stdio: ["pipe", "pipe", "pipe"], detached: true });
+      child = spawn(file, args, { cwd, env: env ? { ...process.env, ...env } : undefined, stdio: ["pipe", "pipe", "pipe"], detached: true });
     } catch (e) {
       return finish({ spawnError: e, exitCode: null, signal: null, killed: false, durationMs: 0, startedAt });
     }
@@ -788,12 +852,7 @@ async function cliAdapter({ workspace, prompt, policy, paths, warnings }) {
   } else {
     const dev = readDevcontainer(policy.devcontainer);
     const limits = toLimits(dev);
-    const image = policy.image ?? limits.image;
-    if (!image) {
-      throw new HarnessError(
-        `no image: set policy.image, or an "image" in ${policy.devcontainer}`,
-      );
-    }
+    const { image, imageId, built } = imageFor(policy, dev, warnings);
     if (policy.net === "none") {
       warnings.push(
         "net:none — the container has no route off the host, so a real agent CLI cannot " +
@@ -837,7 +896,7 @@ async function cliAdapter({ workspace, prompt, policy, paths, warnings }) {
       extraRunFlags: [...policy.extraRunFlags, ...skillsMount(policy, preset, warnings)],
     });
     file = policy.sandbox;
-    container = { runtime: policy.sandbox, name: containerName, image };
+    container = { runtime: policy.sandbox, name: containerName, image, imageId, built };
   }
 
   const exec = await execWithTimeout({
@@ -847,6 +906,10 @@ async function cliAdapter({ workspace, prompt, policy, paths, warnings }) {
     // sandbox:none there is nothing to do it, and a CLI started in the wrong
     // directory edits the wrong repository.
     cwd: policy.sandbox === "none" ? workspace : undefined,
+    // Values reach the container through podman's own environment (the argv
+    // carries names only). On the host, only the run's own env applies: the
+    // preset's HOME is the container's, and would lose the host CLI its login.
+    env: policy.sandbox === "none" ? policy.env : env,
     stdinData: PROMPT_VIA_STDIN ? prompt : undefined,
     stdoutPath: paths.stdout,
     stderrPath: paths.stderr,
@@ -873,21 +936,18 @@ async function cliAdapter({ workspace, prompt, policy, paths, warnings }) {
  * caller records a completed run, the board moves, and no model was ever
  * called. So this throws.
  *
- * What is actually missing, rather than "TODO":
- *   - H-0. There is no mechanism yet for an API key to reach the harness
- *     without touching the repo, the image or the event log. Adding an SDK call
- *     before that lands is how the key ends up in one of them.
- *   - No vendor SDK is a dependency of this repo, and adding one here is the
- *     decision H-10 exists to make deliberately rather than as a side effect.
- *   - Tool execution has to be routed down into the dev environment, which is
- *     the several-hundred-line part the architecture doc prices honestly. The
- *     cli adapter gets that for free by running inside the container.
+ * What is missing, rather than "TODO": no vendor SDK is a dependency of this
+ * repo, and adding one here is the decision H-10 exists to make deliberately
+ * rather than as a side effect. The API-key half now exists (runstore hands a
+ * run the secrets it names as environment variables, by name, never in argv
+ * or the archive), and the openai-compatible adapter already makes model calls
+ * from the harness with its tools routed into the container, which is what an
+ * sdk adapter would need to reuse.
  */
 async function sdkAdapter() {
   throw new HarnessError(
     "adapter \"sdk\" is not implemented. It is registered so it fails by name rather than " +
-      "silently falling back to cli. Blocked on H-0 (a key that reaches the harness without " +
-      "touching the repo, image or log) and on routing tool execution into the dev environment.",
+      "silently falling back to cli. For an API model use adapter \"openai-compatible\".",
     { adapter: "sdk", implemented: false },
   );
 }
@@ -895,7 +955,7 @@ async function sdkAdapter() {
 export const ADAPTERS = {
   cli: cliAdapter,
   sdk: sdkAdapter,
-  "openai-compatible": (args) => openaiCompatibleAdapter({ ...args, HarnessError }),
+  "openai-compatible": (args) => openaiCompatibleAdapter({ ...args, HarnessError, imageFor }),
 };
 
 /** Which adapters exist, for an error message and for the CLI. */
@@ -907,9 +967,7 @@ function ensureLogDir(policy, workspace) {
   const dir = policy.logDir
     ? resolve(policy.logDir)
     : join(tmpdir(), "caretaker-runs", policy.runId);
-  const rel = relative(workspace, dir);
-  const inside = rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
-  if ((inside || dir === workspace) && !policy.allowLogDirInWorkspace) {
+  if (within(dir, workspace) && !policy.allowLogDirInWorkspace) {
     /*
      * REFUSED, not warned. The transcript is written while the run is in
      * flight, so a log inside the workspace lands between the two snapshots and
@@ -924,7 +982,11 @@ function ensureLogDir(policy, workspace) {
       { logDir: dir, workspace },
     );
   }
-  mkdirSync(dir, { recursive: true });
+  // PRIVATE TO THIS USER. The raw transcript (unredacted) and the shadow copy
+  // of the workspace live here; under a shared /tmp at the default umask every
+  // user on the box could read both (independent review).
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  chmodSync(dir, 0o700);
   return dir;
 }
 
@@ -1019,6 +1081,10 @@ export async function run(workspace, prompt, policy = {}) {
    * snapshot below covers it. The adapter throws only when nothing ran at all
    * (an unknown CLI, no image), and then there is no diff to report.
    */
+  // A workspace with no .git has nothing to mount read-only (sandbox.mjs), so
+  // an agent could create one; git on this host would then run its hooks and
+  // config. The shadow diff never sees a .git, so it is checked for here.
+  const hadGit = existsSync(join(ws, ".git"));
   let result;
   try {
     result = await adapter({ workspace: ws, prompt, policy: p, paths, warnings });
@@ -1031,6 +1097,12 @@ export async function run(workspace, prompt, policy = {}) {
 
   const after = snapshot(shadow);
   const diff = measureDiff(shadow, before, after);
+  if (!hadGit && existsSync(join(ws, ".git"))) {
+    warnings.push(
+      `the run CREATED ${join(ws, ".git")} in a workspace that had none. Git on this host runs a repository's hooks and ` +
+        "config, so do not run git there until you have looked at it or deleted it; it is not in the measured diff",
+    );
+  }
 
   const stdoutText = readIfExists(paths.stdout);
   const stderrText = readIfExists(paths.stderr);
@@ -1077,12 +1149,16 @@ export async function run(workspace, prompt, policy = {}) {
     cli: p.adapter === "cli" ? cliLabel(p.cli) : null,
     runId: p.runId,
     container: container
-      ? { runtime: container.runtime, name: container.name, image: container.image, cleanup: container.cleanup ?? null }
+      ? { runtime: container.runtime, name: container.name, image: container.image, imageId: container.imageId ?? null, built: container.built ?? false, cleanup: container.cleanup ?? null }
       : null,
     warnings,
     // Only adapters that drive the tool loop themselves can score it; for a
     // CLI the loop is inside the vendor's binary and this stays absent.
     ...(result.toolUse ? { toolUse: result.toolUse } : {}),
+    // The agent's own final message (see finalTextOf), or null when the
+    // adapter's output has no known shape. Capped: it is for reading a
+    // declared last line, not for holding the transcript twice.
+    finalText: ((f) => (f === null ? null : f.slice(-8000)))(result.finalText !== undefined ? result.finalText : p.adapter === "cli" ? finalTextOf(stdoutText) : null),
   };
 
   const cost = parseUsage(stdoutText, {

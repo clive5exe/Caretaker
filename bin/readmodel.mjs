@@ -23,6 +23,8 @@ import { pathToFileURL, fileURLToPath } from "node:url";
 import * as drift from "./drift.mjs";
 import * as events from "./events.mjs";
 import { freshness as computeFreshness } from "./freshness.mjs";
+import { gitFacts as kpiGitFacts, kpis as computeKpis } from "./kpis.mjs";
+import { pending as harvestPending } from "./harvest.mjs";
 import { commandsFor, openQuestions, requiredGates, specApprovalNeeded, stageOf, STAGES } from "./lifecycle.mjs";
 import { KEY_SHAPES } from "./secrets.mjs";
 import { stateDirFor } from "./runstore.mjs";
@@ -62,8 +64,10 @@ export async function open(cfgPath, { now = () => new Date(), stateDir: stateOve
   const board = await import(pathToFileURL(boardPath).href);
   if (board.API_VERSION !== 1 || typeof board.command !== "function") {
     throw new Error(
+      // install.sh --upgrade, not a bare cp: it keeps a backup of every file it
+      // replaces, and puts them back if the upgraded board cannot read the board.
       `${boardPath} predates the web API (no API_VERSION 1). Upgrade the installed tool files from this checkout: ` +
-        `cp bin/board.mjs bin/dashboard.mjs ${opsDir}/ — config.json, board.json and prompt.txt are not touched.`,
+        `bash ${join(HERE, "..", "install.sh")} --upgrade ${resolve(opsDir, "..", "..")} — config.json, board.json and prompt.txt are not touched, and the replaced files are backed up.`,
     );
   }
   let dash = null;
@@ -123,7 +127,12 @@ export function createReadModel({ cfgPath, board, dash, now = () => new Date(), 
   // dashboard.mjs reads cfg.runs with no default; the server applies the one
   // every other reader here uses, so a config without it still finds the log.
   const runRows = () => (sources().runs === "present" ? dash.readRuns(root, { ...cfg, runs: cfg.runs ?? "ops/caretaker/runs.jsonl" }) : null);
-  const eventLog = () => (sources().events === "present" ? events.read(eventsDir).events : null);
+  // Redacted HERE, where every route that serves events gets them (/events,
+  // /snapshot, /work/:id, /runs/:id, /specs, /inbox). The stream redacted and
+  // these did not: a key in the event log came back verbatim from the REST
+  // routes (independent review). The replacement holds no quote or backslash
+  // (secrets.test asserts it), so the JSON round trip cannot break.
+  const eventLog = () => (sources().events === "present" ? events.read(eventsDir).events.map((e) => JSON.parse(redactShapes(JSON.stringify(e)))) : null);
 
   /* ------------------------------------------------------------------ runs */
   function archived() {
@@ -267,6 +276,7 @@ export function createReadModel({ cfgPath, board, dash, now = () => new Date(), 
       tokens: tokens ?? null,
       openQuestions: openQuestions(t).length,
       pr: t.pr?.url ?? null,
+      specPath: t.spec ? String(t.spec) : null,
       hasAc: !!(Array.isArray(t.ac) ? t.ac.length : String(t.ac ?? "").trim()),
       commands: commandsFor(t, c),
     };
@@ -367,10 +377,15 @@ export function createReadModel({ cfgPath, board, dash, now = () => new Date(), 
       // rework rule below is where they surface. Counting one here would attach
       // a drift-dismissal command to it, and a later one could mask a drift fail.
       const driftGate = ev.filter((e) => e.task === t.id && e.kind === "gate" && e.verdict && e.source !== "refute").sort((a, b) => byTime(a.t, b.t));
-      const lastDrift = driftGate[driftGate.length - 1];
-      if (lastDrift?.verdict === "fail") {
-        reasons.push(`the drift gate failed at ${lastDrift.t}: ${lastDrift.detail ?? ""}`.trim());
-        since ??= lastDrift.t;
+      // Open or not is core's rule (board.driftOpen, H-4): a pass clears only
+      // the paths it checked. An older installed board.mjs without it keeps
+      // the old rule, the latest event.
+      const lastFail = [...driftGate].reverse().find((e) => e.verdict === "fail");
+      const openDrift = typeof board.driftOpen === "function" ? board.driftOpen(ev, t.id) : driftGate.at(-1)?.verdict === "fail" ? driftGate.at(-1).detail ?? "the drift gate failed" : null;
+      const lastDrift = openDrift ? lastFail : driftGate.at(-1);
+      if (openDrift) {
+        reasons.push(`the drift gate failed at ${lastFail?.t}: ${openDrift}`.trim());
+        since ??= lastFail?.t;
       }
       for (const g of required) {
         const rec = gate[g];
@@ -397,13 +412,31 @@ export function createReadModel({ cfgPath, board, dash, now = () => new Date(), 
         items.push({ ...base, kind: "pr-review", since: t.pr.at ?? null, fact: `every required gate passed; PR ${t.pr.url}`, pr: t.pr.url, actions: cmds.filter((x) => x.cmd === "done") });
       }
     }
+    // H-6: a decision a run declared that no spec or ADR records. Kept or
+    // discarded in the terminal, with a name, like a drift dismissal.
+    const titles = new Map(board.allTasks(d).map((t) => [t.id, t]));
+    for (const p of harvestPending(stateDir)) {
+      const t = p.task ? titles.get(p.task) : null;
+      items.push({
+        task: p.task ?? null,
+        title: t?.title ?? "(no task)",
+        owner: t?.owner ?? null,
+        kind: "decision",
+        since: p.since ?? null,
+        fact: `run ${p.run} decided: ${p.text}${p.why ? ` — because ${p.why}` : ""}. No spec or ADR records it.`,
+        decision: { run: p.run, id: p.id, text: p.text, why: p.why },
+        keepCommand: `node bin/harvest.mjs keep --run ${p.run} --id ${p.id} --by <you>`,
+        discardCommand: `node bin/harvest.mjs discard --run ${p.run} --id ${p.id} --reason "…" --by <you>`,
+        actions: [],
+      });
+    }
     // Oldest first; an item whose fact carries no time sorts last, not first.
     return items.sort((a, b) => (a.since && b.since ? byTime(a.since, b.since) : a.since ? -1 : b.since ? 1 : 0));
   }
   function inbox() {
     const { runs } = foldRuns();
     const items = inboxItems(loadBoard(), runs);
-    const counts = { question: 0, "spec-approval": 0, "gate-failure": 0, "pr-review": 0 };
+    const counts = { question: 0, "spec-approval": 0, "gate-failure": 0, "pr-review": 0, decision: 0 };
     for (const i of items) counts[i.kind] += 1;
     return { sources: sources(), threshold: reworkThreshold, counts, items };
   }
@@ -444,9 +477,41 @@ export function createReadModel({ cfgPath, board, dash, now = () => new Date(), 
     for (const f of RUN_FILES) archiveFiles[f] = runFilePath(id, f) ? statSync(runFilePath(id, f)).size : null;
     const d = loadBoard();
     const hit = r.task ? board.find(d, r.task) : null;
+    // What the run's network was, from its archived record, so "no egress
+    // record" can say WHY (independent re-review: the page claimed no route
+    // out for a sandbox:none run, which had the host's whole network).
+    //   host     sandbox none: the host's network; nothing controlled or recorded it
+    //   proxied  a per-run proxy was attached; no log means no connection was made
+    //   sealed   no proxy, network none: no route out, nothing to record
+    //   network  some other named network: not recorded
+    //   unknown  no archived record for the run
+    const rec = archived().get(id) ?? null;
+    const net = rec?.policy?.net ?? (rec?.egress ? null : "none");
+    const egress = !rec || (!rec.policy && !rec.egress)
+      ? { state: "unknown", net: null }
+      : rec.policy?.sandbox === "none"
+        ? { state: "host", net: null }
+        : rec.egress
+          ? { state: "proxied", net: rec.egress.network ?? null }
+          : net === "none"
+            ? { state: "sealed", net: "none" }
+            : { state: "network", net };
+    // The openai-compatible adapter calls its model FROM THIS MACHINE, outside
+    // the sandbox; only its tools run in the container. Those calls are in no
+    // egress log, so the page names where they went (round-3 review).
+    if (rec && (rec.adapter ?? rec.policy?.adapter) === "openai-compatible") {
+      let host = null;
+      try {
+        host = new URL(rec.policy?.endpoint ?? "").host || null;
+      } catch {
+        host = null;
+      }
+      egress.modelCalls = { from: "host", endpoint: host };
+    }
     return {
       sources: sources(),
       ...runRow(r),
+      egress,
       reason: r.reason,
       exitCode: r.exitCode ?? null,
       timeoutMs: r.timeoutMs ?? null,
@@ -469,6 +534,12 @@ export function createReadModel({ cfgPath, board, dash, now = () => new Date(), 
    */
   function runFilePath(id, name) {
     if (!RUN_ID.test(id) || !RUN_FILES.includes(name)) return null;
+    // The proxy writes egress.jsonl RAW while the run is in flight, and only
+    // archive() redacts it, with the run's own secrets, before it writes
+    // run.json. So it is served once run.json exists, never before
+    // (independent QA: a host carrying data was served as written, with only
+    // the key-shape pass). The transcript's live mirror is redacted as it goes.
+    if (name === "egress.jsonl" && !existsSync(join(archiveDir, id, "run.json"))) return null;
     const p = join(archiveDir, id, name);
     try {
       const real = realpathSync(p);
@@ -668,6 +739,7 @@ export function createReadModel({ cfgPath, board, dash, now = () => new Date(), 
       closedByDay: m.closedByDay,
       closedHoursByDay: m.closedHoursByDay,
       closedWindow: m.WINDOW,
+      kpis: computeKpis({ board: d, runs: rows, facts: kpiGitFacts(root, { days, now: now() }), cfg }),
     };
   }
 
@@ -716,6 +788,9 @@ export function createReadModel({ cfgPath, board, dash, now = () => new Date(), 
       const hit = board.find(d, id);
       if (!hit) return { ok: false, notFound: true, error: `no such task: ${id}` };
       if (cmd.startsWith("spec-")) opts.spec = board.specInfo(root, hit.t);
+      // H-4: done refuses while the drift gate fails, on the web as on the CLI.
+      // An installed board.mjs older than the rule has no such export.
+      if (cmd === "done") opts.driftFailing = board.driftGateFailing?.(ctx, id) ?? null;
       return board.command(d, id, cmd, args, opts);
     });
     if (res.notFound) return { status: 404, body: { error: res.error } };

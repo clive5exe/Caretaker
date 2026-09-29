@@ -114,6 +114,11 @@ answered. Nobody has to "clear" it.
    `drift.mjs` dismissal command rather than a button (TECH.md explains why).
 4. **PRs ready for human review.** Every required gate passed and a PR is
    recorded. Action: review and merge outside Caretaker, then close with `done`.
+5. **Decisions no document records.** A run declared a decision
+   (`DECISION: … because …`) that no spec or ADR already says. Action: keep
+   it, which writes it as a draft ADR citing the run, or discard it with a
+   reason. Like a drift dismissal, both are shown as the exact
+   `harvest.mjs` command rather than a button.
 
 **The Inbox is not verification.** ADR-0001 rejects "human approval gates as
 the verification story", because a person approving their fortieth diff of the
@@ -187,7 +192,7 @@ The first thing you see.
 - Held at a gate, blocked, and no finish line.
 - **Executing now**: runs with a start and no end, live over SSE. A run past
   the staleness threshold shows as *no end recorded*, not as still running.
-- Inbox count, linking to the Inbox, with the four oldest items listed.
+- Inbox count, linking to the Inbox, with its four oldest items listed.
 - A live feed of recent events, filterable by level.
 - Three headline cards, the same figures as `board.html`:
   - first-pass rate. Its trend line needs `history.jsonl` to record the rate.
@@ -206,11 +211,13 @@ Factories calls this page Activity, and so does the sidebar.
   `board.html` uses (Working / Queued / Blocked / Done from `config.columns`).
 - A card shows id, title, owner, estimate, the gate rail (one segment per
   gate: filled on pass, red on fail, hollow if not run), missing gates, a
-  blocked badge, and run count and tokens when a run log exists.
+  blocked badge, run count and tokens when a run log exists, and the task's
+  spec path when it has one (as `board.md` and `board.html` cards do, as a link).
 - **Work item detail** shows: the stage and its reason; acceptance criterion;
   the notes, newest first; the **full gate history with attempt counts**; the
   runs (linking to run detail); questions and answers; the spec link and its
-  approval state; the PR link.
+  approval state; the PR link. A governing spec links to the Specs page at
+  `/specs?path=<spec>`, which marks that row; a context doc stays text.
 - Actions (only those the server offers): start, block (with reason), reset
   to todo, note, close (`done`), ask, answer, triage accept/reject, spec
   approve/reject, record PR, drop (with reason).
@@ -219,10 +226,12 @@ Factories calls this page Activity, and so does the sidebar.
   exactly the rubber stamp ADR-0001 rejects.
 
 ### 3. Inbox
-The four kinds above, oldest first, each with its one action and a link to the
-work item. When empty, it says so plainly.
+The five kinds above, oldest first, each with its one action and a link to the
+work item (and, for a decision, to the run that made it). When empty, it says
+so plainly.
 - **A list with a detail pane,** as in Factories. Each row has its kind's icon
-  tile: questions blue, spec reviews orange, gate failures red, PRs green.
+  tile: questions blue, spec reviews orange, gate failures red, PRs green,
+  decisions violet.
   Selecting a row opens the pane, which shows the item's evidence, the exact
   fact that put it there, and its one action.
 - **Filter tabs by kind,** each with its count.
@@ -260,7 +269,7 @@ Everything Caretaker measured about one run. Each section shows its source, and
 | measured diff | files changed, insertions and deletions, the patch; truncation and the fact that gitignored paths are not measured are stated on the page |
 | transcript | the redacted transcript and stderr as **raw text**, live-tailing while the run is in flight |
 | gate results | drift gate events recorded against this run; the work item's gate verdicts, shown as *task-level with their dates*, never attributed to this run unless the record says so |
-| egress | allowed and refused hosts for this run |
+| egress | each connection the run's proxy decided: `allowed`, `refused` (with its reason) or `error` (with why), as `bin/egress.mjs` writes them. With no log, the reason, from the run's archived record: sandbox none (the host's network, uncontrolled), a proxy that saw no connection, no network at all, another network (not recorded), or no record. For the API adapter, also that its model calls left from this machine, and to which host |
 | artifacts | patch, transcript, stderr, drift report, PR link |
 
 What is available today and what waits on prerequisite core work is spelled
@@ -296,18 +305,29 @@ rows: run log rows and gate verdicts. A figure with no dates behind it says
 - **From `dashboard.mjs` today** (exported in C-2):
   - tokens by kind, as cached, in, write and out per day
   - context churn: the share of context the cache could not match
-  - rework spend: tokens on tasks that failed a gate and ran again
-  - pass rate per gate, counting every attempt from the verdict history
+  - rework spend: a failed task's tokens up to its last failed gate verdict
+    (the attempts sent back, not the run that passed)
+  - pass rate per gate, counting every attempt from the verdict history, in
+    the range and all time. Core computes pass% and fail% (fail is 100 minus
+    pass), so the page, board.html and the terminal show the same figures
   - first-pass rate
   - estimate against elapsed time for closed tasks
   - tokens by agent and by model
+- **From `kpis.mjs`** (B-2, B-4), each "not recorded" with its reason when
+  its inputs were not:
+  - delivery from git: deploys per week (a deploy is a merge on main), lead
+    time, change failure rate (merges reverted after landing), time to restore
+  - tokens per closed task, tokens per merged diff line, and dollars per merged
+    line only when the config prices every model in the run log
+  - first-pass and rework rates, model mix, estimate calibration, and the
+    human intervention rate
+  - open work in tokens, re-estimated per task type from closed work
+  - the KPIs left out on purpose, each with why: lines of code, agents
+    spawned, unweighted tasks per day
 - **Not in v1:**
   - Cycle time per lifecycle stage. Stages are derived on every read, so how
     long an item sat in each one needs dated transitions from the event log
     (B-7).
-  - Cost in money. Caretaker records tokens, not dollars. A dollar figure
-    needs a price table per model, and subscription CLIs have no per-token
-    price at all.
 
 ### 9. Settings
 - The resolved config (read-only in v1), and which data sources exist on disk:
@@ -316,7 +336,12 @@ rows: run log rows and gate verdicts. A figure with no dates behind it says
 - How to rotate the access token (restart the server).
 
 ### 10. Getting started
-How to build the client and start the server, both copied from TECH.md §1, and
+First, a new repo walked to its first closed task, in terminal commands:
+install, try to close T-001 and be refused, start it, a reviewer and qa
+verdict from someone else, then close it. `bin/getting-started.test.mjs` runs
+exactly those commands, from the page, in a scratch repo.
+
+Then how to build the client and start the server, both copied from TECH.md §1, and
 how to reach it over `ssh -L`. It also lists what the server promises: no
 daemon, no database, loopback only, and the token handling. It says plainly that
 paths and commands still say `caretaker`.
@@ -331,7 +356,7 @@ the two cannot disagree either. It has four screens, switched with `1` to `4`:
 |---|---|
 | Runs | a list of runs on the left; on the right, the selected run's transcript tail, its token breakdown and its gate state; the queue below |
 | Board | the lifecycle columns, with rework and active items first |
-| Inbox | the same four kinds; the selected item shows the fact that put it there, such as its gate history |
+| Inbox | the same five kinds; the selected item shows the fact that put it there, such as its gate history |
 | Metrics | the Metrics page's figures from `dashboard.mjs`, as text |
 
 - `:` opens a command line that lists only what `commandsFor` offers, like the

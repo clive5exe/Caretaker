@@ -61,6 +61,18 @@ function Diff({ text }: { text: string }) {
   );
 }
 
+/** Why a run has no egress log, by the state core derived from its archived record (W-7). */
+const EGRESS_WHY: Record<string, string> = {
+  host: "This run used sandbox none: it had the host's whole network, and nothing controlled or recorded its connections.",
+  proxied: "A per-run egress proxy was attached, and it recorded no connection: the run made none.",
+  sealed: "No proxy was attached and the network was none: the run had no route out, so there is nothing to record.",
+  network: "The run used network {net}, with no per-run proxy, so its connections were not recorded.",
+  unknown: "There is no archived record of this run, so how it was networked is not known.",
+};
+
+/** One line of a run's egress.jsonl, as bin/egress.mjs writes it. */
+type EgressRecord = { t?: string; kind?: string; host?: string; port?: number; reason?: string; why?: string };
+
 export function RunDetailPage() {
   const id = useParams().id ?? "";
   const { data: r, error } = useResource<RunDetail>(`/runs/${id}`);
@@ -83,12 +95,12 @@ export function RunDetailPage() {
     .filter(Boolean)
     .map((l) => {
       try {
-        return JSON.parse(l) as { host?: string; port?: number; decision?: string; allowed?: boolean; t?: string };
+        return JSON.parse(l) as EgressRecord;
       } catch {
         return null;
       }
     })
-    .filter(Boolean) as { host?: string; port?: number; decision?: string; allowed?: boolean; t?: string }[];
+    .filter(Boolean) as EgressRecord[];
   return (
     <>
       <div style={{ display: "flex", gap: 14, alignItems: "flex-start", flexWrap: "wrap" }}>
@@ -349,7 +361,15 @@ export function RunDetailPage() {
 
       {tab === "egress" ? (
         egress.missing ? (
-          <NotRecorded what="No egress record for this run." why="Egress is attributed per run once each run has its own proxy (C-5). Until then no host can be pinned on this run." />
+          <NotRecorded
+            what="No egress record for this run."
+            why={
+              EGRESS_WHY[r.egress?.state ?? "unknown"].replace("{net}", r.egress?.net ?? "") +
+              (r.egress?.modelCalls
+                ? ` That covers the run's tools only: this adapter called its model from this machine, outside the sandbox, at ${r.egress.modelCalls.endpoint ?? "its configured endpoint"}, and those calls are not recorded.`
+                : "")
+            }
+          />
         ) : (
           <div className="card flush">
             <div className="tw">
@@ -364,7 +384,10 @@ export function RunDetailPage() {
                 </thead>
                 <tbody>
                   {egressRows.map((e, i) => {
-                    const allowed = e.allowed ?? e.decision === "allowed";
+                    // W-7: the proxy writes kind allowed|refused|error (bin/egress.mjs),
+                    // not decision/allowed, so every row read as refused.
+                    const tone = e.kind === "allowed" ? "pass" : e.kind === "refused" ? "fail" : "warn";
+                    const detail = e.reason ?? e.why;
                     return (
                       <tr key={i}>
                         <td className="mono muted">
@@ -375,7 +398,8 @@ export function RunDetailPage() {
                           <Val v={e.port ?? null} />
                         </td>
                         <td>
-                          <span className={`chip ${allowed ? "pass" : "fail"}`}>{e.decision ?? (allowed ? "allowed" : "refused")}</span>
+                          <span className={`chip ${tone}`}>{e.kind ?? "unknown"}</span>
+                          {detail ? <span className="muted"> {detail}</span> : null}
                         </td>
                       </tr>
                     );

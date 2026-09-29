@@ -20,8 +20,10 @@
  *                    container is started for the run (rebuilt, limits,
  *                    read-only root, the repo at /work, no socket) and every
  *                    tool call is a `podman exec` in it. With sandbox "none"
- *                    tools run on the host, confined to the workspace, and the
- *                    run carries the same warning the CLI adapter gives.
+ *                    tools run ON THE HOST: the three file tools are held to
+ *                    the workspace by path checks, and `run` is a host shell
+ *                    held to nothing at all. The run's warning says exactly
+ *                    that; none is not a sandbox.
  *
  * FOUR TOOLS, deliberately few: list_files, read_file, write_file, run. A
  * small model with a short context does worse with a large menu, and every
@@ -38,9 +40,10 @@
  * into the policy (which runstore records), not into the transcript, not into
  * the container. A local server usually needs none, so the default is none.
  */
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { within } from "./paths.mjs";
 import { buildArgs, checkLimits, delegatedControllers } from "./sandbox.mjs";
 import { readDevcontainer, toLimits } from "./spec.mjs";
 import { staged } from "./skills.mjs";
@@ -106,19 +109,83 @@ export function confine(root, p) {
 
 /* -------------------------------------------------------------- executors */
 
-/** Tools on the host, confined to the workspace. Only for sandbox:none. */
+/**
+ * Run one tool command WITHOUT blocking the process, bounded by `timeoutMs`.
+ *
+ * A blocking spawnSync froze the whole harness for the length of the call, so
+ * the run's own ceiling could not fire until it returned (a 1s ceiling took
+ * 120s, independent review). Here the event loop keeps running, the limit is
+ * the run's remaining time, and the whole process group is killed when the
+ * command ends or runs out of time, so a `sleep 999 &` it left behind does not
+ * hold the pipes open or outlive the call.
+ */
+export function runBounded(file, args, { cwd, input, timeoutMs }) {
+  return new Promise((resolve) => {
+    let stdout = "";
+    let stderr = "";
+    let done = false;
+    let timer = null;
+    let child;
+    const cap16 = (buf, d) => (buf.length < 16 * 1024 * 1024 ? buf + d : buf);
+    const finish = (status, signal, timedOut = false) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      try {
+        process.kill(-child.pid, "SIGKILL");
+      } catch {
+        /* already gone */
+      }
+      resolve({ status, signal, stdout, stderr, timedOut });
+    };
+    try {
+      child = spawn(file, args, { cwd, detached: true, stdio: ["pipe", "pipe", "pipe"] });
+    } catch (e) {
+      return resolve({ status: null, signal: null, stdout: "", stderr: String(e.message), timedOut: false });
+    }
+    timer = setTimeout(() => finish(null, "SIGKILL", true), Math.max(1, timeoutMs));
+    child.stdout.on("data", (d) => (stdout = cap16(stdout, d)));
+    child.stderr.on("data", (d) => (stderr = cap16(stderr, d)));
+    child.on("error", (e) => {
+      stderr += String(e.message);
+      finish(null, null);
+    });
+    child.on("close", (code, signal) => finish(code, signal));
+    // A background child can hold the pipes open after the command itself has
+    // exited; `close` would then wait for it. Give the pipes a moment, then end.
+    child.on("exit", (code, signal) => setTimeout(() => finish(code, signal), 250));
+    child.stdin.on("error", () => {});
+    child.stdin.end(input === undefined ? undefined : String(input));
+  });
+}
+
+const timedOutNote = (r) => (r.timedOut ? "\nerror: stopped at the run's time limit" : "");
+
+/**
+ * Tools on the host, for sandbox:none only. The FILE tools are held to the
+ * workspace by path checks; `run` is a host shell and is held to nothing.
+ */
 export function hostExecutor(ws) {
-  const realRoot = realpathSync(ws);
-  const guard = (p) => {
+  const guard = (p, { write = false } = {}) => {
     const rel = confine(ws, p);
     if (rel === null) return null;
-    // Follow the deepest EXISTING ancestor's symlinks: a link inside the repo
-    // that points outside it is a way out, whatever the path string says.
-    let probe = resolve(ws, rel);
-    while (!existsSync(probe) && probe !== realRoot && probe !== ws) probe = dirname(probe);
-    const real = realpathSync(probe);
-    if (real !== realRoot && !real.startsWith(realRoot + sep)) return null;
-    return resolve(ws, rel);
+    const abs = resolve(ws, rel);
+    // A WRITE never goes through a link. existsSync follows links, so a
+    // DANGLING one used to read as "not there yet", the check walked up to its
+    // (inside) parent, and writeFileSync then followed it out of the
+    // workspace (independent review, reproduced). A link that exists and
+    // points inside may still be READ.
+    let isLink = false;
+    try {
+      isLink = lstatSync(abs).isSymbolicLink();
+    } catch {
+      /* not there */
+    }
+    if (write && isLink) return null;
+    // Everything else is judged where it really lands, symlinks resolved
+    // through the deepest part that exists (paths.mjs).
+    if (!within(abs, ws) || !within(dirname(abs), ws)) return null;
+    return abs;
   };
   return {
     list(p) {
@@ -134,15 +201,15 @@ export function hostExecutor(ws) {
       return { ok: true, output: cap(readFileSync(abs, "utf8")) };
     },
     write(p, content) {
-      const abs = guard(p);
+      const abs = guard(p, { write: true });
       if (!abs) return { ok: false, output: "refused: path is outside the repository" };
       mkdirSync(dirname(abs), { recursive: true });
       writeFileSync(abs, String(content));
       return { ok: true, output: `wrote ${Buffer.byteLength(String(content))} bytes to ${confine(ws, p)}` };
     },
-    run(command) {
-      const r = spawnSync("sh", ["-c", String(command)], { cwd: ws, encoding: "utf8", timeout: CMD_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024 });
-      return { ok: r.status === 0, output: cap(`exit ${r.status ?? r.signal}\n${r.stdout ?? ""}${r.stderr ?? ""}`) };
+    async run(command, { timeoutMs = CMD_TIMEOUT_MS } = {}) {
+      const r = await runBounded("sh", ["-c", String(command)], { cwd: ws, timeoutMs });
+      return { ok: r.status === 0, output: cap(`exit ${r.status ?? r.signal}\n${r.stdout}${r.stderr}${timedOutNote(r)}`) };
     },
     close() {
       return null;
@@ -156,36 +223,34 @@ export function hostExecutor(ws) {
  * command that wanders is wandering inside the sandbox, not on the host.
  */
 export function containerExecutor({ runtime, name }) {
-  const exec = (args, input) =>
-    spawnSync(runtime, ["exec", ...(input !== undefined ? ["-i"] : []), "-w", "/work", name, ...args], {
-      encoding: "utf8",
-      input,
-      timeout: CMD_TIMEOUT_MS,
-      maxBuffer: 16 * 1024 * 1024,
-    });
+  let limit = CMD_TIMEOUT_MS;
+  const exec = (args, input) => runBounded(runtime, ["exec", ...(input !== undefined ? ["-i"] : []), "-w", "/work", name, ...args], { input, timeoutMs: limit });
   const inRepo = (p) => confine("/work", p);
   return {
-    list(p) {
+    setLimit(ms) {
+      limit = Math.max(1, Math.min(CMD_TIMEOUT_MS, ms));
+    },
+    async list(p) {
       const rel = inRepo(p ?? ".");
       if (rel === null) return { ok: false, output: "refused: path is outside the repository" };
-      const r = exec(["ls", "-1Ap", "--", rel]);
+      const r = await exec(["ls", "-1Ap", "--", rel]);
       return { ok: r.status === 0, output: cap(r.status === 0 ? r.stdout.trim() : `${r.stderr}`.trim()) };
     },
-    read(p) {
+    async read(p) {
       const rel = inRepo(p);
       if (rel === null) return { ok: false, output: "refused: path is outside the repository" };
-      const r = exec(["cat", "--", rel]);
+      const r = await exec(["cat", "--", rel]);
       return { ok: r.status === 0, output: cap(r.status === 0 ? r.stdout : r.stderr.trim()) };
     },
-    write(p, content) {
+    async write(p, content) {
       const rel = inRepo(p);
       if (rel === null) return { ok: false, output: "refused: path is outside the repository" };
-      const r = exec(["sh", "-c", 'mkdir -p "$(dirname "$1")" && cat > "$1"', "sh", rel], String(content));
+      const r = await exec(["sh", "-c", 'mkdir -p "$(dirname "$1")" && cat > "$1"', "sh", rel], String(content));
       return { ok: r.status === 0, output: r.status === 0 ? `wrote ${Buffer.byteLength(String(content))} bytes to ${rel}` : r.stderr.trim() };
     },
-    run(command) {
-      const r = exec(["sh", "-c", String(command)]);
-      return { ok: r.status === 0, output: cap(`exit ${r.status ?? r.signal}\n${r.stdout ?? ""}${r.stderr ?? ""}`) };
+    async run(command) {
+      const r = await exec(["sh", "-c", String(command)]);
+      return { ok: r.status === 0, output: cap(`exit ${r.status ?? r.signal}\n${r.stdout}${r.stderr}${timedOutNote(r)}`) };
     },
     close() {
       const r = spawnSync(runtime, ["rm", "-f", "-t", "2", name], { encoding: "utf8", timeout: 30_000 });
@@ -196,7 +261,7 @@ export function containerExecutor({ runtime, name }) {
 
 /* ------------------------------------------------------------------ loop */
 
-function dispatch(ex, call, offered, skill) {
+async function dispatch(ex, call, offered, skill, timeoutMs) {
   const name = call?.function?.name;
   const names = new Set(offered.map((t) => t.name));
   if (!names.has(name)) return { invented: true, ok: false, output: `error: there is no tool named ${JSON.stringify(name)}. The tools are: ${[...names].join(", ")}` };
@@ -211,10 +276,11 @@ function dispatch(ex, call, offered, skill) {
   const missing = spec.parameters.required.filter((k) => typeof args[k] !== "string");
   if (missing.length) return { malformed: true, ok: false, output: `error: ${name} needs ${missing.join(", ")} as string(s)` };
   if (name === "read_skill") return skill(args.name, args.file);
+  ex.setLimit?.(timeoutMs);
   if (name === "list_files") return ex.list(args.path);
   if (name === "read_file") return ex.read(args.path);
   if (name === "write_file") return ex.write(args.path, args.content);
-  return ex.run(args.command);
+  return ex.run(args.command, { timeoutMs });
 }
 
 const systemPrompt = (containerised, skills) =>
@@ -235,12 +301,25 @@ const systemPrompt = (containerised, skills) =>
  * file, toolUse }, never throws for an outcome (a failed or killed run is a
  * result), and throws only when nothing could run at all.
  */
-export async function openaiCompatibleAdapter({ workspace, prompt, policy, paths, warnings, HarnessError }) {
+export async function openaiCompatibleAdapter({ workspace, prompt, policy, paths, warnings, HarnessError, imageFor }) {
   if (!policy.endpoint) throw new HarnessError('adapter "openai-compatible" needs policy.endpoint, e.g. http://localhost:11434/v1');
   if (!policy.model) throw new HarnessError('adapter "openai-compatible" needs policy.model; the server serves more than one');
   const url = `${String(policy.endpoint).replace(/\/+$/, "")}/chat/completions`;
   const headers = { "content-type": "application/json" };
   if (policy.apiKeyEnv) {
+    // A KEY NEVER CROSSES A NETWORK IN CLEARTEXT. Plain http is fine for a
+    // model server on this machine (Ollama, llama.cpp); anywhere else it would
+    // hand the key to every hop on the way (independent review).
+    let u;
+    try {
+      u = new URL(String(policy.endpoint));
+    } catch {
+      throw new HarnessError(`policy.endpoint ${policy.endpoint} is not a URL`);
+    }
+    const local = ["localhost", "127.0.0.1", "[::1]"].includes(u.hostname) || /^127\.\d+\.\d+\.\d+$/.test(u.hostname);
+    if (u.protocol !== "https:" && !local) {
+      throw new HarnessError(`refusing to send the ${policy.apiKeyEnv} key to ${u.origin} over plain http; use https, or a model server on this machine`);
+    }
     const key = process.env[policy.apiKeyEnv];
     if (!key) throw new HarnessError(`policy.apiKeyEnv names ${policy.apiKeyEnv}, which is not set in the harness's environment`);
     headers.authorization = `Bearer ${key}`;
@@ -250,15 +329,14 @@ export async function openaiCompatibleAdapter({ workspace, prompt, policy, paths
   let container = null;
   if (policy.sandbox === "none") {
     warnings.push(
-      "sandbox:none — tools ran on the HOST, confined to the workspace by path checks only. No filesystem " +
-        "isolation beyond that, no resource ceiling and no egress control applied to the agent's commands.",
+      "sandbox:none — tools ran on the HOST. The file tools were held to the workspace by path checks; the run " +
+        "tool was a host shell held to nothing: no filesystem isolation, no resource ceiling and no egress control.",
     );
     ex = hostExecutor(workspace);
   } else {
     const dev = readDevcontainer(policy.devcontainer);
     const limits = toLimits(dev);
-    const image = policy.image ?? limits.image;
-    if (!image) throw new HarnessError(`no image: set policy.image, or an "image" in ${policy.devcontainer}`);
+    const { image, imageId, built } = imageFor(policy, dev, warnings);
     for (const m of checkLimits(["memory", "cpus", "pids"], delegatedControllers().controllers)) {
       limits[m.limit] = null;
       warnings.push(`not limiting ${m.limit} — no "${m.controller}" cgroup controller is delegated, so the flag is omitted. This run is NOT bounded on ${m.limit}.`);
@@ -277,7 +355,7 @@ export async function openaiCompatibleAdapter({ workspace, prompt, policy, paths
         file: policy.sandbox,
       };
     }
-    container = { runtime: policy.sandbox, name, image };
+    container = { runtime: policy.sandbox, name, image, imageId, built };
     ex = containerExecutor(container);
   }
 
@@ -298,6 +376,8 @@ export async function openaiCompatibleAdapter({ workspace, prompt, policy, paths
   const startedAt = Date.now();
   const deadline = startedAt + policy.timeoutMs;
   const exec = { spawnError: null, exitCode: null, signal: null, killed: false, killReason: null, durationMs: 0, startedAt };
+  // The model's own last words, never a tool's output (finalTextOf, harness.mjs).
+  let finalText = null;
 
   try {
     for (;;) {
@@ -314,6 +394,7 @@ export async function openaiCompatibleAdapter({ workspace, prompt, policy, paths
       }
       toolUse.turns += 1;
       let res;
+      let bodyText;
       try {
         res = await fetch(url, {
           method: "POST",
@@ -321,11 +402,16 @@ export async function openaiCompatibleAdapter({ workspace, prompt, policy, paths
           body: JSON.stringify({ model: policy.model, messages, tools, tool_choice: "auto" }),
           signal: AbortSignal.timeout(remaining),
         });
+        // Inside the try, under the same deadline: a server that sends its
+        // headers and then stalls the body used to throw out of run()
+        // entirely, and the run was logged as never started (independent
+        // re-review).
+        bodyText = await res.text();
       } catch (e) {
         if (e.name === "TimeoutError" || e.name === "AbortError") {
           exec.killed = true;
           exec.killReason = "timeout";
-        } else if (toolUse.turns === 1) {
+        } else if (toolUse.turns === 1 && !res) {
           // Nothing answered at all: the model is not there, which is
           // UNAVAILABLE, not a failure of the work.
           exec.spawnError = Object.assign(new Error(e.cause?.message ?? e.message), { code: e.cause?.code ?? "ENDPOINT_UNREACHABLE" });
@@ -335,7 +421,6 @@ export async function openaiCompatibleAdapter({ workspace, prompt, policy, paths
         }
         break;
       }
-      const bodyText = await res.text();
       if (!res.ok) {
         exec.exitCode = 1;
         err(`HTTP ${res.status} from ${url}: ${bodyText.slice(0, 2000)}`);
@@ -366,19 +451,27 @@ export async function openaiCompatibleAdapter({ workspace, prompt, policy, paths
       // the last line are the only ones it finds.
       log({ type: "assistant", turn: toolUse.turns, content: msg.content ?? null, tool_calls: calls, turnUsage: body.usage ? { in: body.usage.prompt_tokens ?? null, out: body.usage.completion_tokens ?? null } : null });
       messages.push({ role: "assistant", content: msg.content ?? null, ...(calls.length ? { tool_calls: calls } : {}) });
+      if (typeof msg.content === "string" && msg.content.trim()) finalText = msg.content;
       if (!calls.length) {
         toolUse.stopped = true;
         exec.exitCode = 0;
         break;
       }
       for (const call of calls) {
+        if (Date.now() >= deadline) {
+          exec.killed = true;
+          exec.killReason = "timeout";
+          break;
+        }
         toolUse.calls += 1;
         // A tool that THROWS (a write into a directory, a permission error) is
         // a failed tool call, answered to the model like any other. Letting it
         // escape would end the whole run over one bad call and lose the diff.
         let out;
         try {
-          out = dispatch(ex, call, offered, skill);
+          // Each tool gets what is left of the run, never more: the ceiling
+          // holds inside a turn, not only between turns.
+          out = await dispatch(ex, call, offered, skill, Math.min(CMD_TIMEOUT_MS, deadline - Date.now()));
         } catch (e) {
           out = { ok: false, output: `error: the ${call?.function?.name ?? "tool"} call failed: ${e.message}` };
         }
@@ -413,5 +506,5 @@ export async function openaiCompatibleAdapter({ workspace, prompt, policy, paths
         }
       : {}),
   });
-  return { exec, container, file: url, toolUse };
+  return { exec, container, file: url, toolUse, finalText };
 }

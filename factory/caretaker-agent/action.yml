@@ -1,0 +1,137 @@
+name: Caretaker agent
+description: >-
+  Runs a Warp cloud-factory skill with your own AI (Claude or ChatGPT) inside
+  Caretaker's sandbox. A drop-in for warpdotdev/oz-agent-action: same skill,
+  name and prompt inputs, same agent_output output. No Oz, no Warp account.
+
+inputs:
+  skill:
+    description: The skill, as Warp names it (review-pr, or owner/repo:triage)
+    required: true
+  name:
+    description: A label for the run
+    required: false
+    default: ""
+  prompt:
+    description: The prompt, exactly as Warp's workflow writes it
+    required: true
+  cli:
+    description: claude or codex
+    required: false
+    default: claude
+  model:
+    description: Model name for the CLI; empty for its default
+    required: false
+    default: ""
+  claude_code_oauth_token:
+    description: Your Claude SUBSCRIPTION token, from `claude setup-token`. No API key needed.
+    required: false
+    default: ""
+  anthropic_api_key:
+    description: Optional, instead of the subscription token
+    required: false
+    default: ""
+  openai_api_key:
+    description: For cli codex
+    required: false
+    default: ""
+  sandbox:
+    description: podman (the default, the agent in a container with egress only to its model's API) or none
+    required: false
+    default: podman
+  timeout_minutes:
+    description: The run's ceiling
+    required: false
+    default: "30"
+  open_pr:
+    description: >-
+      "true" for skills that end in a pull request. The agent cannot push from
+      the sandbox; it writes .caretaker/pr.md, and this action then commits
+      what the agent changed, pushes a branch and opens the PR with GH_TOKEN
+    required: false
+    default: "false"
+  issue:
+    description: The issue number to post the PR link on (with open_pr)
+    required: false
+    default: ""
+  profile:
+    description: Accepted so Warp's workflows need no other change; Oz-only, unused
+    required: false
+    default: ""
+
+outputs:
+  agent_output:
+    description: The agent's final message, secrets scrubbed
+    value: ${{ steps.agent.outputs.agent_output }}
+  run_id:
+    description: Caretaker's run id; the archive is uploaded as caretaker-<run_id>
+    value: ${{ steps.agent.outputs.run_id }}
+  pr_url:
+    description: The pull request opened (with open_pr), else empty
+    value: ${{ steps.agent.outputs.pr_url }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 22
+
+    - name: Build the agent image
+      if: inputs.sandbox != 'none'
+      shell: bash
+      run: podman build -q -t caretaker-agent:local -f "$GITHUB_ACTION_PATH/Dockerfile" "$GITHUB_ACTION_PATH"
+
+    - name: Run the skill
+      id: agent
+      shell: bash
+      # Every input reaches the script as an environment variable, never
+      # pasted into the script text, so a prompt cannot become shell code.
+      env:
+        PROMPT: ${{ inputs.prompt }}
+        SKILL: ${{ inputs.skill }}
+        RUN_NAME: ${{ inputs.name }}
+        AGENT_CLI: ${{ inputs.cli }}
+        AGENT_MODEL: ${{ inputs.model }}
+        SANDBOX: ${{ inputs.sandbox }}
+        TIMEOUT_MINUTES: ${{ inputs.timeout_minutes }}
+        OPEN_PR: ${{ inputs.open_pr }}
+        ISSUE: ${{ inputs.issue }}
+        CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.claude_code_oauth_token }}
+        ANTHROPIC_API_KEY: ${{ inputs.anthropic_api_key }}
+        OPENAI_API_KEY: ${{ inputs.openai_api_key }}
+      run: |
+        set -euo pipefail
+        args=(--skill "$SKILL" --name "$RUN_NAME" --prompt-env PROMPT --cli "$AGENT_CLI" --sandbox "$SANDBOX" --timeout "$((TIMEOUT_MINUTES * 60000))")
+        if [ -n "$AGENT_MODEL" ]; then args+=(--model "$AGENT_MODEL"); fi
+        if [ "$SANDBOX" != none ]; then args+=(--image caretaker-agent:local); fi
+        creds=0
+        for s in CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY OPENAI_API_KEY; do
+          if [ -n "${!s}" ]; then args+=(--secret "$s"); creds=1; fi
+        done
+        # GH_TOKEN comes from the calling step's env, as Warp's workflows set it
+        # for the agent's `gh` (triage reads the issue with it). Whatever the
+        # workflow's permissions give that token is what the agent gets.
+        hosts=()
+        if [ -n "${GH_TOKEN:-}" ]; then args+=(--secret GH_TOKEN); hosts+=(api.github.com); fi
+        if [ "$creds" = 0 ]; then
+          echo "::error::No login given. Add your subscription token (claude setup-token) as a secret and pass it as claude_code_oauth_token."
+          exit 1
+        fi
+        if [ "$SANDBOX" != none ]; then
+          if [ "$AGENT_CLI" = codex ]; then hosts+=(api.openai.com); else hosts+=(api.anthropic.com); fi
+          args+=(--egress "$(IFS=,; echo "${hosts[*]}")")
+        fi
+        if [ "$OPEN_PR" = true ]; then
+          args+=(--open-pr)
+          if [ -n "$ISSUE" ]; then args+=(--issue "$ISSUE"); fi
+        fi
+        node "$GITHUB_ACTION_PATH/bin/agent-step.mjs" "${args[@]}"
+
+    - name: Keep the run's record
+      if: always() && steps.agent.outputs.run_id != ''
+      uses: actions/upload-artifact@v4
+      with:
+        name: caretaker-${{ steps.agent.outputs.run_id }}
+        path: ${{ runner.temp }}/caretaker-state/runs/${{ steps.agent.outputs.run_id }}
+        retention-days: 14

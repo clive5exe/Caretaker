@@ -46,6 +46,7 @@ export interface WorkSummary {
   tokens: number | null;
   openQuestions: number;
   pr: string | null;
+  specPath: string | null;
   hasAc: boolean;
   commands: Command[];
 }
@@ -157,9 +158,10 @@ export interface WorkItem extends WorkSummary {
   events: LogEvent[] | null;
 }
 
-export type InboxKind = "question" | "spec-approval" | "gate-failure" | "pr-review";
+export type InboxKind = "question" | "spec-approval" | "gate-failure" | "pr-review" | "decision";
 export interface InboxItem {
-  task: string;
+  /** null only for a harvested decision from a run that named no task. */
+  task: string | null;
   title: string;
   owner: string | null;
   kind: InboxKind;
@@ -170,6 +172,9 @@ export interface InboxItem {
   pr?: string;
   gateHistory?: Record<string, Attempt[]>;
   dismissCommand?: string | null;
+  decision?: { run: string; id: string; text: string; why: string | null };
+  keepCommand?: string;
+  discardCommand?: string;
   actions: Command[];
 }
 export interface Inbox {
@@ -238,6 +243,7 @@ export interface RunDetail extends RunRow {
   events: LogEvent[] | null;
   taskGates: Record<string, { verdict: string; at?: string }> | null;
   taskTitle: string | null;
+  egress: { state: "host" | "proxied" | "sealed" | "network" | "unknown"; net: string | null; modelCalls?: { from: "host"; endpoint: string | null } };
 }
 
 export interface Agent {
@@ -307,7 +313,7 @@ export interface TokenStats {
   perTurn: number | null;
 }
 
-export type GateStats = [string, { pass: number; fail: number }][];
+export type GateStats = [string, { pass: number; fail: number; passPct: number | null; failPct: number | null }][];
 
 export interface CycleRow {
   id: string;
@@ -323,7 +329,7 @@ export interface Metrics {
   window: string[];
   tokens: TokenStats | null;
   tokensPerDay: { day: string; comp: TokenComp | null; total: number }[] | null;
-  reworkSpend: { wasted: number; total: number; pct: number; tasks: number } | null;
+  reworkSpend: { wasted: number; total: number; pct: number; tasks: number; unplaced: number } | null;
   gateStats: GateStats;
   quality: Quality;
   allTime: { gateStats: GateStats; quality: Quality };
@@ -334,6 +340,39 @@ export interface Metrics {
   closedByDay: number[];
   closedHoursByDay: number[];
   closedWindow: string[];
+  kpis: Kpis;
+}
+
+/** B-2 and B-4, from bin/kpis.mjs. null means not recorded, never zero. */
+export interface Kpis {
+  delivery: {
+    reason: string | null;
+    deploys?: number;
+    deploysPerWeek: number | null;
+    leadTimeHours: number | null;
+    changeFailureRate: number | null;
+    timeToRestoreHours: number | null;
+  };
+  ai: {
+    tokensPerClosedTask: number | null;
+    tokensPerClosedTaskBasis: string;
+    tokensPerMergedLine: number | null;
+    dollarsPerMergedLine: number | null;
+    costBasis: string;
+    firstPassRate: number | null;
+    reworkRate: number | null;
+    gatedTasks: number;
+    modelMix: { model: string; share: number; runs: number }[] | null;
+    estimateCalibration: number | null;
+    humanInterventionRate: number | null;
+    humanInterventionBasis: string;
+  };
+  estimates: {
+    calibration: { type: string; closed: number; factor: number | null; tokensPerHour: number | null }[];
+    open: { id: string; type: string; estimate: number | null; basis: string; hours: number | null; actualSoFar: number }[];
+    remaining: { tokens: number; estimated: number; unestimated: number } | null;
+  };
+  antiKpis: { name: string; why: string }[];
 }
 
 export interface Settings {

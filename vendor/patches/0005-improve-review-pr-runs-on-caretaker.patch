@@ -1,0 +1,48 @@
+diff --git a/.github/workflows/improve-review-pr.yml b/.github/workflows/improve-review-pr.yml
+index c9939ad..33dc3d1 100644
+--- a/.github/workflows/improve-review-pr.yml
++++ b/.github/workflows/improve-review-pr.yml
+@@ -6,7 +6,10 @@ name: Improve Review PR Skill
+ # 3. If durable organizational knowledge is found, open a PR updating the review skill
+ #
+ # Setup:
+-# - WARP_API_KEY repository secret must be set
++# - CLAUDE_CODE_OAUTH_TOKEN repository secret must be set: your Claude
++#   subscription token, from `claude setup-token` (Caretaker runs the agent
++#   in place of Oz; the agent cannot push, so it writes .caretaker/pr.md and
++#   the Caretaker step opens the pull request)
+ # - Repository settings must allow GitHub Actions to create pull requests
+ 
+ on:
+@@ -75,8 +78,8 @@ jobs:
+           path: feedback_corpus.json
+           if-no-files-found: error
+ 
+-      - name: Improve review skill with Oz agent
+-        uses: warpdotdev/oz-agent-action@v1.0.25
++      - name: Improve review skill with Caretaker agent
++        uses: ./.github/actions/caretaker-agent
+         env:
+           GH_TOKEN: ${{ github.token }}
+         with:
+@@ -94,9 +97,16 @@ jobs:
+ 
+             Analyze the corpus, synthesize durable organizational knowledge, and only if warranted:
+             update `.agents/skills/review-pr/SKILL.md` and/or create/update
+-            `.agents/skills/review-pr-local/SKILL.md`, then open a pull request with those skill changes.
++            `.agents/skills/review-pr-local/SKILL.md`. You cannot commit, push, or open the pull
++            request yourself (the repository's git directory is read-only in this sandbox): leave
++            the skill changes in the working tree and write the pull request title (first line)
++            and body (the rest) to `.caretaker/pr.md`; the step after you opens the PR.
+ 
+-            Do not change product code. Do not open a PR if there is no durable learning.
++            Do not change product code. Change no files and write no `.caretaker/pr.md` if there is no durable learning.
+             End with the report format required by the skill.
+-          warp_api_key: ${{ secrets.WARP_API_KEY }}
+-          profile: ${{ vars.WARP_AGENT_PROFILE || '' }}
++          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
++          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
++          openai_api_key: ${{ secrets.OPENAI_API_KEY }}
++          cli: ${{ vars.CARETAKER_CLI || 'claude' }}
++          model: ${{ vars.CARETAKER_MODEL || '' }}
++          open_pr: "true"

@@ -19,7 +19,7 @@ function loadRead(): Record<string, true> {
     return {};
   }
 }
-export const itemKey = (i: InboxItem) => `${i.task}|${i.kind}|${i.since ?? ""}|${i.question?.id ?? ""}`;
+export const itemKey = (i: InboxItem) => `${i.task}|${i.kind}|${i.since ?? ""}|${i.question?.id ?? ""}|${i.decision ? `${i.decision.run}/${i.decision.id}` : ""}`;
 
 export function setRead(i: InboxItem, read: boolean) {
   const next = { ...snap };

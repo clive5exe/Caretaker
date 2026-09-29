@@ -46,6 +46,13 @@ const server = createServer((req, res) => {
       return res.end(JSON.stringify({ choices: [{ message: { role: "assistant", content: "done" } }] }));
     }
     if (next.delayMs) await new Promise((r) => setTimeout(r, next.delayMs));
+    if (next.stallBodyMs) {
+      // Headers and the first byte, then nothing: the body stalls.
+      res.writeHead(200, { "content-type": "application/json" });
+      res.write("{");
+      await new Promise((r) => setTimeout(r, next.stallBodyMs));
+      return res.end("}");
+    }
     if (next.status) {
       res.writeHead(next.status);
       return res.end(next.text ?? "");
@@ -151,6 +158,59 @@ const policy = (model, over = {}) => ({ adapter: "openai-compatible", endpoint: 
   ok("confine: a path that stays inside is kept", confine("/w", "a/../b") === "b" && confine("/w", "../x") === null && confine("/w", "/etc") === null);
   void out;
 }
+{
+  // The reviewer's escape: a DANGLING link. existsSync follows links, so the
+  // old check saw "not there yet", approved the (inside) parent, and the write
+  // followed the link out.
+  const ws = workspace();
+  const target = join(TMP, "outside", "via-dangling.txt");
+  symlinkSync(target, join(ws, "dangle"));
+  writeFileSync(join(ws, "real.txt"), "inside\n");
+  symlinkSync(join(ws, "real.txt"), join(ws, "inner-link"));
+  scripts.dangle = [say([call("write_file", { path: "dangle", content: "x" }), call("read_file", { path: "inner-link" })]), say(null, null, "tried")];
+  await run(ws, "x", policy("dangle"));
+  const replies = lastToolReply("dangle");
+  ok("a write through a DANGLING symlink is refused, and nothing lands outside", /refused: path is outside/.test(replies[0] ?? "") && !existsSync(target), JSON.stringify(replies));
+  ok("…while a link that points inside can still be read", replies[1] === "inside\n", JSON.stringify(replies[1]));
+}
+
+{
+  // The key goes only over https, or to this machine.
+  process.env.OAI_TEST_KEY = "k-cleartext-check";
+  const refused = await run(workspace(), "x", policy("x", { endpoint: "http://models.example.test/v1", apiKeyEnv: "OAI_TEST_KEY" })).then(() => null, (e) => e.message);
+  ok("a key is never sent to a remote endpoint over plain http", /refusing to send the OAI_TEST_KEY key .* plain http/.test(refused ?? ""), String(refused));
+  const local = await run(workspace(), "x", policy("x", { endpoint: "http://127.0.0.1:1/v1", apiKeyEnv: "OAI_TEST_KEY" })).then((r) => r.verdict.state, (e) => e.message);
+  ok("…while plain http to a model server on this machine is fine", local === "unavailable", String(local));
+}
+
+/* --------------------------------------- the ceiling holds inside a turn */
+{
+  // H-9, as the reviewers measured it: a 1s ceiling took 8s with two sleeps in
+  // one turn, and 120s with a long one; a backgrounded process outlived it all.
+  const ws = workspace();
+  const pidFile = join(ws, "bg.pid");
+  scripts.slow = [say([call("run", { command: `sleep 37 & echo $! > ${pidFile}; sleep 4` }), call("run", { command: "sleep 4" })]), say(null, null, "done")];
+  const t0 = Date.now();
+  const out = await run(ws, "x", policy("slow", { timeoutMs: 1000 }));
+  const took = Date.now() - t0;
+  ok("a run past its ceiling is KILLED mid-turn, not after its tools finish", out.verdict.state === "killed" && took < 3000, `${out.verdict.state} in ${took}ms`);
+  // Running, not merely present: a killed process stays a zombie (state Z)
+  // until something reaps it, which a container's init may be slow to do.
+  await new Promise((r) => setTimeout(r, 200));
+  const pid = Number(readFileSync(pidFile, "utf8"));
+  let alive = false;
+  try {
+    alive = readFileSync(`/proc/${pid}/stat`, "utf8").split(" ")[2] !== "Z";
+  } catch {
+    try {
+      process.kill(pid, 0);
+      alive = !existsSync("/proc/self");
+    } catch {
+      /* gone, as it should be */
+    }
+  }
+  ok("…and a process a tool left in the background does not outlive the call", !alive);
+}
 
 /* --------------------------------------------------- failure outcomes */
 {
@@ -162,6 +222,20 @@ const policy = (model, over = {}) => ({ adapter: "openai-compatible", endpoint: 
   scripts.slow = [{ delayMs: 3000, ...say(null) }];
   const k = await run(workspace(), "x", policy("slow", { timeoutMs: 500 }));
   ok("a model slower than the ceiling is KILLED, never completed", k.verdict.state === "killed");
+  // Independent re-review: headers on time, then a stalled BODY, threw out of
+  // run() entirely, and the run's end read as "did not start", with no diff.
+  const ws = workspace();
+  scripts.stallbody = [say([call("write_file", { path: "out.txt", content: "made it\n" })]), { stallBodyMs: 5000 }];
+  let stalled = null;
+  let stallThrew = null;
+  const t0 = Date.now();
+  try {
+    stalled = await run(ws, "x", policy("stallbody", { timeoutMs: 1500 }));
+  } catch (err) {
+    stallThrew = err;
+  }
+  ok("a body that stalls past the ceiling is KILLED, not thrown", !stallThrew && stalled?.verdict.state === "killed" && Date.now() - t0 < 4000, stallThrew ? String(stallThrew) : stalled?.verdict.state);
+  ok("…and the work it did before the stall is still measured", stalled?.diff?.files?.some((f) => f.path === "out.txt"), JSON.stringify(stalled?.diff?.files));
   let threw = null;
   try {
     await run(workspace(), "x", policy("x", { model: null }));
@@ -211,6 +285,14 @@ const policy = (model, over = {}) => ({ adapter: "openai-compatible", endpoint: 
   ];
   const poor = await runFixture({ endpoint: ENDPOINT, model: "poor-model", sandbox: "none", maxTurns: 5 }, { runs: 1 });
   const c = poor.results[0].checks;
+  // Finishes the task correctly, then keeps going: it did stop, eventually.
+  scripts["busy-model"] = [
+    say([call("read_file", { path: "names.txt" }), call("write_file", { path: "upper.txt", content: "ADA\nGRACE\nLINUS\n" })]),
+    ...Array.from({ length: 10 }, () => say([call("list_files", {})])),
+    say(null, null, "done"),
+  ];
+  const busy = await runFixture({ endpoint: ENDPOINT, model: "busy-model", sandbox: "none" }, { runs: 1 });
+  ok("a model that keeps calling tools after the task is done did not stop WHEN done", busy.passed === 0 && busy.results[0].checks.correct && !busy.results[0].checks.stopped, JSON.stringify(busy.results[0].checks));
   ok("the fixture fails it on each behaviour separately, by name", poor.passed === 0 && !c.correct && !c.wellFormed && !c.noInvented && !c.stopped && !c.completed, JSON.stringify(c));
 }
 
@@ -227,7 +309,9 @@ else {
     say(null, null, "done"),
   ];
   const out = await run(ws, "x", policy("live", { sandbox: "podman", image: IMAGE, net: "none" }));
-  ok(`${LIVE}: completed`, out.verdict.state === "completed", JSON.stringify(out.verdict));
+  // stderr on failure: this check failed intermittently in CI ("exited 1" on
+  // turn 2) and the verdict alone did not say why.
+  ok(`${LIVE}: completed`, out.verdict.state === "completed", `${JSON.stringify(out.verdict)}\n      stderr: ${out.transcript.stderrTail}`);
   ok(`${LIVE}: the write reached the repo through /work and was measured`, readFileSync(join(ws, "made", "inside.txt"), "utf8") === "from the container\n" && out.diff.files.some((f) => f.path === "made/inside.txt"));
   const replies = lastToolReply("live").join("\n");
   ok(`${LIVE}: the container had no route out`, replies.includes("NET-CLOSED") && !replies.includes("NET-OPEN"), replies);

@@ -86,41 +86,80 @@ cd "$ROOT" || { say "FAIL — cannot cd to $ROOT"; exit 1; }
 # --permission-mode auto: unattended means nothing can answer a prompt. The
 # limits that matter are in the prompt above and in the repo's own gates, not in
 # a dialog nobody is there to read.
+# stream-json: each event is written as it happens, so a pass that is killed
+# has already written what it decided (B-5, independent re-review: with json
+# nothing was printed until exit). --print needs --verbose to stream.
 "$CLAUDE" -p "$PROMPT" \
   --permission-mode auto \
-  --output-format json \
+  --output-format stream-json --verbose \
   > "$OUT" 2>>"$LOG"
 RC=$?
 
+# DECISIONS FIRST, and on a FAILED pass too, because the output is deleted
+# below. A killed or failed pass used to exit here, before the harvest, so what
+# it had decided was lost with it, and the raw tail of its output went into
+# loop.log unredacted (independent re-review). This loop calls the CLI
+# directly rather than through runstore, so nothing else would archive what it
+# said: harvest.mjs archives the output as a run (redacted) and puts any
+# DECISION: line no spec or ADR records in the Inbox. harvest.mjs lives in the
+# caretaker checkout, not the installed copy; without it the decision lines are
+# kept in loop.log rather than lost with the output.
+HARVEST="${CARETAKER_HARVEST:-$ROOT/bin/harvest.mjs}"
+RUN_ID=""
+if [ -n "$NODE" ] && [ -f "$HARVEST" ]; then
+  RUN_ID=$("$NODE" "$HARVEST" import --config "$HERE/config.json" --transcript "$OUT" \
+    --cli claude --source loop.sh 2>>"$LOG")
+  case "$RUN_ID" in r_????????) ;; *) say "harvest failed — decision lines below"; RUN_ID="" ;; esac
+fi
+if [ -z "$RUN_ID" ]; then
+  [ -f "$HARVEST" ] || say "no harvest.mjs at $HARVEST — decision lines kept here, not in the Inbox"
+  grep -o 'DECISION:[^"\\]*' "$OUT" | sed 's/^/  /' >> "$LOG"
+fi
+
 if [ $RC -ne 0 ]; then
-  say "FAIL — claude exited $RC. Last of its output:"
-  tail -c 2000 "$OUT" >> "$LOG"
+  say "FAIL — claude exited $RC. Its output is ${RUN_ID:+archived, redacted, as run $RUN_ID}${RUN_ID:-not archived: decision lines above}."
+  if [ -n "$NODE" ]; then
+    "$NODE" "$HERE/run.mjs" end --name cron-loop ${RUN_ID:+--run "$RUN_ID"} --state failed \
+      --note "unattended pass, claude exited $RC" >> "$LOG" 2>&1
+  fi
   rm -f "$OUT"
   exit $RC
 fi
 
 # Token spend, if the JSON carries it. Best effort on purpose: a shape change in
-# the CLI's output must not fail a pass that already did its work.
+# the CLI's output must not fail a pass that already did its work. The
+# breakdown, not only the total: run.mjs derives the total from the parts, and
+# the dashboard's composition panel is empty for a row that has only a total.
 if [ -n "$NODE" ]; then
-  "$NODE" -e '
+  mapfile -t RUN_FLAGS < <("$NODE" -e '
     const fs = require("node:fs");
     try {
-      const j = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+      // The final result event: the last line that is one, from a streamed
+      // transcript, or the whole file from an older json one.
+      const text = fs.readFileSync(process.argv[1], "utf8");
+      const docs = text.split("\n").flatMap((l) => { try { return [JSON.parse(l)]; } catch { return []; } });
+      const j = docs.filter((d) => d && d.type === "result").at(-1) ?? JSON.parse(text);
       const u = j.usage ?? {};
-      const tok =
-        (u.input_tokens ?? 0) + (u.output_tokens ?? 0) +
-        (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
-      process.stdout.write(String(tok || 0));
-    } catch { process.stdout.write("0"); }
-  ' "$OUT" > /tmp/caretaker-loop-tokens 2>/dev/null
-  TOK=$(cat /tmp/caretaker-loop-tokens 2>/dev/null || echo 0)
-  if [ "${TOK:-0}" -gt 0 ]; then
-    "$NODE" "$HERE/run.mjs" end --name cron-loop --tokens "$TOK" \
-      --state done --note "unattended pass" >/dev/null 2>&1
+      const out = [];
+      const put = (flag, v) => { if (Number.isFinite(v)) out.push(flag, String(v)); };
+      put("--in", u.input_tokens);
+      put("--cached", u.cache_read_input_tokens);
+      put("--write", u.cache_creation_input_tokens);
+      put("--out", u.output_tokens);
+      put("--turns", j.num_turns);
+      // One model or none: a pass that used two would put all its tokens on one.
+      const models = Object.keys(j.modelUsage ?? {});
+      if (models.length === 1) out.push("--model", models[0]);
+      process.stdout.write(out.join("\n"));
+    } catch {}
+  ' "$OUT" 2>/dev/null)
+  if [ "${#RUN_FLAGS[@]}" -gt 0 ]; then
+    "$NODE" "$HERE/run.mjs" end --name cron-loop "${RUN_FLAGS[@]}" \
+      ${RUN_ID:+--run "$RUN_ID"} --state done --note "unattended pass" >> "$LOG" 2>&1
   fi
-  say "done — ${TOK:-0} tokens"
+  say "done — ${RUN_ID:-no run id}${RUN_FLAGS[*]:+, ${RUN_FLAGS[*]}}"
 else
   say "done — node not found, token spend not recorded"
 fi
 
-rm -f "$OUT" /tmp/caretaker-loop-tokens
+rm -f "$OUT"

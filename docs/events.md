@@ -8,7 +8,7 @@ interface.
 ```json
 {"t":"2026-08-30T14:22:01Z","run":"r_8f2c","task":"T-001","stage":"review",
  "kind":"gate","level":"warn","verdict":"fail",
- "detail":"pricing.ts changed, pricing.md did not","tokens":1240}
+ "detail":"upload.ts changed, upload.md did not","tokens":1240}
 ```
 
 `tail` and `jq` are the tooling. Nothing to build.
@@ -18,7 +18,7 @@ tail -F "$(node bin/events.mjs path)"                       watch today live
 cd ops/caretaker/events
 jq -cR 'fromjson? | select(.task=="T-001")'   events-*.jsonl   one task
 jq -cR 'fromjson? | select(.run=="r_8f2c")'   events-*.jsonl   one run
-jq -cR 'fromjson? | select(.verdict=="fail")' events-*.jsonl   only what broke
+jq -cR 'fromjson? | select(.verdict=="fail" or .level=="error")' events-*.jsonl   only what broke
 jq -cR 'fromjson? | select(.level!="debug")'  events-*.jsonl   only what matters
 ```
 
@@ -29,7 +29,10 @@ text and `fromjson?` drops the ones that do not parse. `bin/events.test.mjs`
 runs all four filters above against a file with a fragment in it, and asserts
 that plain `jq` still fails on it, so the day that changes is noticed.
 
-`tail -F` rather than `-f`, because the file changes name at midnight UTC.
+`tail -F` rather than `-f`, because today's file may not exist yet: `-F`
+waits for it to appear. It does not follow the log across midnight UTC. It
+follows the NAME it was given, and a new day writes a new name, so a tail
+started yesterday goes silent at midnight. Start it again with today's date.
 
 ## Why append-only, specifically
 

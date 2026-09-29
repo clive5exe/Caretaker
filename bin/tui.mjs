@@ -218,7 +218,7 @@ export function renderInbox(d, st, W, H, p) {
   const RW = W - LW - 3;
   const items = d.inbox.items;
   const left = [];
-  const SHORT = { question: "questions", "spec-approval": "specs", "gate-failure": "gates", "pr-review": "PRs" };
+  const SHORT = { question: "questions", "spec-approval": "specs", "gate-failure": "gates", "pr-review": "PRs", decision: "decisions" };
   left.push(p.dim(Object.entries(d.inbox.counts).map(([k, n]) => `${SHORT[k]} ${n}`).join(" · ")));
   if (!items.length) left.push(p.dim("Nothing needs you right now."));
   items.forEach((it, i) => {
@@ -268,7 +268,7 @@ export function renderMetrics(d, st, W, H, p) {
       out.push(`  ${fit(g, 9)} ${p.dim("no attempts in range")}`);
       continue;
     }
-    const pct = Math.round((v.pass / n) * 100);
+    const pct = v.passPct;
     const fill = Math.round((pct / 100) * bw);
     const bar = (pct >= 80 ? p.pass : pct < 50 ? p.fail : p.warn)("█".repeat(fill)) + p.faint("░".repeat(bw - fill));
     out.push(`  ${fit(g, 9)} ${bar} ${pct}% ${p.dim(`${v.pass}/${n}`)}`);
@@ -281,7 +281,7 @@ export function renderMetrics(d, st, W, H, p) {
       out.push(`  ${["cached", "in", "write", "out"].map((k) => `${k} ${tokens(t.comp[k])}`).join(" · ")}`);
       out.push(`  churn ${t.churnShare == null ? "unknown" : `${Math.round(t.churnShare * 100)}%`} · output ${t.outShare == null ? "unknown" : `${Math.round(t.outShare * 100)}%`} · per turn ${t.perTurn == null ? "unknown" : tokens(t.perTurn)}`);
     }
-    if (m.reworkSpend) out.push(`  rework spend ${tokens(m.reworkSpend.wasted)} (${m.reworkSpend.pct}%) on ${m.reworkSpend.tasks} tasks`);
+    if (m.reworkSpend) out.push(`  rework spend ${tokens(m.reworkSpend.wasted)} (${m.reworkSpend.pct}%) on ${m.reworkSpend.tasks} tasks, up to each one's last failed verdict`);
     if (t.byAgent.length) out.push(`  by agent  ${t.byAgent.map(([a, v]) => `${a ?? "unnamed"} ${tokens(v.tokens)}`).join(" · ")}`);
     if (t.byModel.length) out.push(`  by model  ${t.byModel.map(([a, v]) => `${a} ${tokens(v.tokens)}`).join(" · ")}`);
   } else out.push(`${p.bold("Tokens")} ${NR(p, m.sources.runs === "absent" ? "no run log (ops/caretaker/runs.jsonl)" : "no tokens logged in range")}`);

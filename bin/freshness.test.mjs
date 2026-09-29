@@ -89,6 +89,48 @@ const cli2 = spawnSync("node", [join(HERE, "freshness.mjs"), "--repo", R], { enc
 ok("the CLI exits 1 and names the lying doc", cli2.status === 1 && /LYING\s+docs\/honest\.md/.test(cli2.stdout), cli2.stdout);
 ok("an unknown flag exits 2", spawnSync("node", [join(HERE, "freshness.mjs"), "--nope"], { encoding: "utf8" }).status === 2);
 
+{
+  // The reviewer's case: a governed file DELETED after the spec's date.
+  writeFileSync(join(R, "specs", "tax.md"), spec("2026-04-02", "src/tax/**"));
+  commit("2026-04-02", "tax claim", "specs/tax.md");
+  spawnSync("git", ["-C", R, "rm", "-q", "src/tax/t.js"]);
+  const env = { ...process.env, GIT_AUTHOR_DATE: "2026-05-01T12:00:00Z", GIT_COMMITTER_DATE: "2026-05-01T12:00:00Z" };
+  spawnSync("git", ["-C", R, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "drop tax"], { env });
+  const d = freshness({ repo: R });
+  ok("deleting a governed file makes its spec stale", d.stale.some((x) => x.spec === "specs/tax.md" && x.lastGoverned?.subject === "drop tax"), JSON.stringify(d.stale));
+}
+{
+  // "Every spec is checked for a lying date, wherever it lives": one outside --docs.
+  mkdirSync(join(R, "design"), { recursive: true });
+  writeFileSync(join(R, "design", "api.md"), spec("2026-01-01", "src/api/**"));
+  commit("2026-06-01", "design spec", "design/api.md");
+  const d = freshness({ repo: R, specsDir: "design", docDirs: ["docs"] });
+  ok("a spec outside the doc dirs is still checked for a lying date", d.lying.some((x) => x.doc === "design/api.md"), JSON.stringify(d.lying));
+}
+
+{
+  // Independent re-review: staleness asked git's own glob pathspecs, ownership
+  // used drift's resolver, and they disagreed.
+  mkdirSync(join(R, "lib", "a"), { recursive: true });
+  writeFileSync(join(R, "specs", "lib.md"), spec("2026-07-01", "lib/**.js"));
+  writeFileSync(join(R, "lib", "a", "b.js"), "1\n");
+  commit("2026-07-01", "lib", "specs/lib.md", "lib/a/b.js");
+  writeFileSync(join(R, "lib", "a", "b.js"), "2\n");
+  commit("2026-07-02", "lib moved", "lib/a/b.js");
+  mkdirSync(join(R, "pay", "fees"), { recursive: true });
+  writeFileSync(join(R, "specs", "pay.md"), spec("2026-07-01", "pay/fees"));
+  writeFileSync(join(R, "pay", "fees", "x.js"), "1\n");
+  commit("2026-07-01", "pay", "specs/pay.md", "pay/fees/x.js");
+  writeFileSync(join(R, "pay", "fees", "x.js"), "2\n");
+  commit("2026-07-02", "pay moved", "pay/fees/x.js");
+  const d = freshness({ repo: R });
+  const lib = d.governed.find((g) => g.spec === "specs/lib.md");
+  ok("a file ownership says a spec governs makes that spec stale when it moves", lib?.governedPaths >= 1 && d.stale.some((x) => x.spec === "specs/lib.md" && x.lastGoverned?.subject === "lib moved"), JSON.stringify(lib));
+  const payOrphan = (d.orphaned ?? []).some((o) => o.spec === "specs/pay.md");
+  const payStale = d.stale.some((x) => x.spec === "specs/pay.md");
+  ok("a spec is never reported both orphaned (governs nothing) and stale (what it governs moved)", !(payOrphan && payStale), JSON.stringify({ payOrphan, payStale }));
+}
+
 rmSync(TMP, { recursive: true, force: true });
 console.log(failures ? `\n[freshness] ${failures} FAILED` : "\n[freshness] all checks passed");
 process.exit(failures ? 1 : 0);

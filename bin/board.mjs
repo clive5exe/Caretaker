@@ -31,6 +31,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import os from "node:os";
 
 /** Bumped when an export changes shape. The server refuses a board.mjs without it. */
@@ -90,10 +91,23 @@ const LOCK_WAIT_MS = 5000;
 const LOCK_STALE_MS = 30000;
 const sleepSync = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
-// The lock's inode if it is stale (its holder is dead, or it is older than any
-// board command runs), else null. null too if it vanished meanwhile: that is a
-// release, and the caller simply tries again.
-function staleLockIno(lockPath) {
+// A lock's identity is its inode AND its content. The inode alone is not
+// enough: a filesystem reuses a freed inode at once, so the lock the next
+// writer creates can carry the number of the one just removed. The content
+// holds a random nonce, so two locks never read the same.
+const lockId = (lockPath) => {
+  try {
+    return { ino: fs.statSync(lockPath).ino, text: fs.readFileSync(lockPath, "utf8") };
+  } catch {
+    return null;
+  }
+};
+const sameLock = (a, b) => !!a && !!b && a.ino === b.ino && a.text === b.text;
+
+// The lock's identity if it is stale (its holder is dead, or it is older than
+// any board command runs), else null. null too if it vanished meanwhile: that
+// is a release, and the caller simply tries again.
+function staleLockId(lockPath) {
   let st;
   try {
     st = fs.statSync(lockPath);
@@ -111,19 +125,19 @@ function staleLockIno(lockPath) {
     try {
       process.kill(info.pid, 0);
     } catch (e) {
-      if (e.code === "ESRCH") return st.ino; // the holder is gone
+      if (e.code === "ESRCH") return lockId(lockPath); // the holder is gone
     }
   }
-  return Date.now() - st.mtimeMs > LOCK_STALE_MS ? st.ino : null;
+  return Date.now() - st.mtimeMs > LOCK_STALE_MS ? lockId(lockPath) : null;
 }
 
 // Remove a stale lock without removing a fresh one that replaced it. Renaming
-// is atomic, so we hold whatever we renamed; if it is not the inode we judged
+// is atomic, so we hold whatever we renamed; if it is not the lock we judged
 // stale, another writer took the lock in between and it goes straight back.
 // linkSync never overwrites, so putting it back cannot clobber a third
 // writer. What is NOT covered: that third writer acquiring in the instant the
 // fresh lock is moved aside. That needs a crash and three writers at once.
-function breakStaleLock(lockPath, ino) {
+function breakStaleLock(lockPath, id) {
   const aside = `${lockPath}.${process.pid}.stale`;
   try {
     fs.renameSync(lockPath, aside);
@@ -131,7 +145,7 @@ function breakStaleLock(lockPath, ino) {
     return; // already gone
   }
   try {
-    if (fs.statSync(aside).ino !== ino) {
+    if (!sameLock(lockId(aside), id)) {
       try {
         fs.linkSync(aside, lockPath);
       } catch {
@@ -146,17 +160,20 @@ function breakStaleLock(lockPath, ino) {
 export function withLock(ctx, fn) {
   const lockPath = `${ctx.data}.lock`;
   const deadline = Date.now() + LOCK_WAIT_MS;
+  let mine;
   for (;;) {
     try {
       const fd = fs.openSync(lockPath, "wx");
-      fs.writeSync(fd, JSON.stringify({ pid: process.pid, at: new Date().toISOString() }));
+      const text = JSON.stringify({ pid: process.pid, at: new Date().toISOString(), nonce: randomBytes(8).toString("hex") });
+      mine = { ino: fs.fstatSync(fd).ino, text };
+      fs.writeSync(fd, text);
       fs.closeSync(fd);
       break;
     } catch (e) {
       if (e.code !== "EEXIST") throw e;
-      const ino = staleLockIno(lockPath);
-      if (ino !== null) {
-        breakStaleLock(lockPath, ino);
+      const id = staleLockId(lockPath);
+      if (id !== null) {
+        breakStaleLock(lockPath, id);
         continue;
       }
       if (Date.now() > deadline) {
@@ -168,7 +185,11 @@ export function withLock(ctx, fn) {
   try {
     return fn();
   } finally {
-    fs.rmSync(lockPath, { force: true });
+    // Only OUR lock. A holder that outlived LOCK_STALE_MS may have had its lock
+    // judged stale and taken by the next writer; removing that one would let a
+    // third writer in beside it (independent review). Same move as breaking a
+    // stale lock: take it aside, and put it back if it is not ours.
+    breakStaleLock(lockPath, mine);
   }
 }
 
@@ -273,7 +294,27 @@ function acBlock(ac) {
   return `<div class="acc"><b>Accept:</b> ${list.map((a) => esc(a)).join("<br>")}</div>`;
 }
 
-function taskBlock(t) {
+/**
+ * B-3: a task's spec, as a link relative to the page it is shown on. A value
+ * that is not a plain path inside the repo (a URL, absolute, or climbing out
+ * with ..) is shown as text, never as a link.
+ */
+const specHref = (spec, pageRel) => {
+  const s = String(spec ?? "");
+  // Plain path characters only, and the RESULT checked too: the relative path
+  // strips leading directories, so "docs/javascript:x" came out as
+  // "javascript:x" and passed a check made before it (independent review).
+  if (!/^[\w.\/-]+$/.test(s) || s.startsWith("/") || s.split("/").includes("..")) return null;
+  const href = path.posix.relative(path.posix.dirname(pageRel), s);
+  return /^[a-z][a-z0-9+.-]*:/i.test(href) || href.startsWith("/") ? null : href;
+};
+const specMeta = (t, pageRel, cls) => {
+  if (!t.spec) return "";
+  const href = specHref(t.spec, pageRel);
+  return `<span class="${cls}">spec ${href ? `<a href="${esc(href)}">${esc(t.spec)}</a>` : esc(t.spec)}</span>`;
+};
+
+function taskBlock(t, pageRel = "docs/board.md") {
   const st = STATUS[t.status] || STATUS.todo;
   const g = t.gate || {};
   const gates = ["reviewer", "qa", "security"]
@@ -293,6 +334,7 @@ function taskBlock(t) {
     t.est ? `<span class="tmi">${esc(t.est)}</span>` : "",
     t.deps?.length ? `<span class="tmi">after ${t.deps.join(", ")}</span>` : "",
     t.completed ? `<span class="tmi">closed ${esc(t.completed)}</span>` : "",
+    specMeta(t, pageRel, "tmi"),
   ]
     .filter(Boolean)
     .join("");
@@ -419,7 +461,7 @@ ${bar(currentPct, "big")}
     // any real history on it.
     const order = { doing: 0, blocked: 1, todo: 2, done: 3 };
     for (const t of [...p.tasks].sort((a, b) => (order[a.status] ?? 9) - (order[b.status] ?? 9))) {
-      md += taskBlock(t);
+      md += taskBlock(t, path.relative(ROOT, OUT).split(path.sep).join("/"));
     }
     md += `\n`;
   }
@@ -499,8 +541,13 @@ export function missingGates(t) {
   // THE LOOP IS NOT OPTIONAL. A task is done when the gate passed, not when
   // the builder says so. Money/auth/tenant tasks additionally need security.
   const g = t.gate || {};
-  const needsSecurity = /fee|refund|stripe|payment|auth|tenant|plan gat|domain|entitle|money|sign in|oauth|consent|webhook/i
-    .test(`${t.title} ${t.note || ""}`);
+  // CLAUDE.md: money, auth and ISOLATION changes need security. The list was
+  // the ticketing project's (stripe, refund, fee, tenant…), which had no word
+  // for sandbox, egress or secrets, so this repo's isolation work could close
+  // without a security verdict (independent review). Whole words only.
+  const needsSecurity =
+    /\b(money|payments?|billing|auth|oauth|sign[- ]?in|login|credentials?|secrets?|api[- ]key|bearer|sandbox(ed|ing)?|isolation|egress|allowlist|escape|container socket|permission mode|cookies?|csrf|csp|cors|redact(ed|ion)?|needs security)\b/i
+      .test(`${t.title} ${t.note || ""}`);
   // Docs-only work has no executable surface — reviewer is the whole gate.
   // Roles that never write code, on tasks that name no code path.
   const DOC_ROLES = ["product-architect", "legal", "marketing", "product-manager"];
@@ -510,7 +557,10 @@ export function missingGates(t) {
   const missing = [];
   if (g.reviewer?.verdict !== "pass") missing.push("reviewer");
   if (!docsOnly && g.qa?.verdict !== "pass") missing.push("qa");
-  if (!docsOnly && needsSecurity && g.security?.verdict !== "pass") missing.push("security (money/auth/tenant)");
+  if (!docsOnly && needsSecurity && g.security?.verdict !== "pass") missing.push("security (money/auth/isolation)");
+  // A FAIL blocks whether or not the gate was required: a refutation recorded
+  // on a docs-only task is still a failing check (independent review).
+  if (docsOnly && g.qa?.verdict === "fail") missing.push("qa");
   return { missing, docsOnly };
 }
 
@@ -521,7 +571,63 @@ const noTask = (id) => ({ ok: false, error: `no such task: ${id}` });
  * Returns { ok, task } or { ok:false, refused:{ missing, docsOnly } } when the
  * gate refuses `done`, or { ok:false, error } for a bad id. It never exits.
  */
-export function transition(d, id, cmd, text = "") {
+/**
+ * H-4: is the drift gate failing for this task? Its latest gate event in the
+ * project's event log (refutations aside, which are qa verdicts) is read here,
+ * where `done` can refuse on it, because a verdict nobody consults is a
+ * comment: the drift gate failed, and `done` closed the task anyway
+ * (independent review). Returns the failing event's detail, or null.
+ */
+export function driftGateFailing(ctx, id) {
+  const dir = path.join(ctx.root, ctx.cfg.events ?? "ops/caretaker/events");
+  let names = [];
+  try {
+    names = fs.readdirSync(dir).filter((f) => /^events-\d{4}-\d{2}-\d{2}\.jsonl$/.test(f)).sort();
+  } catch {
+    return null;
+  }
+  const evs = [];
+  for (const f of names) {
+    for (const line of fs.readFileSync(path.join(dir, f), "utf8").split("\n")) {
+      try {
+        evs.push(JSON.parse(line));
+      } catch {
+        /* a half-written line */
+      }
+    }
+  }
+  return driftOpen(evs, id);
+}
+
+/**
+ * The drift gate's open failure for a task, from its gate events, or null.
+ * A pass clears only the flagged paths it CHECKED: the latest event used to
+ * win whatever it looked at, so `drift check --path README.md` cleared a real
+ * fail on src/fee.js (H-4, independent re-review). An event from before paths
+ * were recorded falls back to the old rule: a fail with no `flagged` is
+ * cleared by any pass, and a pass with no `checked` clears everything.
+ */
+export function driftOpen(events, id) {
+  const gates = events
+    .filter((e) => e?.kind === "gate" && e.task === id && e.verdict && e.source === undefined)
+    .sort((a, b) => (String(a.t) < String(b.t) ? -1 : String(a.t) > String(b.t) ? 1 : 0));
+  const open = new Map(); // path (or "*" for a fail with no paths) -> the fail event
+  for (const e of gates) {
+    if (e.verdict === "fail") {
+      for (const p of Array.isArray(e.flagged) && e.flagged.length ? e.flagged : ["*"]) open.set(p, e);
+    } else if (!Array.isArray(e.checked)) open.clear();
+    else {
+      open.delete("*");
+      for (const p of e.checked) open.delete(p);
+    }
+  }
+  if (!open.size) return null;
+  const last = [...open.values()].sort((a, b) => (String(a.t) < String(b.t) ? 1 : -1))[0];
+  const paths = [...open.keys()].filter((p) => p !== "*");
+  return `${last.detail ?? "the drift gate failed"}${paths.length ? ` (still open: ${paths.join(", ")})` : ""}`;
+}
+
+export function transition(d, id, cmd, text = "", opts = {}) {
   if (!TRANSITIONS.includes(cmd)) return { ok: false, error: `unknown command: ${cmd}` };
   const hit = find(d, id);
   if (!hit) return noTask(id);
@@ -532,7 +638,8 @@ export function transition(d, id, cmd, text = "") {
   } else {
     if (cmd === "done") {
       const { missing, docsOnly } = missingGates(t);
-      if (missing.length) return { ok: false, task: t, refused: { missing, docsOnly } };
+      if (opts.driftFailing) missing.push("drift gate");
+      if (missing.length) return { ok: false, task: t, refused: { missing, docsOnly, ...(opts.driftFailing ? { drift: opts.driftFailing } : {}) } };
       t.completed = today();
     }
     if (cmd !== "done") delete t.completed;
@@ -541,6 +648,10 @@ export function transition(d, id, cmd, text = "") {
     else delete t.blockedReason;
     if (cmd === "block" && text) t.note = t.note ? `${t.note} — BLOCKED: ${text}` : `BLOCKED: ${text}`;
   }
+  // W-4: who moved it, when, and from where (independent review: the web
+  // claimed to record the operator and "via web", and nothing did). Appended,
+  // like every other fact; a refused `done` records nothing.
+  if (opts.by) (t.transitions ||= []).push({ cmd, ...stamp(opts) });
   d.meta.updated = today();
   return { ok: true, task: t };
 }
@@ -557,7 +668,7 @@ export function transition(d, id, cmd, text = "") {
  * working untouched. The history lives beside it in `gate.reviewer.history`,
  * oldest first, and is only read by the code that wants it.
  */
-export function recordVerdict(d, id, gate, verdict, note) {
+export function recordVerdict(d, id, gate, verdict, note, opts = {}) {
   if (!GATE_CMDS.includes(gate)) return { ok: false, error: `unknown gate: ${gate}` };
   const hit = find(d, id);
   if (!hit) return noTask(id);
@@ -565,10 +676,15 @@ export function recordVerdict(d, id, gate, verdict, note) {
   if (!["pass", "fail"].includes(verdict)) return { ok: false, error: "verdict must be pass or fail" };
   hit.t.gate = hit.t.gate || {};
   const previous = hit.t.gate[gate];
-  const entry = { verdict, at: today(), note: note || undefined };
-  const history = previous
-    ? [...(previous.history || []), { verdict: previous.verdict, at: previous.at, note: previous.note }]
-    : [];
+  // `at` stays the date every reader already uses. `t` is the instant, added
+  // so a fail and its same-day retry can be ordered (B-8: rework counted the
+  // passing attempt whenever both fell on one day).
+  // `by` and `via`, as every other fact carries (independent re-review: the
+  // walk said every move records who made it, and verdicts recorded no one).
+  const who = opts.by ? { by: String(opts.by), ...(opts.via ? { via: opts.via } : {}) } : {};
+  const entry = { verdict, at: today(), t: new Date().toISOString(), ...who, note: note || undefined };
+  const kept = (e) => ({ verdict: e.verdict, at: e.at, ...(e.t ? { t: e.t } : {}), ...(e.by ? { by: e.by } : {}), ...(e.via ? { via: e.via } : {}), note: e.note });
+  const history = previous ? [...(previous.history || []), kept(previous)] : [];
   hit.t.gate[gate] = { ...entry, ...(history.length ? { history } : {}) };
   d.meta.updated = today();
   return { ok: true, task: hit.t };
@@ -689,21 +805,28 @@ export function specReview(d, id, decision, why, spec, opts) {
   return { ok: true, task: hit.t };
 }
 
-/** pr <id> <url>: pr {url, by, at}. A later pr replaces it; the url is the fact. */
+/**
+ * pr <id> <url>: pr {url, by, at}. A later pr becomes the current one, and the
+ * one it replaced goes to pr.history with its by and at, as gate verdicts do:
+ * an append-only fact is never overwritten (independent QA).
+ */
 export function recordPr(d, id, url, opts) {
   const hit = find(d, id);
   if (!hit) return noTask(id);
   if (!/^https?:\/\/\S+$/.test(String(url ?? ""))) return { ok: false, error: "pr needs an http(s) url" };
   const bad = closed(hit.t);
   if (bad) return bad;
-  hit.t.pr = { url: String(url), ...stamp(opts) };
+  const prev = hit.t.pr;
+  const history = prev ? [...(prev.history || []), { url: prev.url, by: prev.by, at: prev.at }] : [];
+  hit.t.pr = { url: String(url), ...stamp(opts), ...(history.length ? { history } : {}) };
   d.meta.updated = today();
   return { ok: true, task: hit.t };
 }
 
 /**
  * drop <id> "why": status "dropped" plus dropped {why, by, at}. `dropped` was
- * already a status (see STATUS) but nothing set it.
+ * already a status (see STATUS) but nothing set it. A task reopened and
+ * dropped again keeps the earlier drop in dropped.history.
  */
 export function drop(d, id, why, opts) {
   const hit = find(d, id);
@@ -711,7 +834,9 @@ export function drop(d, id, why, opts) {
   const bad = need(why, "a reason") ?? closed(hit.t);
   if (bad) return bad;
   hit.t.status = "dropped";
-  hit.t.dropped = { why: String(why), ...stamp(opts) };
+  const prev = hit.t.dropped;
+  const history = prev ? [...(prev.history || []), { why: prev.why, by: prev.by, at: prev.at }] : [];
+  hit.t.dropped = { why: String(why), ...stamp(opts), ...(history.length ? { history } : {}) };
   delete hit.t.completed;
   delete hit.t.blockedReason;
   d.meta.updated = today();
@@ -728,10 +853,10 @@ export function command(d, id, cmd, args = {}, opts = {}) {
     case "start":
     case "todo":
     case "done":
-      return transition(d, id, cmd);
+      return transition(d, id, cmd, "", opts);
     case "block":
     case "note":
-      return transition(d, id, cmd, String(args.text ?? ""));
+      return transition(d, id, cmd, String(args.text ?? ""), opts);
     case "ask":
       return ask(d, id, args.text, opts);
     case "answer":
@@ -796,7 +921,7 @@ function cli(argv) {
     const res = mutate(ctx, (d) => {
       if (!find(d, id)) return noTask(id);
       if (!["pass", "fail"].includes(verdict)) return { ok: false, badVerdict: true };
-      return recordVerdict(d, id, cmd, verdict, rest.slice(1).join(" "));
+      return recordVerdict(d, id, cmd, verdict, rest.slice(1).join(" "), { by: operator(ctx.cfg), via: "cli" });
     });
     if (res.badVerdict) {
       console.error("verdict must be pass or fail:  node ops/caretaker/board.mjs " + cmd + " " + id + " pass");
@@ -813,14 +938,18 @@ function cli(argv) {
   } else if (TRANSITIONS.includes(cmd)) {
     if (!id) { console.error("need a task id, e.g. T-012"); process.exit(1); }
     const ctx = loadConfig();
-    const res = mutate(ctx, (d) => transition(d, id, cmd, text));
+    const opts = { by: operator(ctx.cfg), via: "cli", ...(cmd === "done" ? { driftFailing: driftGateFailing(ctx, id) } : {}) };
+    const res = mutate(ctx, (d) => transition(d, id, cmd, text, opts));
     if (res.refused) {
       const { missing, docsOnly } = res.refused;
       const t = res.task;
       console.error(`\n  REFUSED — ${t.id} has not passed the gate${docsOnly ? " (docs-only: reviewer required)" : ""}.\n`);
       console.error(`  Missing: ${missing.join(", ")}\n`);
       console.error(`  Record verdicts first:`);
-      for (const m of missing) console.error(`    node ops/caretaker/board.mjs ${m.split(" ")[0]} ${t.id} pass`);
+      for (const m of missing) {
+        if (m === "drift gate") console.error(`    node bin/drift.mjs check --task ${t.id}   (the drift gate is failing: ${res.refused.drift}; change the spec, reconcile, or dismiss with a reason)`);
+        else console.error(`    node ops/caretaker/board.mjs ${m.split(" ")[0]} ${t.id} pass`);
+      }
       console.error(`\n  This is enforced. Builder-says-done is a status report, not a completion.\n`);
       process.exit(1);
     }

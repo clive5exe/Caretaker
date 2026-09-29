@@ -38,15 +38,21 @@
  *        [--skills yes]                                 stage the config's skills for the run (S-1)
  *   node bin/runstore.mjs where [--config F]      print the state dir
  */
+import { StringDecoder } from "node:string_decoder";
 import {
-  closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, renameSync, statSync, writeFileSync, appendFileSync,
+  closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync, appendFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { randomBytes } from "node:crypto";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { spawnSync } from "node:child_process";
 import { makeRedactor, requireSecrets } from "./secrets.mjs";
 import { stateDirFor } from "./statedir.mjs";
+import { within } from "./paths.mjs";
+import { harvest, liveRecorder } from "./harvest.mjs";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
 
 export const RUN_ID = /^r_[0-9a-f]{8}$/;
 export const newRunId = () => `r_${randomBytes(4).toString("hex")}`;
@@ -63,12 +69,29 @@ export class RunStoreError extends Error {
 /** The state directory for a repo; defined in statedir.mjs (see there for why). */
 export { stateDirFor };
 
-const inside = (p, root) => {
-  const rel = relative(resolve(root), resolve(p));
-  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
-};
+const inside = within;
 
 /** Refuse a state dir the next agent could read. See the header for why. */
+/**
+ * H-10: what a CLI run in a container is missing to reach its model, said
+ * before it runs rather than discovered as an auth error inside it. Returns
+ * advice lines, [] when nothing is missing. Only the claude preset is known.
+ */
+export const CLAUDE_CREDENTIALS = ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"];
+export function credentialAdvice(policy = {}, { secrets = [], egress = null } = {}) {
+  const inContainer = (policy.sandbox ?? "podman") !== "none";
+  const cli = typeof policy.cli === "string" ? policy.cli : policy.cli ? "custom" : "claude";
+  if (!inContainer || (policy.adapter ?? "cli") !== "cli" || cli !== "claude") return [];
+  const out = [];
+  if (!secrets.some((s) => CLAUDE_CREDENTIALS.includes(s))) {
+    out.push("the claude CLI in the container has no credential: nothing of your login is mounted. For a subscription, run `claude setup-token` once, put the token in ~/.config/caretaker/secrets.env as CLAUDE_CODE_OAUTH_TOKEN, and pass --secret CLAUDE_CODE_OAUTH_TOKEN (or --secret ANTHROPIC_API_KEY for a key)");
+  }
+  if (!egress || !egress.allow?.some((h) => h === "api.anthropic.com" || "api.anthropic.com".endsWith(h.startsWith(".") ? h : `.${h}`))) {
+    out.push("the container has no route to api.anthropic.com: the default network is none. Pass --egress api.anthropic.com to give this run its own allowlisted proxy");
+  }
+  return out;
+}
+
 export function checkStateDir(stateDir, workspace) {
   if (workspace && inside(stateDir, workspace)) {
     throw new RunStoreError(
@@ -94,11 +117,15 @@ export const redactorFor = (secrets = {}) => makeRedactor(secrets);
  * the file is written by another process through a pipe, and a missed watch
  * event must never mean a gap in the mirror.
  */
-export function startMirror({ from, to, redact, intervalMs = 200 }) {
+export function startMirror({ from, to, redact, intervalMs = 200, onLine = null }) {
   mkdirSync(dirname(to), { recursive: true });
   writeFileSync(to, "");
   let offset = 0;
   let pending = "";
+  // A read can end part-way through a multi-byte character; the decoder holds
+  // those bytes until the rest arrive, where toString() made them U+FFFD
+  // (independent re-review).
+  const decoder = new StringDecoder("utf8");
   const pump = () => {
     let size;
     try {
@@ -112,7 +139,7 @@ export function startMirror({ from, to, redact, intervalMs = 200 }) {
       const buf = Buffer.alloc(size - offset);
       const n = readSync(fd, buf, 0, buf.length, offset);
       offset += n;
-      pending += buf.subarray(0, n).toString("utf8");
+      pending += decoder.write(buf.subarray(0, n));
     } finally {
       closeSync(fd);
     }
@@ -120,7 +147,11 @@ export function startMirror({ from, to, redact, intervalMs = 200 }) {
     if (cut === -1) return;
     const complete = pending.slice(0, cut + 1);
     pending = pending.slice(cut + 1);
-    appendFileSync(to, complete.split("\n").map((l) => (l ? redact(l) : l)).join("\n"));
+    const lines = complete.split("\n").map((l) => (l ? redact(l) : l));
+    appendFileSync(to, lines.join("\n"));
+    // B-5: each complete line is handed on as it lands, redacted, so what the
+    // run decides is recorded while it runs rather than after it ends.
+    if (onLine) for (const l of lines) if (l) onLine(l);
   };
   const timer = setInterval(pump, intervalMs);
   return {
@@ -128,8 +159,11 @@ export function startMirror({ from, to, redact, intervalMs = 200 }) {
     stop() {
       clearInterval(timer);
       pump();
+      pending += decoder.end();
       if (pending) {
-        appendFileSync(to, `${redact(pending)}\n`);
+        const last = redact(pending);
+        appendFileSync(to, `${last}\n`);
+        if (onLine) onLine(last);
         pending = "";
       }
     },
@@ -231,8 +265,12 @@ export async function runArchived(workspace, prompt, policy = {}, { stateDir, ta
   const redact = redactorFor(secrets);
   const logDir = policy.logDir ?? join(tmpdir(), "caretaker-runs", runId);
   const dir = join(stateDir, "runs", runId);
-  const mirror = startMirror({ from: join(logDir, "transcript.log"), to: join(dir, "transcript.live.log"), redact });
-  const harnessPolicy = { ...policy, runId, logDir, ...(task ? { task } : {}) };
+  const mirror = startMirror({ from: join(logDir, "transcript.log"), to: join(dir, "transcript.live.log"), redact, onLine: liveRecorder(dir) });
+  // H-0: the run's secrets REACH it, as environment variables by name. The
+  // harness passes names on the container's argv and values through podman's
+  // own environment, so a value is never in argv, the image, the repo or the
+  // log (the redactor below, built from the same values, scrubs the archive).
+  const harnessPolicy = { ...policy, runId, logDir, ...(task ? { task } : {}), env: { ...(policy.env ?? {}), ...secrets } };
   let result;
   let egressRecord = null;
   try {
@@ -246,7 +284,7 @@ export async function runArchived(workspace, prompt, policy = {}, { stateDir, ta
             ...harnessPolicy,
             net,
             extraRunFlags: [...(policy.extraRunFlags ?? []), ...extraRunFlags],
-            env: { ...(policy.env ?? {}), ...env },
+            env: { ...harnessPolicy.env, ...env },
           }),
       );
       result = out.result;
@@ -255,13 +293,35 @@ export async function runArchived(workspace, prompt, policy = {}, { stateDir, ta
     } else {
       result = await h.run(workspace, prompt, harnessPolicy);
     }
+  } catch (e) {
+    // The run threw, so archive() below will not run and would not redact the
+    // proxy's log: do it here, or it stays raw on disk (independent review).
+    const egressLog = join(dir, "egress.jsonl");
+    if (existsSync(egressLog)) writeAtomic(egressLog, redactLines(readFileSync(egressLog, "utf8"), redact));
+    throw e;
   } finally {
     mirror.stop();
   }
   const archived = archive(result, {
     stateDir, workspace, task, parent, model: policy.model ?? null, policy: harnessPolicy, redact, egress: egressRecord,
   });
-  return { ...result, archived };
+  // The raw run directory (unredacted transcript, shadow copy of the
+  // workspace) has served its purpose once the redacted archive exists. Kept
+  // only when the caller chose where it lives.
+  if (!policy.logDir) rmSync(logDir, { recursive: true, force: true });
+  // H-6: surface what the run decided and no document records. Never fails
+  // the run: the archive is already written, and a harvest can be re-run.
+  let harvested;
+  try {
+    const h = harvest({ root: workspace, runDir: archived });
+    harvested = { decisions: h.decisions.length, pending: h.decisions.filter((d) => !d.recordedIn).length };
+  } catch (e) {
+    harvested = { error: e.message };
+  }
+  // The paths handed back are the ARCHIVED (redacted) ones: the raw directory
+  // is gone unless the caller named it.
+  const transcript = policy.logDir ? result.transcript : { ...result.transcript, path: join(archived, "transcript.log"), stderrPath: join(archived, "stderr.log") };
+  return { ...result, transcript, archived, harvested };
 }
 
 /* -------------------------------------------------------------------- cli */
@@ -272,7 +332,7 @@ if (isEntry) {
   const KNOWN = new Set([
     "workspace", "prompt-file", "prompt", "config", "state-dir", "task", "parent", "secret",
     "adapter", "cli", "model", "sandbox", "net", "timeout", "image", "egress", "egress-network",
-    "endpoint", "api-key-env", "max-turns", "skills", "harness-config",
+    "endpoint", "api-key-env", "max-turns", "skills", "harness-config", "build-network",
   ]);
   const flags = { secret: [] };
   for (let i = 0; i < argv.length; i++) {
@@ -319,6 +379,8 @@ if (isEntry) {
         if (dir) policy.skillsDir = dir;
       }
       const secrets = flags.secret.length ? Object.fromEntries(requireSecrets(flags.secret, { repoRoot: workspace }).values) : {};
+      const egressFlag = flags.egress !== undefined ? { allow: flags.egress.split(",").map((h) => h.trim()).filter(Boolean) } : null;
+      for (const line of credentialAdvice(policy, { secrets: flags.secret, egress: egressFlag })) console.error(`[runstore] warning: ${line}`);
       const out = await runArchived(workspace, prompt, policy, {
         stateDir: stateDirFromFlags(),
         task: flags.task ?? null,
@@ -331,6 +393,36 @@ if (isEntry) {
           : null,
       });
       console.log(`[runstore] ${out.verdict.runId} ${out.verdict.state} -> ${out.archived}`);
+      // B-2: the run's cost goes on the project's run log, through run.mjs
+      // (the one writer, which derives the total from the parts), carrying
+      // its task and run id. Estimates are calibrated from that log, and
+      // nothing wrote it without a person typing run.mjs (independent QA).
+      // The workspace's own config: the run log belongs to the project that
+      // was worked on, not to whatever directory this was started from.
+      const cfgFile = flags.config ? resolve(flags.config) : join(workspace, "ops", "caretaker", "config.json");
+      if (existsSync(cfgFile)) {
+        const t = out.cost?.tokens ?? {};
+        const part = (flag, v) => (Number.isFinite(v) ? [flag, String(v)] : []);
+        const args = [
+          "end", "--name", "builder", "--config", cfgFile, "--run", out.verdict.runId,
+          "--state", out.verdict.ok ? "done" : "failed",
+          ...(flags.task ? ["--task", flags.task] : []),
+          ...part("--in", t.in), ...part("--cached", t.cached), ...part("--write", t.write), ...part("--out", t.out), ...part("--turns", out.cost?.turns),
+          ...(policy.model ? ["--model", String(policy.model)] : []),
+          ...(out.verdict.adapter ? ["--adapter", out.verdict.adapter] : []),
+          ...(out.verdict.cli ? ["--cli", out.verdict.cli] : []),
+        ];
+        const w = spawnSync(process.execPath, [join(HERE, "run.mjs"), ...args], { encoding: "utf8" });
+        if (w.status !== 0) console.error(`[runstore] warning: the run log was not written: ${String(w.stderr).trim()}`);
+      }
+      // H-4: a run for a task is checked by the drift gate on its own diff,
+      // so `done` refuses while the spec it drifted from is unchanged. Only a
+      // run whose diff was measured has a change set to check.
+      if (flags.task && out.diff?.measured) {
+        const { gateForRun } = await import("./drift.mjs");
+        const g = gateForRun({ repo: workspace, changed: out.diff.files.map((f) => f.path), task: flags.task, run: out.verdict.runId, configPath: flags.config ? resolve(flags.config) : null });
+        console.log(`[runstore] drift gate for ${flags.task}: ${g.report.ok ? "pass" : "FAIL"} on ${g.report.counts.considered} governed path(s)${g.logged ? ` -> ${g.logged}` : ""}`);
+      }
       process.exit(out.verdict.ok ? 0 : 1);
     } catch (e) {
       console.error(`[runstore] ${e.name}: ${e.message}`);

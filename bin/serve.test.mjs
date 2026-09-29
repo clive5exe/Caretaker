@@ -18,12 +18,12 @@
  * Run: node bin/serve.test.mjs
  */
 import { spawn, spawnSync } from "node:child_process";
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync, appendFileSync } from "node:fs";
+import { existsSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync, appendFileSync } from "node:fs";
 import { request } from "node:http";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { startServer } from "./serve.mjs";
+import { lineStart, startServer, tailFile } from "./serve.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -57,8 +57,8 @@ writeFileSync(
         {
           name: "P",
           tasks: [
-            { id: "T-1", title: "one", owner: "b", est: "2h", status: "doing", ac: "x", gate: { qa: { verdict: "pass", at: "2026-09-28" } } },
-            { id: "T-2", title: "two", owner: "b", est: "3h", status: "todo", ac: "y" },
+            { id: "T-1", title: "one", owner: "b", est: "2h", status: "doing", ac: "x", gate: { qa: { verdict: "pass", at: "2026-09-28", history: [{ verdict: "fail", at: "2000-01-01" }] } } },
+            { id: "T-2", title: "two", owner: "b", est: "3h", status: "todo", ac: "y", spec: "docs/two.md" },
             { id: "T-3", title: "three", owner: "b", est: "1h", status: "done", completed: "2026-09-28", ac: "z", gate: { reviewer: { verdict: "pass", at: "2026-09-28" }, qa: { verdict: "pass", at: "2026-09-28" } } },
           ],
         },
@@ -249,8 +249,13 @@ const post = (path, obj, headers = WRITE()) => req("POST", path, { headers, body
   ok("a file not recorded is 404 saying so", r.status === 404 && /not recorded/.test(r.json?.error ?? ""));
   r = await get("/board.html");
   ok("board.html is served under CSP sandbox", r.status === 200 && r.headers["content-security-policy"] === "sandbox");
-  r = await get("/..%2f..%2fdocs%2fboard.json");
-  ok("static traversal does not leave dist", !r.text.includes("phases"), r.text.slice(0, 80));
+  // dist is <root>/dist and the board is <root>/docs/board.json: ONE level up.
+  // Independent review: this climbed two, so it could not fail.
+  ok("the traversal target is really one level above dist", existsSync(join(dist, "..", "docs", "board.json")));
+  for (const path of ["/..%2fdocs%2fboard.json", "/%2e%2e/docs/board.json", "/assets/..%2f..%2fdocs%2fboard.json"]) {
+    r = await get(path);
+    ok(`static traversal does not leave dist: ${path}`, !r.text.includes("phases"), `${r.status} ${r.text.slice(0, 80)}`);
+  }
   r = await get("/assets/a.js");
   ok("static assets are served with their type", r.status === 200 && /javascript/.test(r.headers["content-type"]));
   r = await get("/work/T-1");
@@ -264,6 +269,15 @@ const post = (path, obj, headers = WRITE()) => req("POST", path, { headers, body
   const t1 = board.find(JSON.parse(before), "T-1").t;
   let r = await post("/api/v1/work/T-1/commands", { cmd: "done" });
   ok("done with a gate missing is 409", r.status === 409, r.text);
+  {
+    // H-4 through the web: T-3 has every gate passed; a failing drift gate
+    // for it must still refuse done, as on the CLI.
+    const f = join(evDir, "events-2026-01-01.jsonl");
+    writeFileSync(f, `${JSON.stringify({ t: "2026-01-01T00:00:00Z", kind: "gate", level: "error", stage: "review", task: "T-3", verdict: "fail", detail: "drift 1" })}\n`);
+    const d = await post("/api/v1/work/T-3/commands", { cmd: "done" });
+    rmSync(f);
+    ok("done is 409 through the web while the drift gate fails", d.status === 409 && /drift gate/.test(d.text), d.text);
+  }
   ok("the refusal is core's missingGates, verbatim", JSON.stringify(r.json?.refused) === JSON.stringify(board.missingGates(t1)), r.text);
   ok("and the board is byte-identical", readFileSync(boardFile, "utf8") === before);
   r = await post("/api/v1/work/T-9/commands", { cmd: "note", args: { text: "x" } });
@@ -276,6 +290,10 @@ const post = (path, obj, headers = WRITE()) => req("POST", path, { headers, body
   const q = JSON.parse(readFileSync(boardFile, "utf8")).phases[0].tasks.find((t) => t.id === "T-2").questions?.[0];
   ok("an accepted command returns the updated work item", r.status === 200 && r.json?.task?.openQuestions === 1, r.text);
   ok("and core recorded it by the operator, via web", q?.by === "five" && q?.via === "web" && q?.q === "which port?", JSON.stringify(q));
+  // W-4 (independent review): transitions ignored by and via, though the UI said they were recorded.
+  r = await post("/api/v1/work/T-2/commands", { cmd: "block", args: { text: "waiting on a key" } });
+  const moves = JSON.parse(readFileSync(boardFile, "utf8")).phases[0].tasks.find((t) => t.id === "T-2").transitions ?? [];
+  ok("a transition through the web records by the operator, via web", r.status === 200 && moves.at(-1)?.cmd === "block" && moves.at(-1)?.by === "five" && moves.at(-1)?.via === "web" && /T/.test(moves.at(-1)?.at ?? ""), JSON.stringify(moves));
 }
 
 /* 5. numbers -------------------------------------------------------------- */
@@ -290,13 +308,67 @@ const post = (path, obj, headers = WRITE()) => req("POST", path, { headers, body
   ok("the first-pass rate is dashboard.metrics' figure", JSON.stringify(snap.quality) === JSON.stringify(m.quality));
   ok("held is dashboard.metrics' figure", snap.held === m.heldTotal);
   ok("a missing run log is null, not zero", snap.sources.runs === "absent" && snap.tokensPerClosedTask === null && snap.legacyRunning === null);
+  const { kpis, gitFacts } = await import("./kpis.mjs");
+  const mk = (await get("/api/v1/metrics?days=30")).json.kpis;
+  const want = kpis({ board: d, runs: null, facts: gitFacts(root, { days: 30 }), cfg });
+  ok("the Metrics API's KPIs are kpis.mjs's, with no run log as null", JSON.stringify(mk) === JSON.stringify(want) && mk.ai.tokensPerClosedTask === null && mk.antiKpis.length === 3, JSON.stringify(mk).slice(0, 300));
+  // W-15 (independent re-review): nothing held the Metrics page's gate figures;
+  // mutating them left every test green. Counted here from the board itself.
+  const met = (await get("/api/v1/metrics?days=30")).json;
+  const count = (since) => {
+    const c = {};
+    for (const t of d.phases.flatMap((p) => p.tasks)) {
+      for (const [g, rec] of Object.entries(t.gate ?? {})) {
+        for (const a of [...(rec.history ?? []), rec]) if (!since || a.at >= since) (c[g] ??= { pass: 0, fail: 0 })[a.verdict === "pass" ? "pass" : "fail"] += 1;
+      }
+    }
+    return c;
+  };
+  const sorted = (o) => JSON.stringify(Object.keys(o).sort().map((k) => [k, o[k]]));
+  const asMap = (gs) => Object.fromEntries(gs.filter(([, v]) => v.pass + v.fail > 0).map(([g, v]) => [g, { pass: v.pass, fail: v.fail }]));
+  ok("Metrics' all-time gate figures count every attempt on the board", sorted(asMap(met.allTime.gateStats)) === sorted(count(null)), JSON.stringify(met.allTime.gateStats));
+  ok("…and its range counts only attempts inside the window it reports", sorted(asMap(met.gateStats)) === sorted(count(met.window[0])) && asMap(met.allTime.gateStats).qa?.fail === 1 && !asMap(met.gateStats).qa?.fail, JSON.stringify(met.gateStats));
+  // Round 3: the all-time first-pass figure was not held either. T-1's qa
+  // failed in 2000 and passed later: first pass in the range, not all time.
+  ok("Metrics' all-time first-pass is dashboard.quality over the whole board", JSON.stringify(met.allTime.quality) === JSON.stringify(dash.quality(d.phases, cfg.gates ?? ["reviewer", "qa", "security"])), JSON.stringify(met.allTime.quality));
+  ok("…and differs from the range's where an attempt falls outside it", met.allTime.quality.firstPass < met.quality.firstPass, `${met.allTime.quality.firstPass} vs ${met.quality.firstPass}`);
+  ok("…with pass% from core, beside the counts", met.allTime.gateStats.every(([, v]) => v.pass + v.fail === 0 ? v.passPct === null : v.passPct === Math.round((v.pass / (v.pass + v.fail)) * 100)));
   const work = (await get("/api/v1/work")).json;
   const t3 = work.tasks.find((t) => t.id === "T-3");
   ok("a closed task is in the done stage", t3.lifecycle === "done");
+  ok("a work card carries its spec path, and null for none (B-3)", work.tasks.find((t) => t.id === "T-2")?.specPath === "docs/two.md" && t3.specPath === null);
   ok("a work item's commands come from lifecycle.commandsFor", !work.tasks.some((t) => t.commands.some((c) => ["reviewer", "qa", "security"].includes(c.cmd))));
   const run = (await get(`/api/v1/runs/${RUN}`)).json;
   ok("a run folds its archive record", run?.task === "T-1" && run?.status === "ok", JSON.stringify(run));
   ok("and names the files it has", run?.archiveFiles?.["transcript.log"] > 0 && run?.archiveFiles?.["diff.patch"] === null, JSON.stringify(run?.archiveFiles));
+  // W-7 (independent re-review): "no egress record" claimed no route out even
+  // for a sandbox:none run. The state now comes from the archived record.
+  const states = {
+    r_e0000001: { policy: { sandbox: "none" } },
+    r_e0000002: { policy: { sandbox: "podman" }, egress: { network: "caretaker-egress-r_e0000002" } },
+    r_e0000003: { policy: { sandbox: "podman", net: "none" } },
+    r_e0000004: { policy: { sandbox: "podman", net: "shared" } },
+    r_e0000005: {},
+    r_e0000006: { adapter: "openai-compatible", policy: { sandbox: "podman", net: "none", adapter: "openai-compatible", endpoint: "https://api.example.test/v1" } },
+  };
+  for (const [id, rec] of Object.entries(states)) {
+    mkdirSync(join(state, "runs", id), { recursive: true });
+    writeFileSync(join(state, "runs", id, "run.json"), JSON.stringify({ task: "T-1", ...rec }));
+  }
+  const got = {};
+  for (const id of Object.keys(states)) got[id] = (await get(`/api/v1/runs/${id}`)).json?.egress?.state;
+  ok("a run's egress state says why it has no log: host, proxied, sealed, another network, or unknown", JSON.stringify(Object.values(got).slice(0, 5)) === '["host","proxied","sealed","network","unknown"]', JSON.stringify(got));
+  const api = (await get("/api/v1/runs/r_e0000006")).json?.egress;
+  ok("an API-adapter run says its model calls went from this machine, and where", api?.state === "sealed" && api?.modelCalls?.from === "host" && api.modelCalls.endpoint === "api.example.test", JSON.stringify(api));
+  // C-5 (independent QA): the proxy's log is raw until the run is archived.
+  const live = "r_e0000009";
+  mkdirSync(join(state, "runs", live), { recursive: true });
+  writeFileSync(join(state, "runs", live, "egress.jsonl"), `${JSON.stringify({ t: "2026-09-29T10:00:00Z", kind: "refused", host: "data-in-a-hostname.evil.example", port: 443 })}\n`);
+  const inFlight = await get(`/api/v1/runs/${live}/egress`);
+  ok("a run's egress log is not served while the run is in flight (it is still raw)", inFlight.status === 404 && !inFlight.text.includes("data-in-a-hostname"), `${inFlight.status} ${inFlight.text.slice(0, 80)}`);
+  writeFileSync(join(state, "runs", live, "run.json"), JSON.stringify({ task: "T-1", egress: { network: "n" } }));
+  const after = await get(`/api/v1/runs/${live}/egress`);
+  ok("…and is once the run is archived, which redacts it first", after.status === 200 && after.text.includes("evil.example"), `${after.status} ${after.text.slice(0, 80)}`);
   void board;
 }
 
@@ -334,6 +406,9 @@ const line = (n) => `${JSON.stringify({ t: `2026-09-29T10:00:0${n}Z`, kind: "sys
   const a = openStream();
   await sleep(200);
   ok("the stream says hello with the sources", a.events[0]?.event === "hello" && !!a.events[0].json.sources);
+  // W-3 (independent review): hello had no id, so a client that dropped before
+  // any log event reconnected as fresh, and missed what arrived meanwhile.
+  ok("hello carries the cursor, pointing at the end of what exists", a.events[0]?.id?.includes(`${basename(evFile)}:${line(0).length}`), a.events[0]?.id);
   ok("a fresh client does not replay history (it has just fetched it)", logs(a).length === 0);
   const l1 = line(1);
   appendFileSync(evFile, l1.slice(0, 20));
@@ -359,6 +434,23 @@ const line = (n) => `${JSON.stringify({ t: `2026-09-29T10:00:0${n}Z`, kind: "sys
   await sleep(150);
   const last = logs(b).at(-1);
   ok("a key in a streamed event is redacted", last && !last.data.includes(KEY) && last.data.includes("[redacted:anthropic]"));
+  // The same event through the REST routes, which the stream's redaction
+  // never covered: every route that serves the event log gets it redacted.
+  for (const route of ["/api/v1/events", "/api/v1/snapshot"]) {
+    const body = (await get(route)).text;
+    ok(`…and on ${route}`, body.includes("[redacted:anthropic]") && !body.includes(KEY), body.slice(0, 200));
+  }
+  // W-3 (independent QA): a fresh client started at the file's SIZE, which is
+  // mid-line while a writer is part-way through one; that line was lost.
+  const l5 = line(5);
+  appendFileSync(evFile, l5.slice(0, 25));
+  const c = openStream();
+  await sleep(200);
+  appendFileSync(evFile, l5.slice(25));
+  s.pump();
+  await sleep(150);
+  ok("a client that connects while a line is half-written still gets that line", logs(c).map((e) => e.json.detail).join() === "event 5", JSON.stringify(logs(c)));
+  c.close();
   const d = JSON.parse(readFileSync(boardFile, "utf8"));
   d.phases[0].tasks[1].note = "changed by the CLI";
   writeFileSync(boardFile, `${JSON.stringify(d, null, 2)}\n`);
@@ -366,6 +458,61 @@ const line = (n) => `${JSON.stringify({ t: `2026-09-29T10:00:0${n}Z`, kind: "sys
   await sleep(150);
   ok("a board write sends invalidate board", b.events.some((e) => e.event === "invalidate" && e.json.resource === "board"));
   b.close();
+}
+
+{
+  // W-3: tailing helpers.
+  const f = join(root, "tail-test.jsonl");
+  writeFileSync(f, "{}\n{\"a\":1}\n{\"b\"");
+  ok("lineStart is just after the last complete line", lineStart(f) === "{}\n{\"a\":1}\n".length);
+  writeFileSync(f, "no newline at all");
+  ok("…and 0 when there is none", lineStart(f) === 0 && lineStart(join(root, "absent")) === 0);
+  // Independent review: a line longer than the read window stalled the file forever.
+  writeFileSync(f, `${JSON.stringify({ big: "x".repeat(100) })}\n${JSON.stringify({ ok: 1 })}\n`);
+  let at = 0;
+  let got = [];
+  for (let i = 0; i < 20 && !got.length; i++) {
+    const r = tailFile(f, at, { window: 32 });
+    at = r.offset;
+    got = r.records;
+  }
+  ok("a line longer than the window is skipped, not waited on, and the next line is read", got[0]?.value?.ok === 1, JSON.stringify({ at, got }));
+}
+{
+  // W-17: with no web build, the fallback page's inline styles were blocked
+  // by its own CSP. It carries none now.
+  const empty = join(root, "no-dist");
+  mkdirSync(empty, { recursive: true });
+  const fs2 = await startServer({ cfgPath, dist: empty, port: 0, stateDir: state, pollMs: 60_000, heartbeatMs: 60_000, log: () => {}, token: "u".repeat(64) });
+  const page = await new Promise((res) => request({ host: "127.0.0.1", port: fs2.port, path: "/", headers: { Host: `127.0.0.1:${fs2.port}` } }, (r) => {
+    let t = "";
+    r.setEncoding("utf8");
+    r.on("data", (c) => (t += c));
+    r.on("end", () => res({ csp: r.headers["content-security-policy"] ?? "", text: t }));
+  }).end());
+  ok("the no-build page is served under CSP", /default-src 'self'/.test(page.csp) && /has not been built/.test(page.text), page.text.slice(0, 120));
+  ok("…and carries no inline style that CSP would block", !/\sstyle=|<style/i.test(page.text) && !/'unsafe-inline'/.test(page.csp));
+  await fs2.close();
+}
+{
+  // W-3: the per-run stream had no heartbeat.
+  const hs = await startServer({ cfgPath, dist, port: 0, stateDir: state, pollMs: 60_000, heartbeatMs: 50, log: () => {}, token: "t".repeat(64) });
+  const port = hs.port;
+  const auth = await new Promise((res) => request({ host: "127.0.0.1", port, path: `/auth?t=${"t".repeat(64)}`, headers: { Host: `127.0.0.1:${port}` } }, (r) => res(r.headers["set-cookie"]?.[0]?.split(";")[0])).end());
+  const raw = await new Promise((res) => {
+    let text = "";
+    const r = request({ host: "127.0.0.1", port, path: `/api/v1/runs/${RUN}/stream`, headers: { Host: `127.0.0.1:${port}`, Cookie: auth } }, (resp) => {
+      resp.setEncoding("utf8");
+      resp.on("data", (c) => (text += c));
+    });
+    r.end();
+    setTimeout(() => {
+      r.destroy();
+      res(text);
+    }, 400);
+  });
+  ok("the per-run stream sends heartbeats", /: heartbeat/.test(raw), raw.slice(0, 200));
+  await hs.close();
 }
 
 await s.close();

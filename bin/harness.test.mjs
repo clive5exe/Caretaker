@@ -16,7 +16,7 @@
  * Run: node bin/harness.test.mjs
  */
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -28,6 +28,7 @@ import {
   adapterNames,
   buildContainerArgv,
   emptyCost,
+  finalTextOf,
   normalisePolicy,
   parseUsage,
   run,
@@ -97,6 +98,26 @@ const basePolicy = (label, cli, over = {}) => ({
   ...over,
 });
 
+{
+  // No .git to mount read-only, so an agent can make one; git on the host would
+  // run its hooks. The shadow diff never shows it, so the verdict must.
+  const ws = join(TMP, "ws-nogit");
+  mkdirSync(ws, { recursive: true });
+  writeFileSync(join(ws, "a.txt"), "a\n");
+  const r = await run(ws, "go", basePolicy("nogit", fakeCli("cat > /dev/null; mkdir -p .git/hooks; printf '#!/bin/sh\\ntouch /tmp/pwned\\n' > .git/hooks/pre-commit")));
+  ok("a run that CREATES .git in a workspace with none is named in the warnings", r.verdict.warnings.some((w) => /CREATED .*\.git/.test(w)), JSON.stringify(r.verdict.warnings));
+  const clean = await run(makeWorkspace("hasgit"), "go", basePolicy("hasgit", fakeCli("cat > /dev/null; echo hi > new.txt")));
+  ok("…and an ordinary run in a repo carries no such warning", !clean.verdict.warnings.some((w) => /CREATED/.test(w)));
+}
+
+{
+  // The raw transcript and the shadow copy live in the run's log dir; under a
+  // shared /tmp at the default umask every user could read them.
+  const r = await run(makeWorkspace("private"), "go", basePolicy("private", fakeCli("cat > /dev/null; echo hi")));
+  const mode = statSync(dirname(r.transcript.path)).mode & 0o777;
+  ok("a run's log dir is private to this user (0700)", mode === 0o700, mode.toString(8));
+}
+
 const MARKER = "MARKER_TRANSCRIPT_7f3a";
 
 /** An agent that writes one file and lies about writing another. */
@@ -126,7 +147,7 @@ echo "Done. I refactored committed.txt and added three files."
     runtime: "podman",
     containerName: "caretaker-r_dead",
     cliArgv: ["claude", "--print"],
-    env: { HOME: "/tmp/agent-home" },
+    env: { HOME: "/tmp/agent-home", ANTHROPIC_API_KEY: "sk-ant-argv-leak-check-0123456789" },
   });
   const has = (flag, value) => {
     const i = argv.indexOf(flag);
@@ -138,7 +159,9 @@ echo "Done. I refactored committed.txt and added three files."
     "measured: `echo X | podman run --rm IMAGE sh -c cat` prints nothing without -i");
   ok("the container is named, so a killed run has a handle to remove", has("--name", "caretaker-r_dead"),
     "measured: SIGKILL on the podman client leaves the container Up despite --rm");
-  ok("environment is passed with -e", has("-e", "HOME=/tmp/agent-home"));
+  const envNames = argv.flatMap((a, i) => (a === "-e" ? [argv[i + 1]] : []));
+  ok("environment is passed with -e, by NAME", envNames.join() === "HOME,ANTHROPIC_API_KEY", JSON.stringify(envNames));
+  ok("NO ENV VALUE IS IN THE ARGV, where ps and podman inspect show it", !argv.some((a) => /sk-ant-argv-leak-check|agent-home/.test(String(a))), JSON.stringify(argv));
   ok("the agent CLI is the container's command", argv.slice(-2).join(" ") === "claude --print", argv.slice(-3).join(" "));
   ok("THE CONTAINER SOCKET IS STILL NEVER MOUNTED", !argv.some((a) => String(a).includes(".sock")));
   ok("the prompt is not on the command line", !argv.some((a) => /prompt/i.test(String(a))),
@@ -418,6 +441,23 @@ sleep 30
 }
 
 {
+  // B-5: the claude preset STREAMS, so a killed run has already written what
+  // it said. A streamed transcript carries usage per message and the run's
+  // total on its final result event; the total is what is read.
+  const argv = CLI_PRESETS.claude.argv({ model: null });
+  ok("the claude preset streams its events (stream-json, which --print needs --verbose for)", argv.join(" ") === "claude --print --output-format stream-json --verbose", argv.join(" "));
+  const streamed = [
+    { type: "system", subtype: "init" },
+    { type: "assistant", message: { content: [{ type: "text", text: "DECISION: keep it small because it is read often" }], usage: { input_tokens: 3, output_tokens: 4 } } },
+    { type: "assistant", message: { content: [{ type: "text", text: "done" }], usage: { input_tokens: 5, output_tokens: 6 } } },
+    { type: "result", subtype: "success", result: "All done.", num_turns: 2, usage: { input_tokens: 8, cache_read_input_tokens: 100, cache_creation_input_tokens: 0, output_tokens: 10 } },
+  ].map((x) => JSON.stringify(x)).join("\n");
+  const u = parseUsage(streamed);
+  ok("a streamed transcript's usage is the result's total, not the first message's", u.tokens.in === 8 && u.tokens.out === 10 && u.tokens.cached === 100 && u.turns === 2, JSON.stringify(u.tokens));
+  ok("…and its final text is the result's", finalTextOf(streamed) === "All done.");
+}
+
+{
   const none = parseUsage("just some prose, no json at all\nsecond line\n");
   ok("prose with no JSON parses to all-null, not all-zero", none.tokens.total === null && none.reported === false, JSON.stringify(none.tokens));
 }
@@ -638,9 +678,11 @@ const haveImage =
 if (!havePodman) {
   skip("live: an agent inside the container edits the workspace", "podman not available");
   skip("live: a hung container is killed AND removed", "podman not available");
+  skip("live: an agent cannot write the repo's .git", "podman not available");
 } else if (!haveImage) {
   skip("live: an agent inside the container edits the workspace", `image ${LIVE_IMAGE} not present`);
   skip("live: a hung container is killed AND removed", `image ${LIVE_IMAGE} not present`);
+  skip("live: an agent cannot write the repo's .git", `image ${LIVE_IMAGE} not present`);
 } else {
   {
     const ws = makeWorkspace("live-edit");
@@ -678,6 +720,29 @@ if (!havePodman) {
         "sandbox.mjs does this check inside its CLI block, so a programmatic caller of buildArgs " +
         "does not get it for free and passing --cpus without the controller fails the whole run",
     );
+  }
+
+  {
+    // The attack the reviewer ran, against the real mount: plant a hook and a
+    // core.fsmonitor from inside. Both must be refused, and nothing on the host
+    // may change, because the next `git status` here would execute them.
+    const ws = makeWorkspace("live-git");
+    const hook = join(ws, ".git", "hooks", "pre-commit");
+    const cfgBefore = readFileSync(join(ws, ".git", "config"), "utf8");
+    const r = await run(ws, "go", {
+      adapter: "cli",
+      cli: { argv: ["sh", "-c", "cat > /dev/null; (printf '#!/bin/sh\\ntouch /tmp/pwned\\n' > /work/.git/hooks/pre-commit) 2>/dev/null && echo HOOK-WRITTEN; (printf '[core]\\nfsmonitor = touch /tmp/pwned\\n' >> /work/.git/config) 2>/dev/null && echo CONFIG-WRITTEN; echo ok > /work/still-writable.txt"] },
+      sandbox: "podman",
+      net: "none",
+      image: LIVE_IMAGE,
+      logDir: logDirFor("live-git"),
+      events: EVENTS_DIR,
+      timeoutMs: 90_000,
+    });
+    ok("live: an agent cannot write the repo's .git (hooks, config), so it cannot run code on the host",
+      r.verdict.state === "completed" && !existsSync(hook) && readFileSync(join(ws, ".git", "config"), "utf8") === cfgBefore && !/WRITTEN/.test(r.transcript.tail),
+      `${r.verdict.state} ${r.transcript.tail.slice(0, 200)}`);
+    ok("live: …while the rest of the repo stays writable", r.diff.files.some((f) => f.path === "still-writable.txt"), JSON.stringify(r.diff.files));
   }
 
   {

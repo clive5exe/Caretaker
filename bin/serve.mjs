@@ -51,7 +51,8 @@ const MIME = {
  * until its newline arrives; an unparseable complete line is skipped and
  * counted, never thrown. Returns [{ file, offset, line, value }].
  */
-export function tailFile(path, from) {
+export const TAIL_WINDOW = 8 * 1024 * 1024;
+export function tailFile(path, from, { window = TAIL_WINDOW } = {}) {
   let size;
   try {
     size = statSync(path).size;
@@ -60,7 +61,7 @@ export function tailFile(path, from) {
   }
   if (size < from) from = 0; // truncated or replaced: start again rather than read past the end
   if (size === from) return { records: [], offset: from, skipped: 0 };
-  const len = Math.min(size - from, 8 * 1024 * 1024);
+  const len = Math.min(size - from, window);
   const buf = Buffer.alloc(len);
   const fd = openSync(path, "r");
   try {
@@ -87,7 +88,41 @@ export function tailFile(path, from) {
     }
     pos = nl + 1;
   }
+  // A full window with no newline in it is a line longer than the window.
+  // Holding it, as a partial line is held, would stall this file forever
+  // (independent review): skip past it and count it. The rest of that line
+  // then arrives as an unparseable fragment, and is skipped the same way.
+  if (pos === 0 && len === window) return { records, offset: from + len, skipped: skipped + 1 };
   return { records, offset: from + pos, skipped };
+}
+
+/**
+ * Where a fresh reader of an append-only file starts: just after its last
+ * complete line. The file's size is mid-line whenever a writer is part-way
+ * through a line, and starting there would read that line's tail as a bad
+ * line and drop it (independent QA).
+ */
+export function lineStart(path) {
+  let size;
+  try {
+    size = statSync(path).size;
+  } catch {
+    return 0;
+  }
+  const fd = openSync(path, "r");
+  try {
+    const chunk = 64 * 1024;
+    for (let end = size; end > 0; end -= chunk) {
+      const start = Math.max(0, end - chunk);
+      const buf = Buffer.alloc(end - start);
+      readSync(fd, buf, 0, buf.length, start);
+      const nl = buf.lastIndexOf(10);
+      if (nl >= 0) return start + nl + 1;
+    }
+    return 0;
+  } finally {
+    closeSync(fd);
+  }
 }
 
 /** A cursor over several files: "name:offset,name:offset". Every file's offset rides in every id. */
@@ -174,11 +209,14 @@ export async function startServer({ cfgPath, dist = DIST, port = 7420, host = "1
     return send(res, 200, readFileSync(p), { "Content-Type": type, "Cache-Control": cache });
   }
 
+  // Unstyled on purpose: the page is served under CSP, which blocks inline
+  // style attributes, and it is the one page with no stylesheet to point at
+  // (independent review).
   const fallbackPage = () => `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Caretaker</title></head>
-<body style="font:15px system-ui,sans-serif;max-width:640px;margin:48px auto;padding:0 16px;color:#0a0a0a">
-<h1 style="font-size:22px">Caretaker</h1>
+<body>
+<h1>Caretaker</h1>
 <p>The web client has not been built. Build it once, then reload:</p>
-<pre style="background:#fafafa;border:1px solid #e5e5e5;border-radius:8px;padding:12px">npm --prefix web ci &amp;&amp; npm --prefix web run build</pre>
+<pre>npm --prefix web ci &amp;&amp; npm --prefix web run build</pre>
 <p>Until then: the static page is at <a href="/board.html">/board.html</a>, and the API is under <code>/api/v1</code>
 (snapshot, work, work/:id, inbox, runs, runs/:id, agents, specs, metrics, events, settings, stream).</p>
 </body></html>`;
@@ -193,13 +231,6 @@ export async function startServer({ cfgPath, dist = DIST, port = 7420, host = "1
       /* no event log yet */
     }
     return out;
-  };
-  const sizeOf = (p) => {
-    try {
-      return statSync(p).size;
-    } catch {
-      return 0;
-    }
   };
   const stamp = (p) => {
     try {
@@ -276,11 +307,13 @@ export async function startServer({ cfgPath, dist = DIST, port = 7420, host = "1
     // With Last-Event-ID, every file resumes from its offset in the cursor, so
     // there is no gap and no duplicate. A fresh client starts at the end: it
     // has just fetched the current state over REST.
-    for (const [name, path] of Object.entries(files)) offsets[name] = name in resume ? resume[name] : req.headers["last-event-id"] ? 0 : sizeOf(path);
+    for (const [name, path] of Object.entries(files)) offsets[name] = name in resume ? resume[name] : req.headers["last-event-id"] ? 0 : lineStart(path);
     const c = { res, offsets };
     clients.add(c);
     res.write(`retry: 3000\n\n`);
-    res.write(`event: hello\ndata: ${JSON.stringify({ sources: rm.sources() })}\n\n`);
+    // hello carries the cursor, so a client that drops before any log event
+    // still resumes from here rather than reconnecting as fresh (a gap).
+    res.write(`id: ${encodeCursor(offsets)}\nevent: hello\ndata: ${JSON.stringify({ sources: rm.sources() })}\n\n`);
     req.on("close", () => clients.delete(c));
     if (req.headers["last-event-id"]) setImmediate(pump);
   }
@@ -299,7 +332,13 @@ export async function startServer({ cfgPath, dist = DIST, port = 7420, host = "1
     };
     tick();
     const t = setInterval(tick, 1000);
-    req.on("close", () => clearInterval(t));
+    // The same heartbeat as the main stream: a quiet transcript must not look
+    // like a dead connection to a proxy, or to EventSource.
+    const hb = setInterval(() => res.write(`: heartbeat\n\n`), heartbeatMs);
+    req.on("close", () => {
+      clearInterval(t);
+      clearInterval(hb);
+    });
   }
 
   /* ----------------------------------------------------------------- routes */
