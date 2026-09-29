@@ -293,10 +293,16 @@ ok("findOrphaned returns null, not [], when there is no tree",
 {
   const src = readFileSync(join(HERE, "drift.mjs"), "utf8");
   const imports = [...src.matchAll(/^import[\s\S]*?from\s+"([^"]+)";/gm)].map((m) => m[1]);
-  const ALLOWED = new Set(["node:fs", "node:child_process", "node:path", "node:url", "./spec.mjs"]);
+  const ALLOWED = new Set(["node:fs", "node:child_process", "node:path", "node:url", "./spec.mjs", "./events.mjs"]);
   const foreign = imports.filter((i) => !ALLOWED.has(i));
-  ok("NO MODEL IS IN THE GATE PATH: every import is fs, path, url, child_process or spec.mjs",
+  ok("NO MODEL IS IN THE GATE PATH: every import is fs, path, url, child_process, spec.mjs or events.mjs",
     foreign.length === 0 && imports.length > 0, foreign.join(", "));
+  // events.mjs is local code, so its own imports are in the gate path too.
+  const evSrc = readFileSync(join(HERE, "events.mjs"), "utf8");
+  const evForeign = [...evSrc.matchAll(/^import[\s\S]*?from\s+"([^"]+)";/gm)].map((m) => m[1])
+    .filter((i) => !["node:fs", "node:path", "node:url"].includes(i));
+  ok("...and events.mjs, which the gate writes through, imports only fs, path and url",
+    evForeign.length === 0, evForeign.join(", "));
   ok("and it opens no socket and calls no API",
     !/\bfetch\s*\(|node:https?\b|anthropic|openai/i.test(src),
     "a gate must answer the same way twice on the same input");
