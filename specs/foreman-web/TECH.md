@@ -1,6 +1,6 @@
 ---
 title: Foreman Web v1 — architecture and technical spec
-status: draft
+status: accepted
 updated: 2026-09-29
 ---
 
@@ -11,7 +11,8 @@ governs: bin/serve.mjs, bin/readmodel.mjs, bin/lifecycle.mjs, web/src/api/**
 
 # Foreman Web v1 — architecture and technical spec
 
-This is a proposal for review. **Nothing here is implemented yet.** It covers:
+Accepted with ADR-0002 on 2026-09-29. **Nothing here is implemented yet.** It
+covers:
 
 1. the local server
 2. the API boundary
@@ -468,15 +469,74 @@ by the harness.
 - `npm --prefix web ci && npm --prefix web run build` produces `web/dist/`,
   which `serve.mjs` serves. `web/dist/` is gitignored.
 
-**Design.**
-- System fonts and no external requests. The page keeps the same "nothing
-  leaves the machine" posture as the sandbox.
-- The visual language reuses the dashboard's tokens: panel, gate rail, chips.
+**Design.** The client takes its shape from Warp Factories' web app: a light
+page, a white sidebar, breadcrumbs, bordered cards and colored icon tiles.
+PRODUCT.md §Layout describes the layout. The tokens are below. `docs/board.html`
+keeps its own dark look, because it is a different surface. The two surfaces
+share numbers (C-2), not styles.
+
+- **No external requests.** The page keeps the same "nothing leaves the
+  machine" posture as the sandbox.
+  - Inter is bundled from `@fontsource-variable/inter`, which is a `web/`
+    dependency, and served from `web/dist/`. Only the Latin variable-weight
+    file is used.
+  - Monospace uses the system stack (`ui-monospace, SFMono-Regular, Menlo,
+    Consolas, monospace`).
+  - The page contains no CDN link, web font URL or analytics call.
+- **Name and logo.**
+  - The UI says **Caretaker**. Paths and commands keep saying `foreman`
+    wherever the code does, as the README explains.
+  - The sidebar and the Getting started page use
+    `docs/assets/caretaker-logo-black.png`, which has black letters on white.
+    It is the repo logo inverted, thresholded so the thin gaps between the
+    letters survive.
+  - `docs/assets/caretaker-logo.png`, which is white on black, stays the logo
+    for dark surfaces such as the README.
+- **Color.** Color has two jobs, and they never swap:
+  - **Category** says *which one*: which agent, which Inbox kind, which chart
+    series.
+  - **Status** says *how it went*: pass, fail, or needs attention.
+
+  A tag that says where a number comes from is neither, and stays grey. Using
+  status colors for provenance tags is what made an earlier draft read as "all
+  over the place".
+
+| token | value | use |
+|---|---|---|
+| `bg` / `canvas` / `hover` | `#ffffff` / `#fafafa` / `#f5f5f5` | page, inset panels, hovered and selected rows |
+| `line` / `line2` | `#e5e5e5` / `#d4d4d4` | card borders, dashed "not recorded" boxes |
+| `fg` / `dim` / `faint` | `#0a0a0a` / `#525252` / `#737373` | text, secondary text, labels and axes |
+| `black` | `#0a0a0a` | the one primary button per page ("Go to" / "Actions") |
+| `accent` | `#7c3aed`; badges `#6d28d9` on `#f3e8ff` | the brand accent: unread dots, the Inbox count, `new` and `proposed` badges |
+| category: violet | `#9333ea` on `#f3e8ff`, series `#8b5cf6` | the verifier, the first chart series |
+| category: blue | `#2563eb` on `#dbeafe` | the builder, questions, the second series, a running run |
+| category: orange | `#ea580c` on `#ffedd5` | the reconciler, spec reviews, the third series |
+| category: pink | `#db2777` on `#fce7f3` | the reviewer, the fourth series |
+| status: pass | `#15803d` on `#dcfce7`; rail `#16a34a` | a passing verdict, a PR ready for review, a filled gate-rail segment |
+| status: fail | `#b91c1c` on `#fee2e2`; rail `#dc2626` | a failing verdict, a gate failure in the Inbox, a red gate-rail segment |
+| status: attention | `#b45309` on `#fef3c7`; dot `#d97706` | no end recorded, stale data, a warn event |
+
+- **Components.**
+  - Cards have a 1px `line` border and an 8px radius.
+  - A status chip is a pill with a dot in its own color. The dot of a running
+    run pulses, except under `prefers-reduced-motion`.
+  - An icon tile is the category color at 100 behind a 600-weight icon, as
+    Factories' agent list does.
+  - Provenance tags (`board.html today`, `planned`, `proposed`) are grey
+    uppercase labels, except `proposed`, which uses the accent.
+  - Line charts draw 2.5px lines with a 16% area fill, with series in the
+    order violet, blue, orange, pink. The gate rail keeps its meaning: filled
+    green on pass, red on fail, hollow if not run.
+- **The reference.** The owner reviewed this design as a clickable mockup of
+  every page and the TUI, made from these two specs. It is not committed, and
+  where it and this section differ, this section wins.
 
 **Structure.**
 - `web/src/api/`: one typed client over the routes in §2, plus one
   `EventSource` subscription. Governed by this spec.
-- `web/src/pages/`: the eight pages in PRODUCT.md. Governed by PRODUCT.md.
+- `web/src/pages/`: the pages in PRODUCT.md. Governed by PRODUCT.md.
+- `web/src/theme.css`: the tokens above, as CSS custom properties. Colors appear
+  nowhere else in `web/src`.
 - Shared state is one small store keyed by resource, refetched on `invalidate`.
 
 **`bin/web-boundary.test.mjs`** is a plain node script like the other tests.
@@ -486,6 +546,8 @@ It fails if `web/src`:
 - contains `innerHTML` or `dangerouslySetInnerHTML`
 - names a gate or a lifecycle stage outside the single display-label module
   `web/src/api/labels.ts`
+- contains an `http://` or `https://` URL, which would be an external request
+- contains a color literal outside `web/src/theme.css`
 
 ---
 
@@ -638,7 +700,8 @@ standard way this dies". The honest split:
 data):**
 - C-1, C-2, C-3, C-6
 - W-1 to W-5
-- the Dashboard, Work board, Inbox, Specs and Settings pages
+- the Dashboard, Activity, Inbox, Specs, Metrics, Settings and Getting started
+  pages, and the command menu
 
 **Blocked on H-1 and B-6, for U-1's reason:**
 - C-4 and C-5, which are layer 1–2 work and need security
@@ -667,8 +730,11 @@ them.
 | W-3 | SSE stream with offset resume | W-1 | reviewer, qa |
 | W-4 | command endpoint over core only | W-1, C-6 | reviewer, qa, security |
 | W-5 | client shell, api module, boundary test | W-2 | reviewer, qa |
-| W-6…W-13 | one per page, in the order of PRODUCT.md | W-5, plus C-4/C-5 for runs pages | reviewer, qa |
+| W-6…W-13 | one per page, pages 1 to 7 and 9 of PRODUCT.md | W-5, plus C-4/C-5 for runs pages | reviewer, qa |
 | W-14 | install upgrade mode; backward-compat end to end | all | reviewer, qa |
+| W-15 | Metrics page (PRODUCT.md page 8) | W-5, C-2 | reviewer, qa |
+| W-16 | command menu over `commandsFor`, and the Getting started page | W-5 | reviewer, qa |
+| W-17 | `theme.css` tokens, bundled Inter, logo; boundary test covers URLs and color literals | W-5 | reviewer, qa |
 
 ## Findings recorded here, not fixed by this project
 
@@ -684,6 +750,10 @@ them.
 4. **Drift events are written unredacted** (`drift.mjs:453-460`).
 5. **The egress proxy's `--log` may be unwritable** as launched by
    `netns.proxyRunArgs`. Unverified; C-5 confirms or refutes it with a test.
+6. **Encore leaks into `bin/tui-mock.mjs`:** task `T-277` "money gates",
+   `src/lib/pricing.ts`, `scripts/qa/platform-fee.mjs` and a price check in
+   the sample log (`:99-116` at `bb38593`). The TUI's sample data should use
+   this repo's own tasks.
 
 Four earlier findings were fixed by #2: `esc()` not escaping quotes, the
 missing `build.mjs` hook, the drifted installed `run.mjs`, and the Google Fonts
