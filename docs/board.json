@@ -1453,12 +1453,26 @@
             "reviewer": {
               "verdict": "fail",
               "at": "2026-09-29",
-              "note": "Independent review (fresh agent, not the builder): Runs, Run detail and Agents read the server's folded runs (legacy apart, reconstructed labelled, no end recorded after staleRunHours) and show not recorded per section. But the Egress tab mislabels every host: egress.mjs records are {t, kind: allowed|refused|error, host, port, reason|why} (egress.mjs:83,91,106,116), while RunDetail.tsx:86 parses decision/allowed, which never exist, so line 367 computes allowed=false for every row and line 378 prints 'refused' in a red chip for hosts the proxy ALLOWED; the refusal reason is never shown. On the one page meant to show what a run reached, allowed traffic reads as blocked. Also stale: RunDetail.tsx:352 says egress waits on C-5, which is built; TECH says 'no proxy was attached to this run'."
+              "note": "Independent re-review (fresh agent, not the builder): the old points are fixed. RunDetail.tsx:372-385 reads kind and shows reason/why, and the C-5 text is gone. The replacement text states a false reason, the defect class RULES.md calls the most expensive. RunDetail.tsx:355 says 'No egress proxy was attached to this run. A run with no proxy has no route out.' But a sandbox:none run has the host's network with no egress control (harness.mjs:826-829 warns exactly that), and a proxied run that made no connection has no egress.jsonl, because egress.mjs:221 creates it on the first event, while run.json records egress {network, proxy, allow} (runstore.mjs:212). /api/v1/runs/<id> exposes neither egress nor policy, so the page cannot tell. Fix: pass run.json's egress/sandbox through and say which case it is, or say only 'not recorded'.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent review (fresh agent, not the builder): Runs, Run detail and Agents read the server's folded runs (legacy apart, reconstructed labelled, no end recorded after staleRunHours) and show not recorded per section. But the Egress tab mislabels every host: egress.mjs records are {t, kind: allowed|refused|error, host, port, reason|why} (egress.mjs:83,91,106,116), while RunDetail.tsx:86 parses decision/allowed, which never exist, so line 367 computes allowed=false for every row and line 378 prints 'refused' in a red chip for hosts the proxy ALLOWED; the refusal reason is never shown. On the one page meant to show what a run reached, allowed traffic reads as blocked. Also stale: RunDetail.tsx:352 says egress waits on C-5, which is built; TECH says 'no proxy was attached to this run'."
+                }
+              ]
             },
             "qa": {
               "verdict": "fail",
               "at": "2026-09-29",
-              "note": "Independent QA (fresh agent, not the builder): identity, diff, transcript, parent/child and not recorded for unarchived files all render (Chromium against runstore.archive() fixtures: r_0a0a0a0a lists child r_0b0b0b0b, the child says child of r_0a0a0a0a, the transcript shows <script> as text, transcript.live.log says not recorded, an unknown run says Not recorded). But the egress tab shows every allowed host as refused. egress.mjs writes {kind:'allowed'|'refused'|'error', host, port, reason}, and RunDetail.tsx reads e.allowed ?? e.decision === 'allowed', neither of which exists. With egress.jsonl holding kind:allowed example.com and kind:refused evil.example, the page rendered: example.com 443 refused | evil.example 443 refused. It also drops the refusal reason. The child run's empty egress text still says egress waits for C-5, which is built."
+              "note": "Independent re-review (fresh agent, not the builder): the old points are fixed. Built web/, served runstore.archive() fixtures, drove Chromium. The egress tab now shows allowed (pass chip), 'refused not-allowlisted', 'error ECONNRESET' and 'refused plain-http'. The C-5 text is gone. Parent/child and an unknown run's Not recorded still render. But the egress tab is wrong on two edge cases. r_0c0c0c0c, archived with egress {network, proxy, allow} and no traffic (egress.mjs creates egress.jsonl on the first event), renders 'No egress proxy was attached to this run'. r_0b0b0b0b, sandbox:none on the host network, renders 'A run with no proxy has no route out, so there is nothing to record'. Both are false, on the page meant to say what a run could reach.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent QA (fresh agent, not the builder): identity, diff, transcript, parent/child and not recorded for unarchived files all render (Chromium against runstore.archive() fixtures: r_0a0a0a0a lists child r_0b0b0b0b, the child says child of r_0a0a0a0a, the transcript shows <script> as text, transcript.live.log says not recorded, an unknown run says Not recorded). But the egress tab shows every allowed host as refused. egress.mjs writes {kind:'allowed'|'refused'|'error', host, port, reason}, and RunDetail.tsx reads e.allowed ?? e.decision === 'allowed', neither of which exists. With egress.jsonl holding kind:allowed example.com and kind:refused evil.example, the page rendered: example.com 443 refused | evil.example 443 refused. It also drops the refusal reason. The child run's empty egress text still says egress waits for C-5, which is built."
+                }
+              ]
             }
           }
         },
@@ -1507,7 +1521,15 @@
             "qa": {
               "verdict": "fail",
               "at": "2026-09-29",
-              "note": "Independent QA (fresh agent, not the builder): the Metrics page's gate figures differ from docs/board.html on this very repo. Generated board.html with node ops/caretaker/dashboard.mjs in a copy: it shows reviewer 1 pass 0 fail, qa 11 pass 1 fail (8%), and 91% first-pass over 11 tasks and 13 attempts. GET /api/v1/metrics?days=7, 14 and 30 all return gateStats of 0/0 for every gate and quality.gated 0. Every verdict is dated 2026-08-30, just outside the widest 30-day range. In Chromium the page at 30d shows Pass rate per gate: No verdict recorded in this range, and First-pass rate: a dash. The API returns allTime.gateStats, but the page never renders it, so board.html's per-gate numbers appear at no range setting. Only a first-pass footnote shows all-time. There is no test comparing /metrics with board.html: serve.test.mjs checks snapshot and kpis only."
+              "t": "2026-09-29T21:41:40.315Z",
+              "note": "Independent re-review (fresh agent, not the builder): the display is fixed. On a copy of this repo, board.html (dashboard.mjs) shows reviewer 30 pass/37 fail 55%, qa 28/41 59%, first-pass 17% of 48. In Chromium, /metrics at 7d, 14d and 30d shows 'All time: reviewer 45% of 67 · qa 41% of 69' and 'All time: 17% of 48', which agree, from core's passPct/failPct. But the old note's last point still stands: no test holds /metrics to board.html's numbers. I mutated readmodel.mjs:689 to gateStats over d.phases.slice(1) and :691 to compute allTime over the ranged board, and serve, tui and dashboard-lib all stayed green (restored, sha256 OK). The AC's 'same numbers' is checked by hand only; serve.test.mjs:305-312 compares snapshot and kpis, not metrics.gateStats or allTime.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent QA (fresh agent, not the builder): the Metrics page's gate figures differ from docs/board.html on this very repo. Generated board.html with node ops/caretaker/dashboard.mjs in a copy: it shows reviewer 1 pass 0 fail, qa 11 pass 1 fail (8%), and 91% first-pass over 11 tasks and 13 attempts. GET /api/v1/metrics?days=7, 14 and 30 all return gateStats of 0/0 for every gate and quality.gated 0. Every verdict is dated 2026-08-30, just outside the widest 30-day range. In Chromium the page at 30d shows Pass rate per gate: No verdict recorded in this range, and First-pass rate: a dash. The API returns allTime.gateStats, but the page never renders it, so board.html's per-gate numbers appear at no range setting. Only a first-pass footnote shows all-time. There is no test comparing /metrics with board.html: serve.test.mjs checks snapshot and kpis only."
+                }
+              ]
             }
           }
         },
@@ -1526,12 +1548,28 @@
             "reviewer": {
               "verdict": "fail",
               "at": "2026-09-29",
-              "note": "Independent review (fresh agent, not the builder): the command menu half is right: CommandMenu.tsx lists pages, work items, runs and, on a work item, exactly item.commands from commandsFor, adds none of its own, and choosing one opens the same CommandForm the page uses. The Getting started half does not meet the AC 'walks a new repo to its first closed task': GettingStarted.tsx:14-43 covers building the client, starting the server, ssh -L and the server's promises (PRODUCT.md §10), but never installs into a repo (install.sh), never shows the board, and never reaches a closed task: no board.mjs done, no gate verdicts, no refusal. Either the page walks install to first close, or the AC is narrowed to what PRODUCT §10 asks for, by someone other than the builder."
+              "t": "2026-09-29T21:43:20.145Z",
+              "note": "Independent re-review (fresh agent, not the builder): the old point is fixed. GettingStarted.tsx now walks install, refused done, start, reviewer+qa, done, and getting-started.test runs those blocks from the page. In a copy, dropping the reviewer line, marking the refusal ok, or removing data-walk each fail it by name. By hand in a fresh git repo the walk closes T-001, and a second install refuses. The command menu on /work/T-1 lists exactly commandsFor. New defect, a false claim: step 5 says 'Every move above is on the task with who made it and when', but recordVerdict (board.mjs:656) stores verdict/at/t/note with no by. The walk left gate.reviewer and gate.qa with no author, so the step that says 'Someone else checks it' is the one move with no who. The test named '…every move on it recorded, with who made it' checks transitions only. Fix the sentence, or record by on verdicts.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent review (fresh agent, not the builder): the command menu half is right: CommandMenu.tsx lists pages, work items, runs and, on a work item, exactly item.commands from commandsFor, adds none of its own, and choosing one opens the same CommandForm the page uses. The Getting started half does not meet the AC 'walks a new repo to its first closed task': GettingStarted.tsx:14-43 covers building the client, starting the server, ssh -L and the server's promises (PRODUCT.md §10), but never installs into a repo (install.sh), never shows the board, and never reaches a closed task: no board.mjs done, no gate verdicts, no refusal. Either the page walks install to first close, or the AC is narrowed to what PRODUCT §10 asks for, by someone other than the builder."
+                }
+              ]
             },
             "qa": {
-              "verdict": "fail",
+              "verdict": "pass",
               "at": "2026-09-29",
-              "note": "Independent QA (fresh agent, not the builder): the command menu half holds. In Chromium on /work/W-2, /work/W-0 and /work/B-1, Ctrl-K listed exactly the commands /api/v1/work/<id> returned from commandsFor, in order (W-2: block, todo, answer q1, ask, pr, note, drop; B-1: todo, note), plus pages, items and runs, and no command of its own. The Getting started half does not. web/src/pages/GettingStarted.tsx has four cards: build the client, start the server, ssh -L, and what the server promises. It never mentions install.sh, adding a task, recording gate verdicts from the CLI, or done. Rendered text confirmed, so it does not walk a new repo to its first closed task."
+              "t": "2026-09-29T21:43:32.247Z",
+              "note": "Independent re-review (fresh agent, not the builder): both halves now work. Chromium on the built client: /start renders the five-step walk. Ctrl-K on /work/T-1 lists exactly Block, Reset to todo, Ask, Record PR, Add note, Drop, which is /api/v1/work/T-1's commandsFor order, plus pages, items and runs. By hand in a fresh git repo: install.sh wrote T-001, done was REFUSED naming reviewer and qa, start, reviewer, qa and done then closed it with start and done transitions, and a second install refused. getting-started.test is green. In a copy, dropping the reviewer step, flipping the refusal to ok, or stripping data-walk each fail it by name. Nit (in the reviewer verdict): step 5's 'with who made it' is false for the verdicts, which carry no by.",
+              "history": [
+                {
+                  "verdict": "fail",
+                  "at": "2026-09-29",
+                  "note": "Independent QA (fresh agent, not the builder): the command menu half holds. In Chromium on /work/W-2, /work/W-0 and /work/B-1, Ctrl-K listed exactly the commands /api/v1/work/<id> returned from commandsFor, in order (W-2: block, todo, answer q1, ask, pr, note, drop; B-1: todo, note), plus pages, items and runs, and no command of its own. The Getting started half does not. web/src/pages/GettingStarted.tsx has four cards: build the client, start the server, ssh -L, and what the server promises. It never mentions install.sh, adding a task, recording gate verdicts from the CLI, or done. Rendered text confirmed, so it does not walk a new repo to its first closed task."
+                }
+              ]
             }
           }
         },
