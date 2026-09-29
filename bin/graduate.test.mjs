@@ -124,21 +124,46 @@ commit("2026-02-03", "round half even"); // an accepted decision rewritten in pl
 /* --------------------------------------------------------------------- ci */
 {
   ok("no evidence, no workflow: an empty repo gets null, not a placeholder", ciWorkflow(evidence(R)) === null);
-  write("package.json", JSON.stringify({ scripts: { test: 'echo "Error: no test specified" && exit 1' } }));
-  ok("npm's default 'no test specified' script is not evidence of a test", evidence(R).length === 0);
-  write("package.json", JSON.stringify({ scripts: { test: "node --test" } }));
-  const withNpm = evidence(R);
-  ok("a real test script is evidence", withNpm.some((s) => s.name === "npm test" && /node --test/.test(s.evidence)));
-  write("ops/caretaker/config.json", JSON.stringify({ board: "docs/board.json", boardMarkdown: "docs/board.md", events: "ops/caretaker/events" }));
+  write("package.json", JSON.stringify({ scripts: { test: "node --test", lint: "eslint ." } }));
+  mkdirSync(join(R, "bin"), { recursive: true });
+  write("bin/a.test.mjs", "");
+  write("bin/b.test.mjs", "");
+  // Independent QA: steps came from file presence. None of this is evidence yet.
+  ok("a test script or test files that no gate was seen to run are not evidence", evidence(R).length === 0, JSON.stringify(evidence(R)));
+  write("ops/caretaker/config.json", JSON.stringify({ board: "docs/board.json", events: "ops/caretaker/events" }));
+  const note = (t, gate, text, at = "2026-02-01") => ({ id: t, title: t, status: "doing", gate: { [gate]: { verdict: "pass", at, note: text } } });
+  write("docs/board.json", JSON.stringify({ phases: [{ name: "P", tasks: [
+    note("T-1", "qa", "ran node bin/a.test.mjs and npm test; also node bin/gone.test.mjs"),
+    { id: "T-2", title: "T-2", status: "doing", gate: { reviewer: { verdict: "pass", at: "2026-02-03", note: "fine", history: [{ verdict: "fail", at: "2026-02-02", note: "npm run lint failed" }] } } },
+  ] }] }));
+  const skipped = [];
+  const ev = evidence(R, { skipped });
+  const tests = ev.find((s) => s.name === "tests");
+  ok("a test file a gate note names as run is a step, with where it was named", tests?.run === "node bin/a.test.mjs" && /T-1 qa 2026-02-01/.test(tests.evidence), JSON.stringify(ev));
+  ok("…and one that is only present is not", !/b\.test/.test(tests?.run ?? ""));
+  ok("a named test file the repo does not have is skipped, and said", skipped.some((x) => /node bin\/gone\.test\.mjs.*not in this repo/.test(x)) && !/gone/.test(tests?.run ?? ""), JSON.stringify(skipped));
+  ok("an npm script a gate note names is a step, with the script it runs", ev.some((s) => s.name === "npm test" && /scripts\.test: node --test; named as run in 1 gate/.test(s.evidence)));
+  ok("…including one named in an earlier verdict", ev.some((s) => s.name === "npm run lint" && /T-2 reviewer 2026-02-02/.test(s.evidence)), JSON.stringify(ev.map((s) => s.name)));
+  write("package.json", JSON.stringify({ scripts: { test: 'echo "Error: no test specified" && exit 1', lint: "eslint ." } }));
+  const s2 = [];
+  ok("npm's default 'no test specified' script is not a check, even when named", !evidence(R, { skipped: s2 }).some((s) => s.name === "npm test") && s2.some((x) => /no real test script/.test(x)));
+  write("package.json", JSON.stringify({ scripts: { test: "node --test", lint: "eslint ." } }));
+
   ok("a drift gate is NOT added just because drift.mjs could run", !evidence(R).some((s) => s.name === "drift gate"));
   events.append(join(R, "ops/caretaker/events"), { kind: "gate", level: "info", stage: "review", verdict: "pass", detail: "drift 0, dismissed 0, blocking conflicts 0, spec errors 0, unowned 0 of 1 governed-code path(s) changed" });
   events.append(join(R, "ops/caretaker/events"), { kind: "gate", level: "error", stage: "verify", verdict: "fail", source: "refute", detail: "refutation of r_00000000: refuted — the drift check misses governed files" });
-  // A refutation's reason is free text and can name drift; it is not a drift gate run.
-  const ev = evidence(R);
-  const drift = ev.find((s) => s.name === "drift gate");
-  ok("a drift gate that RAN (in the event log) is included, with its evidence", drift && /1 drift gate run\(s\)/.test(drift.evidence), JSON.stringify(ev));
-  const wf = ciWorkflow(ev);
-  ok("every step in the workflow carries its evidence line", (wf.match(/# evidence:/g) ?? []).length === ev.length && ev.length >= 2);
+  // Anchored: a gate event that merely mentions drift is not a drift gate run.
+  events.append(join(R, "ops/caretaker/events"), { kind: "gate", level: "info", stage: "review", verdict: "pass", detail: "lint gate: no drift in formatting" });
+  const s3 = [];
+  ok("a drift gate that RAN, with no drift.mjs in the repo, is skipped and said", !evidence(R, { skipped: s3 }).some((s) => s.name === "drift gate") && s3.some((x) => /no drift\.mjs is in this repo/.test(x)), JSON.stringify(s3));
+  write("bin/drift.mjs", "");
+  const ev2 = evidence(R);
+  const drift = ev2.find((s) => s.name === "drift gate");
+  ok("a drift gate that RAN is included, counting only its own gate events", drift && /1 drift gate run\(s\)/.test(drift.evidence), JSON.stringify(ev2));
+  ok("…and run with the drift.mjs the repo has", drift?.run.startsWith("node bin/drift.mjs check"));
+  const wf = ciWorkflow(ev2);
+  ok("every step in the workflow carries its evidence line", (wf?.match(/# evidence:/g) ?? []).length === ev2.length && ev2.length >= 3);
+  ok("no step calls a file the repo does not have", ev2.every((s) => [...s.run.matchAll(/node (\S+\.m?js)/g)].every((m) => existsSync(join(R, m[1])))));
 }
 
 /* ------------------------------------------------------------------- docs */
@@ -156,6 +181,23 @@ commit("2026-02-03", "round half even"); // an accepted decision rewritten in pl
   const all = [...readdirSync(site).map((f) => readFileSync(join(site, f), "utf8")), readFileSync(join(R, "graduate", "DECISIONS.md"), "utf8"), readFileSync(join(R, "graduate", ".github", "workflows", "ci.yml"), "utf8")].join("\n");
   ok("nothing in the output is template placeholder text", !/TODO|TBD|FIXME|lorem ipsum|\{\{|<placeholder>|your-project/i.test(all));
   ok("it writes under the output dir, never over the project's own files", !existsSync(join(R, ".github")) && !existsSync(join(R, "DECISIONS.md")));
+}
+{
+  // Independent review: `--out .` wrote over the project's .github/workflows/ci.yml.
+  const refused = (out) => {
+    try {
+      graduate(R, { out });
+      return null;
+    } catch (e) {
+      return e.code ?? e.message;
+    }
+  };
+  ok("the project itself is refused as --out", refused(".") === "OUT_IS_PROJECT" && refused(R) === "OUT_IS_PROJECT");
+  ok("…and so is a directory above it", refused("..") === "OUT_IS_PROJECT");
+  ok("a directory holding files graduate did not write is refused", refused("docs") === "OUT_NOT_OURS" && refused("bin") === "OUT_NOT_OURS");
+  ok("a directory graduate wrote before is written again", refused("graduate") === null);
+  const cli = spawnSync("node", [join(HERE, "graduate.mjs"), "all", "--repo", R, "--out", "."], { encoding: "utf8" });
+  ok("the CLI refuses --out . by name, and writes nothing", cli.status === 2 && /is the project/.test(cli.stderr) && !existsSync(join(R, ".graduate")), cli.stderr);
 }
 {
   const bare = join(TMP, "bare");
