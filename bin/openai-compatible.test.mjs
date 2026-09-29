@@ -264,6 +264,14 @@ const policy = (model, over = {}) => ({ adapter: "openai-compatible", endpoint: 
   ];
   const poor = await runFixture({ endpoint: ENDPOINT, model: "poor-model", sandbox: "none", maxTurns: 5 }, { runs: 1 });
   const c = poor.results[0].checks;
+  // Finishes the task correctly, then keeps going: it did stop, eventually.
+  scripts["busy-model"] = [
+    say([call("read_file", { path: "names.txt" }), call("write_file", { path: "upper.txt", content: "ADA\nGRACE\nLINUS\n" })]),
+    ...Array.from({ length: 10 }, () => say([call("list_files", {})])),
+    say(null, null, "done"),
+  ];
+  const busy = await runFixture({ endpoint: ENDPOINT, model: "busy-model", sandbox: "none" }, { runs: 1 });
+  ok("a model that keeps calling tools after the task is done did not stop WHEN done", busy.passed === 0 && busy.results[0].checks.correct && !busy.results[0].checks.stopped, JSON.stringify(busy.results[0].checks));
   ok("the fixture fails it on each behaviour separately, by name", poor.passed === 0 && !c.correct && !c.wellFormed && !c.noInvented && !c.stopped && !c.completed, JSON.stringify(c));
 }
 

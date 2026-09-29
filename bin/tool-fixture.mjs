@@ -35,6 +35,11 @@ export const FIXTURE = {
     "Read names.txt. Write a file named upper.txt containing the same names in UPPER CASE, " +
     "one per line, in the same order, ending with a newline. Change nothing else. Then stop.",
   expect: { "upper.txt": "ADA\nGRACE\nLINUS\n" },
+  // The task needs two calls (read, write). Six allows a look around and a
+  // check of the result. "Stopped" means stopped WHEN DONE: a model that
+  // finished and then made 45 more calls used to pass, because stopping only
+  // meant "before the turn ceiling" (independent review).
+  maxCalls: 6,
 };
 
 /** Score one run's outcome. Pure, so it is testable without a model. */
@@ -51,7 +56,7 @@ export function score(out, ws) {
     correct,
     wellFormed: tu !== null && tu.malformed === 0,
     noInvented: tu !== null && tu.invented === 0,
-    stopped: tu !== null && tu.stopped === true,
+    stopped: tu !== null && tu.stopped === true && tu.calls <= FIXTURE.maxCalls,
   };
   return { pass: Object.values(checks).every(Boolean), checks, toolUse: tu, changed, state: out.verdict.state, tokens: out.cost.tokens.total };
 }

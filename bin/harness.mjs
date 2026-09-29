@@ -9,15 +9,21 @@
  *
  * ── the two adapters ──────────────────────────────────────────────────────
  *
- * `cli` (DEFAULT) shells out to an agent CLI running INSIDE the dev-environment
- * container. It is the default because that is where subscription auth lives:
- * the SDKs take an API key and nothing else, while `claude login` against a Pro
- * or Max plan exists only in the CLI. Defaulting to the SDK would quietly bill
- * API rates on top of a subscription somebody already pays for.
+ * `cli` (DEFAULT) shells out to an agent CLI, INSIDE the dev-environment
+ * container unless sandbox is none. It is the default because the CLI is where
+ * subscription auth lives (`claude login` on a Pro or Max plan).
  *
- * `sdk` is API-key, model call above the container. It is NOT IMPLEMENTED here
- * and says so loudly rather than returning a plausible-looking empty result.
- * See `sdkAdapter` for exactly what is missing.
+ * WHAT REACHES THAT CLI, stated because the default's reason depends on it:
+ * on the host (sandbox none) it is your own login. In the container it is NOT:
+ * HOME there is a fresh tmpfs and nothing of your login is mounted, so a
+ * containerised CLI authenticates with an API key given to the run by name
+ * (`--secret ANTHROPIC_API_KEY`, which runstore passes as environment), and
+ * reaches the API only through the run's egress proxy. Carrying a
+ * subscription login into the container is not built (independent review).
+ *
+ * `openai-compatible` makes the model call from the harness, above the
+ * container, and runs the tools inside it. `sdk` is registered and NOT
+ * IMPLEMENTED, and says so rather than returning a plausible empty result.
  *
  * ── what this costs, stated rather than hidden ────────────────────────────
  *
