@@ -1,0 +1,41 @@
+diff --git a/.github/workflows/review-pull-requests.yml b/.github/workflows/review-pull-requests.yml
+index 351f4ba..2a1339b 100644
+--- a/.github/workflows/review-pull-requests.yml
++++ b/.github/workflows/review-pull-requests.yml
+@@ -4,7 +4,10 @@ name: Review Pull Requests
+ # contributor changes as untrusted review data. A separate publish job validates
+ # the review against the immutable prepared diff before posting it.
+ #
+-# Setup: the WARP_API_KEY repository secret must be set (the Oz API key).
++# Setup: the CLAUDE_CODE_OAUTH_TOKEN repository secret must be set: your Claude
++# subscription token, from `claude setup-token` (Caretaker runs the agent in
++# place of Oz). ANTHROPIC_API_KEY, or OPENAI_API_KEY with the CARETAKER_CLI
++# variable set to codex, also work.
+ # Optional: enable "Allow GitHub Actions to create and approve pull requests"
+ # in the repository/organization Actions settings if APPROVE review events
+ # should succeed. Otherwise publish_review.py falls back to COMMENT for
+@@ -176,8 +179,8 @@ jobs:
+       - name: Clear untrusted review artifact
+         run: rm -f review.json
+ 
+-      - name: Review with Oz agent
+-        uses: warpdotdev/oz-agent-action@v1.0.25
++      - name: Review with Caretaker agent
++        uses: ./.github/actions/caretaker-agent
+         id: review
+         with:
+           skill: "review-pr"
+@@ -214,8 +217,11 @@ jobs:
+             `python3 .agents/skills/review-pr/scripts/validate_review_json.py --review-json review.json --diff pr_diff.txt`
+ 
+             Do not post the review to GitHub. Leave the validated `review.json` file in the working directory. Your final response may restate the JSON, but the on-disk `review.json` file is required.
+-          warp_api_key: ${{ secrets.WARP_API_KEY }}
+-          profile: ${{ vars.WARP_AGENT_PROFILE || '' }}
++          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
++          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
++          openai_api_key: ${{ secrets.OPENAI_API_KEY }}
++          cli: ${{ vars.CARETAKER_CLI || 'claude' }}
++          model: ${{ vars.CARETAKER_MODEL || '' }}
+ 
+       - name: Materialize review.json
+         env:

@@ -93,12 +93,18 @@ runs:
         for s in CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY OPENAI_API_KEY; do
           if [ -n "${!s}" ]; then args+=(--secret "$s"); creds=1; fi
         done
+        # GH_TOKEN comes from the calling step's env, as Warp's workflows set it
+        # for the agent's `gh` (triage reads the issue with it). Whatever the
+        # workflow's permissions give that token is what the agent gets.
+        hosts=()
+        if [ -n "${GH_TOKEN:-}" ]; then args+=(--secret GH_TOKEN); hosts+=(api.github.com); fi
         if [ "$creds" = 0 ]; then
           echo "::error::No login given. Add your subscription token (claude setup-token) as a secret and pass it as claude_code_oauth_token."
           exit 1
         fi
         if [ "$SANDBOX" != none ]; then
-          if [ "$AGENT_CLI" = codex ]; then args+=(--egress api.openai.com); else args+=(--egress api.anthropic.com); fi
+          if [ "$AGENT_CLI" = codex ]; then hosts+=(api.openai.com); else hosts+=(api.anthropic.com); fi
+          args+=(--egress "$(IFS=,; echo "${hosts[*]}")")
         fi
         node "$GITHUB_ACTION_PATH/bin/agent-step.mjs" "${args[@]}"
 

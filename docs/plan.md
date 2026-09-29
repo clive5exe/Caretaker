@@ -68,7 +68,7 @@ stays Warp's.
 | workflows: triage, spec, implement, review, improve | **Warp** | copied; `uses: oz-agent-action` → `uses: caretaker-agent` (a patch) |
 | installer `install-cloud-factory.sh` | **Warp** | copied; the patch points it at this repo and drops the Warp-key line |
 | skill `verify-behavior` | **Warp** | copied. It asks for Oz's `computer_use`; the patch points it at Playwright (already on the runner) |
-| triage's Oz polling (~200 lines of `oz run get`) | **Warp** | patched out. Our run is synchronous, so `agent_output` is already the final answer |
+| triage's Oz polling (~200 lines of `oz run get`) | **Warp** | **untouched.** Warp built a fast path for a step that returns the final answer, which ours does, so the polling never runs |
 | skill `oz-cloud-factory-demo` | Warp | **not copied**: it only describes Oz |
 | `warpdotdev/common-skills` (write-product-spec, write-tech-spec, validate-changes-match-specs) | Warp | copied the same way, if its licence allows; checked in step 1 |
 | sandbox, egress allowlist, secrets by name | **Caretaker** | kept: Warp has none of this, Oz did it in Warp's cloud |
@@ -116,6 +116,31 @@ The budget is 5 hours. Each step ends in a commit you can check.
   That proves the plumbing, not the AI's work. I will say which is which every
   time.
 - **Merging.** Steps land on this branch and you merge. I don't merge.
+
+## Progress
+
+| step | state | commit |
+|---|---|---|
+| 0 plan + README | done | 609629f |
+| 1 vendor Warp | done: 27 files byte for byte, test fails on one edited byte | 30cb6fa |
+| 2 the Oz stand-in | done with a **fake model**. Warp's own validator accepts its `review.json`. Not yet proven: a real model, and the podman path, which can't run on the build machine | 88997cf |
+| 3 workflows | **2 of 5 on Caretaker** (review, triage), actionlint clean. **3 blocked** on the decision below | this commit |
+
+### Open decision: how the agent pushes (implement, spec, improve-review-pr)
+
+In those three workflows Warp's agent commits, pushes a branch and opens the
+PR itself. Caretaker's sandbox mounts `.git` read-only, because a planted git
+hook runs outside the sandbox the next time anything uses git there. So:
+
+- **A (recommended): the agent edits, a trusted step pushes.** The agent works
+  in the sandbox as now and writes the PR title and body to a file. A step
+  after it, outside the sandbox, commits, pushes and opens the PR. The sandbox
+  is unchanged. Cost: a few lines patched into each of the three prompts
+  ("don't push; write the PR text to `pr.md`"), plus one small shared step.
+- **B: writable `.git`, on a throwaway copy of the repo.** Warp's flow is
+  unchanged, but this loosens an isolation control. The permission system
+  blocked it as weakening the sandbox, so it needs your explicit say-so and a
+  `security` verdict.
 
 ## After the 5 hours (not in this window)
 
