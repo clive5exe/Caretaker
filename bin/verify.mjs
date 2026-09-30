@@ -36,8 +36,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import * as events from "./events.mjs";
-import { cliLabel } from "./harness.mjs";
-import { transcriptTexts } from "./transcript.mjs";
+import { agentTexts, cliLabel } from "./harness.mjs";
 import { load as loadHarnessSettings, policyFlags, policyFor } from "./harness-config.mjs";
 import { RUN_ID, runArchived, stateDirFor } from "./runstore.mjs";
 import { requireSecrets } from "./secrets.mjs";
@@ -56,11 +55,12 @@ const VERDICT_LINE = /^[ \t>*`_-]*VERDICT:[ \t]*(REFUTED|STANDS)\b[ \t:—-]*(.*
 /**
  * Read the refuter's verdict from its transcript. The LAST verdict line wins,
  * because an agent may quote the instruction before answering it. The text is
- * read as transcript.mjs reads any transcript, knowing no vendor's shape.
+ * read as the agent's own words (harness.mjs agentTexts): a VERDICT line it
+ * only read in a file or a tool's output is not its verdict.
  */
 export function parseVerdict(text) {
   let last = null;
-  const texts = transcriptTexts(text);
+  const texts = agentTexts(text);
   for (const t of texts) {
     for (const m of t.matchAll(VERDICT_LINE)) last = m;
   }
@@ -71,7 +71,7 @@ export function parseVerdict(text) {
 
 /** The last non-empty line of a transcript's text, whatever its shape. */
 export function lastLine(raw) {
-  const lines = transcriptTexts(raw).join("\n").split("\n").map((l) => l.trim()).filter(Boolean);
+  const lines = agentTexts(raw).join("\n").split("\n").map((l) => l.trim()).filter(Boolean);
   return lines.at(-1) ?? "";
 }
 

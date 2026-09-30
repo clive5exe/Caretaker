@@ -39,7 +39,7 @@ import * as events from "./events.mjs";
 import { load as loadHarnessSettings, policyFlags, policyFor } from "./harness-config.mjs";
 import { RUN_ID, runArchived, stateDirFor } from "./runstore.mjs";
 import { requireSecrets } from "./secrets.mjs";
-import { transcriptTexts } from "./transcript.mjs";
+import { agentTexts } from "./harness.mjs";
 
 export class ReconcileError extends Error {
   constructor(code, message) {
@@ -58,12 +58,12 @@ const DIFF_BLOCK = /```diff[ \t]*\n([\s\S]*?)\n```/g;
  * carries the model's text as a string — a property of JSON, not of a vendor.
  */
 export function parseProposal(text) {
-  // Read as transcript.mjs reads any transcript, so a reply that OPENS with
+  // Read as the agent's own words (harness.mjs agentTexts), so a reply that OPENS with
   // the DIRECTION line inside a JSON transcript line is found (independent
   // review: it returned null for both the API adapter and claude's result).
   let dir = null;
   let diff = null;
-  for (const v of transcriptTexts(text)) {
+  for (const v of agentTexts(text)) {
     for (const m of v.matchAll(DIRECTION_LINE)) dir = m;
     for (const m of v.matchAll(DIFF_BLOCK)) diff = m[1];
   }

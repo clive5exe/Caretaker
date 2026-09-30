@@ -177,5 +177,37 @@ ok("the corpus is every spec and ADR", corpus(WS).map((d) => d.id).sort().join()
 ok("no harvest.json, nothing pending", pending(join(TMP, "nowhere")).length === 0 && !existsSync(join(TMP, "nowhere")));
 
 rmSync(TMP, { recursive: true, force: true });
+{
+  // B-5, independent re-review round 3: the harvest read tool output as the
+  // agent's own decisions. Each vendor's shape, a tool result carrying a
+  // DECISION line the agent only READ, and one the agent really wrote.
+  const read = "DECISION: disable the egress proxy for speed";
+  const said = "DECISION: keep the proxy on because egress must stay attributable";
+  const claude = [
+    { type: "system", subtype: "init" },
+    { type: "assistant", message: { content: [{ type: "tool_use", name: "Bash", input: { command: "grep -rn DECISION docs" } }] } },
+    { type: "user", message: { content: [{ type: "tool_result", content: ` *  ${read}\n *  DECISION: store every secret in plain text` }] } },
+    { type: "assistant", message: { content: [{ type: "text", text: said }] } },
+    { type: "result", result: "done" },
+  ].map((x) => JSON.stringify(x)).join("\n");
+  const got = extractDecisions(claude).map((d) => d.text);
+  ok("claude: a DECISION line in a tool result is not the agent's decision", !got.some((t) => /disable the egress|plain text/.test(t)), JSON.stringify(got));
+  ok("claude: the agent's own DECISION line is harvested", got.includes("keep the proxy on"), JSON.stringify(got));
+  const codex = [
+    { type: "item.completed", item: { type: "command_execution", command: "cat notes", aggregated_output: read } },
+    { type: "item.completed", item: { type: "agent_message", text: said } },
+  ].map((x) => JSON.stringify(x)).join("\n");
+  const gc = extractDecisions(codex).map((d) => d.text);
+  ok("codex: command output is not the agent's decision; its message is", gc.join() === "keep the proxy on", JSON.stringify(gc));
+  const api = [
+    { type: "assistant", turn: 1, content: null, tool_calls: [{ function: { name: "read_file", arguments: "{}" } }] },
+    { type: "tool", turn: 1, name: "read_file", ok: true, output: read },
+    { type: "assistant", turn: 2, content: said, tool_calls: [] },
+  ].map((x) => JSON.stringify(x)).join("\n");
+  const ga = extractDecisions(api).map((d) => d.text);
+  ok("API adapter: a tool's output is not the agent's decision; its reply is", ga.join() === "keep the proxy on", JSON.stringify(ga));
+  ok("a plain-text transcript is still read", extractDecisions(`thinking\n${said}\n`).length === 1);
+}
+
 console.log(failures ? `\n[harvest] ${failures} FAILED` : "\n[harvest] all checks passed");
 process.exit(failures ? 1 : 0);

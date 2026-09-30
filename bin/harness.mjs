@@ -554,6 +554,62 @@ export function finalTextOf(transcriptText) {
   return null;
 }
 
+/**
+ * The agent's OWN words from a transcript, in order: what the model wrote,
+ * never what a tool returned or a file held. Harvested decisions, a refuter's
+ * VERDICT and a reconciler's DIRECTION are the agent's statements; a line it
+ * merely READ is not (independent re-review, B-5: a Bash tool's output holding
+ * "DECISION: disable the egress proxy" was harvested as the agent's decision).
+ *
+ * Read here, in the harness, because it is vendor shape:
+ *   claude stream-json   "assistant" message text parts, and the "result"
+ *                        ("user" events carry tool results: skipped)
+ *   codex exec --json    an item of type "agent_message"
+ *                        (command_execution and other items: skipped)
+ *   openai-compatible    "assistant" content ("tool" and "approval": skipped)
+ * A JSON line of no known shape (a custom CLI's) is read as every string it
+ * holds, as before: its tool output cannot be told apart, and dropping it
+ * would lose what that agent said. Plain lines are kept, consecutive ones as
+ * one text.
+ */
+export function agentTexts(raw) {
+  const texts = [];
+  let plain = [];
+  const flush = () => {
+    if (plain.length) texts.push(plain.join("\n"));
+    plain = [];
+  };
+  const walk = (v) => {
+    if (typeof v === "string") texts.push(v);
+    else if (v && typeof v === "object") for (const x of Array.isArray(v) ? v : Object.values(v)) walk(x);
+  };
+  const NOT_THE_AGENT = new Set(["user", "system", "tool", "approval"]);
+  for (const line of String(raw ?? "").split("\n")) {
+    let v;
+    try {
+      v = JSON.parse(line);
+    } catch {
+      v = undefined;
+    }
+    if (!v || typeof v !== "object" || Array.isArray(v)) {
+      plain.push(line.replace(/\\n/g, "\n"));
+      continue;
+    }
+    flush();
+    if (v.type === "assistant") {
+      const c = v.message?.content ?? v.content;
+      if (typeof c === "string") texts.push(c);
+      else if (Array.isArray(c)) for (const part of c) if (part?.type === "text" && typeof part.text === "string") texts.push(part.text);
+    } else if (v.type === "result") {
+      if (typeof v.result === "string") texts.push(v.result);
+    } else if (v.item && typeof v.item === "object") {
+      if (v.item.type === "agent_message" && typeof v.item.text === "string") texts.push(v.item.text);
+    } else if (!NOT_THE_AGENT.has(v.type)) walk(v);
+  }
+  flush();
+  return texts;
+}
+
 /** Deep search for the first numeric value under any of `names`. */
 function findNumber(node, names, depth = 0) {
   if (node === null || typeof node !== "object" || depth > 6) return null;

@@ -10,7 +10,7 @@
  *
  * Run: node bin/loop.test.mjs
  */
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -105,6 +105,78 @@ const rows = (r) => (existsSync(join(r.ops, "runs.jsonl")) ? readFileSync(join(r
   ok("with no harvest.mjs, the pass still ends and says where decisions went", res.status === 0 && /no harvest\.mjs at .*decision lines kept here/.test(log), log);
   ok("…and the decision line is kept in loop.log, not lost with the output", /DECISION: retry the upload twice/.test(log));
   ok("…and the row still has the breakdown, with no run id", rows(r).at(-1)?.tokens === 2440 && rows(r).at(-1)?.run === undefined);
+}
+
+{
+  // B-5, independent re-review round 3: killing loop.sh ITSELF archived
+  // nothing and left the unredacted stream in /tmp. Now the stream is
+  // recorded as it arrives: the CLI and the recorder outlive loop.sh.
+  const r = repo("loop-killed");
+  const slow = join(r.root, "slow-claude");
+  const [first, ...rest] = events(false).split("\n");
+  writeFileSync(slow, `#!/bin/sh\ncat <<'JSON'\n${events(false).split("\n").slice(0, 2).join("\n")}\nJSON\nsleep 2\ncat <<'JSON'\n${events(false).split("\n").slice(2).join("\n")}\nJSON\n`);
+  chmodSync(slow, 0o755);
+  const outs = () => new Set(readdirSync("/tmp").filter((f) => f.startsWith("caretaker-loop-out.")));
+  const before = outs();
+  const child = spawn("bash", [join(r.ops, "loop.sh")], { env: { ...process.env, CLAUDE_BIN: slow, CLAUDE_CODE_OAUTH_TOKEN: OAUTH, CARETAKER_HARVEST: join(HERE, "harvest.mjs") }, stdio: "ignore" });
+  await new Promise((res) => setTimeout(res, 800));
+  child.kill("SIGKILL");
+  const runsDir = join(r.root, "state", "runs");
+  let rec = null;
+  for (let i = 0; i < 60 && !(rec && rec.state !== "recording"); i++) {
+    await new Promise((res) => setTimeout(res, 200));
+    const id = existsSync(runsDir) ? readdirSync(runsDir)[0] : null;
+    if (id && existsSync(join(runsDir, id, "run.json"))) rec = JSON.parse(readFileSync(join(runsDir, id, "run.json"), "utf8"));
+  }
+  const id = rec?.runId;
+  const dir = join(runsDir, id ?? "none");
+  ok("with loop.sh killed mid-pass, the recorder still finishes the run when the stream ends", rec?.state === "recorded", JSON.stringify(rec));
+  const h = existsSync(join(dir, "harvest.json")) ? JSON.parse(readFileSync(join(dir, "harvest.json"), "utf8")) : null;
+  ok("…and its decision is harvested for the Inbox", h?.decisions.some((d) => /retry the upload twice/.test(d.text)), JSON.stringify(h));
+  const archived = existsSync(join(dir, "transcript.log")) ? readFileSync(join(dir, "transcript.log"), "utf8") : "";
+  ok("…the archive is redacted, and holds the whole stream", archived.includes('"type":"result"') && !archived.includes(KEY) && !archived.includes(OAUTH));
+  ok("…and no raw stream is left in /tmp", [...outs()].filter((f) => !before.has(f)).length === 0);
+}
+{
+  // A recorder killed WITH the loop (kill -9 on the group) cannot finish the
+  // run itself; what streamed is archived, and the next pass finishes it.
+  const r = repo("recover");
+  const dir = join(r.root, "state", "runs", "r_deadbeef");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "run.json"), JSON.stringify({ runId: "r_deadbeef", state: "recording" }));
+  writeFileSync(join(dir, "transcript.log"), `${JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "DECISION: pin the proxy image by digest" }] } })}\n`);
+  loop(r, { CARETAKER_HARVEST: join(HERE, "harvest.mjs") });
+  const rec = JSON.parse(readFileSync(join(dir, "run.json"), "utf8"));
+  const h = existsSync(join(dir, "harvest.json")) ? JSON.parse(readFileSync(join(dir, "harvest.json"), "utf8")) : null;
+  ok("the next pass finishes a run its recorder was killed in, and says it was cut off", /^cut off/.test(rec.state) && h?.decisions.some((d) => /pin the proxy image/.test(d.text)), JSON.stringify({ rec, h }));
+}
+{
+  // B-2: which task the pass worked on, from the board.
+  const withBoard = (name, touch) => {
+    const r = repo(name);
+    mkdirSync(join(r.root, "docs"), { recursive: true });
+    const board = join(r.root, "docs", "board.json");
+    writeFileSync(board, JSON.stringify({ meta: {}, phases: [{ name: "p", tasks: [{ id: "T-1", status: "todo" }, { id: "T-2", status: "todo" }] }] }));
+    const cfg = JSON.parse(readFileSync(join(r.ops, "config.json"), "utf8"));
+    writeFileSync(join(r.ops, "config.json"), JSON.stringify({ ...cfg, board: "docs/board.json" }));
+    // The fake agent moves the named tasks, as `board.mjs start` would.
+    const edit = `node -e 'const f=process.argv[1];const d=JSON.parse(require("fs").readFileSync(f));for(const t of d.phases[0].tasks)if(${JSON.stringify(touch)}.includes(t.id))t.status="doing";require("fs").writeFileSync(f,JSON.stringify(d))' ${board}`;
+    writeFileSync(r.claude, `#!/bin/sh\n${edit}\ncat <<'JSON'\n${events(false)}\nJSON\n`);
+    loop(r, { CARETAKER_HARVEST: join(HERE, "harvest.mjs") });
+    return { row: rows(r).at(-1), log: readFileSync(join(r.ops, "loop.log"), "utf8") };
+  };
+  const one = withBoard("task-one", ["T-1"]);
+  ok("a pass that moved exactly one task puts its spend on that task", one.row?.task === "T-1" && one.row?.tokens === 2440, JSON.stringify(one.row));
+  const two = withBoard("task-two", ["T-1", "T-2"]);
+  ok("a pass that moved several puts it on none, and the log says which", two.row?.task === undefined && /no task: the pass changed several \(T-1 T-2\)/.test(two.log), `${JSON.stringify(two.row)}\n${two.log}`);
+  const none = withBoard("task-none", []);
+  ok("a pass that moved none says so", none.row?.task === undefined && /no task: the pass changed none/.test(none.log));
+}
+{
+  const r = repo("killed-msg", { killed: true });
+  loop(r, { CARETAKER_HARVEST: join(HERE, "harvest.mjs") });
+  const log = readFileSync(join(r.ops, "loop.log"), "utf8");
+  ok("a failed pass names its run once (it was printed twice)", /as run r_[0-9a-f]{8}\./.test(log), log);
 }
 
 rmSync(TMP, { recursive: true, force: true });

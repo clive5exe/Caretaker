@@ -36,19 +36,21 @@
  *   node bin/harvest.mjs discard --run r_… --id d1 --reason "…" [--by NAME]
  *   node bin/harvest.mjs pending [--config …]
  *   node bin/harvest.mjs import  --transcript FILE [--task T-1] [--cli claude] [--source loop.sh]
+ *   <cli> | node bin/harvest.mjs record --run r_… [--task T-1] [--cli claude] [--source loop.sh]
  *
  * `import` is for a run that did not go through runstore: the unattended loop
  * calls its CLI directly. Its output is archived as a run (redacted) and
  * harvested, and the run id is printed so the loop can log it on its row.
  */
 import { randomBytes } from "node:crypto";
+import { StringDecoder } from "node:string_decoder";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { userInfo } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { makeRedactor } from "./secrets.mjs";
 import { stateDirFor } from "./statedir.mjs";
-import { transcriptTexts } from "./transcript.mjs";
+import { agentTexts } from "./harness.mjs";
 
 export class HarvestError extends Error {
   constructor(code, message) {
@@ -67,7 +69,7 @@ const BECAUSE = /\s+(?:—|--|-|,)?\s*because\s+/i;
 export function extractDecisions(raw) {
   const out = [];
   const seen = new Set();
-  for (const t of transcriptTexts(raw)) {
+  for (const t of agentTexts(raw)) {
     for (const m of t.matchAll(DECISION_LINE)) {
       const line = m[1].replace(/\\"/g, '"').replace(/["}\]]+$/, "").trim();
       if (!line || /^<.*>$/.test(line)) continue; // the instruction's own placeholder
@@ -225,6 +227,106 @@ export function importRun({ root, stateDir, transcript, task = null, cli = null,
   return { runId, runDir, ...harvest({ root, runDir, specsDir }) };
 }
 
+/**
+ * B-5: record a run AS IT PROCEEDS. The loop pipes its CLI's stream in; each
+ * line is redacted and appended to the archive the moment it arrives, and any
+ * decision in it goes to decisions.live.jsonl. Nothing raw is ever written.
+ * The loop used to keep the whole stream in /tmp and archive it at the end,
+ * so killing loop.sh itself archived nothing and left the unredacted stream
+ * behind (independent re-review).
+ *
+ * Ends the run when the stream ends, or on SIGTERM/SIGINT/SIGHUP. A SIGKILL
+ * cannot be caught: what streamed until then is already archived, and the
+ * next `record` finishes any run left "recording" (recover).
+ */
+export async function recordRun({ root, stateDir, runId, input, task = null, cli = null, source = null, env = process.env, specsDir = "specs", signals = true }) {
+  if (!RUN_ID.test(String(runId))) throw new HarvestError("BAD_RUN", `run id ${JSON.stringify(runId)} is not r_ plus eight hex digits`);
+  recover({ root, stateDir, specsDir });
+  const runDir = join(stateDir, "runs", runId);
+  if (existsSync(runDir)) throw new HarvestError("EXISTS", `run ${runId} already exists`);
+  mkdirSync(runDir, { recursive: true, mode: 0o700 });
+  const held = Object.fromEntries(LOOP_CREDENTIALS.filter((k) => String(env[k] ?? "").length >= 8).map((k) => [k, env[k]]));
+  const redact = makeRedactor(held);
+  const rec = {
+    runId, task, parent: null, adapter: cli ? "cli" : null, cli, source, state: "recording",
+    notRecorded: "diff, verdict and egress: this run did not go through runstore, so only its output was archived",
+    startedAt: new Date().toISOString(),
+  };
+  const writeRec = () => writeFileSync(join(runDir, "run.json"), `${redact(JSON.stringify(rec, null, 2))}\n`);
+  writeRec();
+  const out = join(runDir, "transcript.log");
+  writeFileSync(out, "");
+  const live = liveRecorder(runDir);
+  let bytes = 0;
+  let lines = 0;
+  const take = (line) => {
+    const clean = line ? redact(line) : line;
+    appendFileSync(out, `${clean}\n`);
+    bytes += Buffer.byteLength(line) + 1;
+    lines += 1;
+    live(clean);
+  };
+  let done = false;
+  let pendingLine = "";
+  const finish = (state) => {
+    if (done) return null;
+    done = true;
+    Object.assign(rec, { state, endedAt: new Date().toISOString(), transcript: { bytes, lines } });
+    writeRec();
+    return harvest({ root, runDir, specsDir });
+  };
+  const handlers = [];
+  if (signals) {
+    for (const sig of ["SIGTERM", "SIGINT", "SIGHUP"]) {
+      const h = () => {
+        if (pendingLine) take(pendingLine);
+        finish(`stopped by ${sig}`);
+        process.exit(1);
+      };
+      process.on(sig, h);
+      handlers.push([sig, h]);
+    }
+  }
+  const decoder = new StringDecoder("utf8");
+  for await (const chunk of input) {
+    const text = pendingLine + decoder.write(chunk);
+    const parts = text.split("\n");
+    pendingLine = parts.pop();
+    for (const l of parts) take(l);
+  }
+  pendingLine += decoder.end();
+  if (pendingLine) take(pendingLine);
+  pendingLine = "";
+  const h = finish("recorded");
+  for (const [sig, fn] of handlers) process.off(sig, fn);
+  return { runId, runDir, ...h };
+}
+
+/** Finish runs a killed recorder left "recording": harvest what they archived, and say they were cut off. */
+export function recover({ root, stateDir, specsDir = "specs" }) {
+  const runs = join(stateDir, "runs");
+  if (!existsSync(runs)) return [];
+  const out = [];
+  for (const id of readdirSync(runs).filter((r) => RUN_ID.test(r))) {
+    const dir = join(runs, id);
+    const p = join(dir, "run.json");
+    if (!existsSync(p)) continue;
+    let rec;
+    try {
+      rec = JSON.parse(readFileSync(p, "utf8"));
+    } catch {
+      continue;
+    }
+    if (rec.state !== "recording") continue;
+    rec.state = "cut off: the recorder was killed, so this holds what streamed until then";
+    rec.recoveredAt = new Date().toISOString();
+    writeFileSync(p, `${JSON.stringify(rec, null, 2)}\n`);
+    harvest({ root, runDir: dir, specsDir });
+    out.push(id);
+  }
+  return out;
+}
+
 const decisionsLog = (runDir) => join(runDir, "harvest-decisions.jsonl");
 
 /** Pending decisions across every archived run: declared, recorded nowhere, not yet kept or discarded. */
@@ -326,6 +428,14 @@ if (isEntry) {
       console.error(`[harvest] ${h.runId}: ${h.decisions.length} decision(s), ${h.decisions.filter((d) => !d.recordedIn).length} recorded nowhere`);
       process.exit(0);
     }
+    if (cmd === "record") {
+      // Prints the run's archive directory when the stream ends, so the loop
+      // can read its (redacted) transcript afterwards without keeping its own.
+      const h = await recordRun({ root, stateDir, runId: f.run, input: process.stdin, task: f.task ?? null, cli: f.cli ?? null, source: f.source ?? null, specsDir: f.specs ?? "specs" });
+      console.log(h.runDir);
+      console.error(`[harvest] ${h.runId}: recorded, ${h.decisions.length} decision(s), ${h.decisions.filter((d) => !d.recordedIn).length} recorded nowhere`);
+      process.exit(0);
+    }
     if (cmd === "keep" || cmd === "discard") {
       const r = decide({ root, stateDir, run: f.run, id: f.id, decision: cmd, by: f.by, reason: f.reason });
       console.log(`[harvest] ${f.run} ${f.id} ${cmd === "keep" ? `kept as ${r.adr} (draft)` : "discarded"} by ${r.by}`);
@@ -337,7 +447,7 @@ if (isEntry) {
       console.error(`[harvest] ${p.length} pending`);
       process.exit(0);
     }
-    throw new HarvestError("USAGE", "usage: harvest.mjs run|keep|discard|pending|import --run r_… [--id dN] [--reason …] [--transcript FILE]");
+    throw new HarvestError("USAGE", "usage: harvest.mjs run|keep|discard|pending|import|record --run r_… [--id dN] [--reason …] [--transcript FILE]");
   } catch (e) {
     console.error(`[harvest] ${e.name}: ${e.message}`);
     process.exit(2);
