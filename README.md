@@ -72,6 +72,36 @@ example Claude builds and ChatGPT reviews:
 { "default": { "cli": "claude" }, "roles": { "refuter": { "cli": "codex" } } }
 ```
 
+**Control the tools.** In the same file, per role or for all of them:
+
+```json
+{
+  "default": {
+    "cli": "claude",
+    "tools": {
+      "claude": { "allow": ["Read", "Edit", "Bash(npm test:*)"], "deny": ["WebFetch"],
+                  "permissionMode": "acceptEdits" }
+    }
+  }
+}
+```
+
+- **`claude`:** becomes the Claude CLI's `--allowedTools`,
+  `--disallowedTools` and `--permission-mode`.
+  - `bypassPermissions` is only allowed inside the sandbox.
+  - On your own machine it is refused.
+- **When Caretaker runs the tool loop itself** (the API adapter):
+  - `enable` picks which built-in tools the AI gets: `list_files`,
+    `read_file`, `write_file`, `run`.
+  - `custom` adds your own named commands. Their arguments arrive as
+    variables, never as shell text.
+  - `approve` makes Caretaker stop and ask you before each call. Your options
+    are `y`, `a` (yes for the rest of the run), or `n` plus a reason, which
+    is handed to the AI.
+- **A setting the run can't use is named in the run's warnings,** never
+  silently dropped.
+- **Where it's described:** `bin/tools.mjs`.
+
 **4. Run an agent in the sandbox:**
 
 ```sh

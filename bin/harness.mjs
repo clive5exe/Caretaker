@@ -83,6 +83,7 @@ import { readDevcontainer, toLimits } from "./spec.mjs";
 import { openaiCompatibleAdapter } from "./openai-compatible.mjs";
 import { EnvironmentError, imageId, resolveImage } from "./environment.mjs";
 import { within } from "./paths.mjs";
+import { ToolsError, checkTools, claudeArgs, unreachable } from "./tools.mjs";
 
 /**
  * The seam, as data. Exported so a test can assert the shape rather than trust
@@ -146,6 +147,13 @@ const DEFAULTS = {
   // `skills.mjs`. Mounted read-only for a CLI that reads skills, offered as a
   // tool by the openai-compatible adapter. Never copied into the workspace.
   skillsDir: null,
+  // Tool control (bin/tools.mjs): which tools, your own, your yes before a
+  // call, and the claude CLI's tool flags. null is the adapter's defaults.
+  tools: null,
+  // A library caller's function(name, args) -> { allow, always?, why? } that
+  // answers `tools.approve` instead of the terminal. A function, so it is
+  // never in a settings file and never in a recorded policy (JSON drops it).
+  approver: null,
 };
 
 /**
@@ -195,6 +203,17 @@ export function normalisePolicy(policy = {}) {
   }
   if (p.task !== null && (typeof p.task !== "string" || !p.task)) {
     throw new HarnessError(`task must be a non-empty string or null, got ${JSON.stringify(p.task)}`);
+  }
+  if (p.tools !== null) {
+    try {
+      checkTools("tools", p.tools);
+    } catch (e) {
+      if (e instanceof ToolsError) throw new HarnessError(e.message, { code: e.code });
+      throw e;
+    }
+  }
+  if (p.approver !== null && typeof p.approver !== "function") {
+    throw new HarnessError("approver must be a function or null");
   }
   return p;
 }
@@ -806,6 +825,21 @@ export function skillsMount(policy, preset, warnings) {
   return ["-v", `${resolve(policy.skillsDir)}:${preset.skillsPath}:ro,Z`];
 }
 
+/**
+ * The CLI flags and environment `tools.claude` asks for. bypassPermissions
+ * lets claude act without asking: in the container the container is the
+ * boundary, and the CLI needs IS_SANDBOX=1 to accept the mode as root; on the
+ * HOST there is no boundary at all, so it is refused.
+ */
+export function cliToolSetup(policy, cliName) {
+  if (cliName !== "claude") return { toolArgs: [], toolEnv: {} };
+  const bypass = policy.tools?.claude?.permissionMode === "bypassPermissions";
+  if (bypass && policy.sandbox === "none") {
+    throw new HarnessError('tools.claude.permissionMode "bypassPermissions" is refused with sandbox:none: on the host it would let the agent act on this machine without asking. Use it in the container, or choose acceptEdits');
+  }
+  return { toolArgs: claudeArgs(policy.tools), toolEnv: bypass ? { IS_SANDBOX: "1" } : {} };
+}
+
 async function cliAdapter({ workspace, prompt, policy, paths, warnings }) {
   const preset =
     typeof policy.cli === "string"
@@ -819,11 +853,17 @@ async function cliAdapter({ workspace, prompt, policy, paths, warnings }) {
       { cli: policy.cli },
     );
   }
+  // tools.claude reaches the built-in claude preset only; anything else in
+  // `tools` is named as not applied rather than silently dropped.
+  const cliName = cliLabel(policy.cli);
+  warnings.push(...unreachable(policy.tools, "cli", cliName));
+  const { toolArgs, toolEnv } = cliToolSetup(policy, cliName);
   const cliArgv = [
     ...(typeof preset.argv === "function" ? preset.argv({ model: policy.model }) : preset.argv),
     ...policy.extraCliArgs,
+    ...toolArgs,
   ];
-  const env = { ...(preset.env ?? {}), ...policy.env };
+  const env = { ...(preset.env ?? {}), ...toolEnv, ...policy.env };
 
   const containerName = `caretaker-${policy.runId}`;
   let file;
@@ -955,7 +995,10 @@ async function sdkAdapter() {
 export const ADAPTERS = {
   cli: cliAdapter,
   sdk: sdkAdapter,
-  "openai-compatible": (args) => openaiCompatibleAdapter({ ...args, HarnessError, imageFor }),
+  "openai-compatible": (args) => {
+    args.warnings.push(...unreachable(args.policy.tools, "openai-compatible", null));
+    return openaiCompatibleAdapter({ ...args, HarnessError, imageFor });
+  },
 };
 
 /** Which adapters exist, for an error message and for the CLI. */

@@ -25,9 +25,11 @@
  *                    held to nothing at all. The run's warning says exactly
  *                    that; none is not a sandbox.
  *
- * FOUR TOOLS, deliberately few: list_files, read_file, write_file, run. A
- * small model with a short context does worse with a large menu, and every
- * extra tool is one more thing it can call wrongly.
+ * FOUR TOOLS BY DEFAULT, deliberately few: list_files, read_file, write_file,
+ * run. A small model with a short context does worse with a large menu, and
+ * every extra tool is one more thing it can call wrongly. Which of them the
+ * model gets, tools of your own, and a yes from you before a call runs are
+ * all `policy.tools` (bin/tools.mjs).
  *
  * WHAT IT SCORES, because vendors.md names these as the real discriminator
  * and a benchmark score is not: `verdict.toolUse` counts malformed tool calls,
@@ -47,6 +49,7 @@ import { within } from "./paths.mjs";
 import { buildArgs, checkLimits, delegatedControllers } from "./sandbox.mjs";
 import { readDevcontainer, toLimits } from "./spec.mjs";
 import { staged } from "./skills.mjs";
+import { forModel, menu, needsApproval, terminalApprover } from "./tools.mjs";
 
 const OUTPUT_CAP = 20_000;
 const CMD_TIMEOUT_MS = 120_000;
@@ -119,7 +122,7 @@ export function confine(root, p) {
  * command ends or runs out of time, so a `sleep 999 &` it left behind does not
  * hold the pipes open or outlive the call.
  */
-export function runBounded(file, args, { cwd, input, timeoutMs }) {
+export function runBounded(file, args, { cwd, input, timeoutMs, env }) {
   return new Promise((resolve) => {
     let stdout = "";
     let stderr = "";
@@ -139,7 +142,7 @@ export function runBounded(file, args, { cwd, input, timeoutMs }) {
       resolve({ status, signal, stdout, stderr, timedOut });
     };
     try {
-      child = spawn(file, args, { cwd, detached: true, stdio: ["pipe", "pipe", "pipe"] });
+      child = spawn(file, args, { cwd, detached: true, stdio: ["pipe", "pipe", "pipe"], ...(env ? { env: { ...process.env, ...env } } : {}) });
     } catch (e) {
       return resolve({ status: null, signal: null, stdout: "", stderr: String(e.message), timedOut: false });
     }
@@ -207,8 +210,8 @@ export function hostExecutor(ws) {
       writeFileSync(abs, String(content));
       return { ok: true, output: `wrote ${Buffer.byteLength(String(content))} bytes to ${confine(ws, p)}` };
     },
-    async run(command, { timeoutMs = CMD_TIMEOUT_MS } = {}) {
-      const r = await runBounded("sh", ["-c", String(command)], { cwd: ws, timeoutMs });
+    async run(command, { timeoutMs = CMD_TIMEOUT_MS, vars } = {}) {
+      const r = await runBounded("sh", ["-c", String(command)], { cwd: ws, timeoutMs, env: vars });
       return { ok: r.status === 0, output: cap(`exit ${r.status ?? r.signal}\n${r.stdout}${r.stderr}${timedOutNote(r)}`) };
     },
     close() {
@@ -224,7 +227,10 @@ export function hostExecutor(ws) {
  */
 export function containerExecutor({ runtime, name }) {
   let limit = CMD_TIMEOUT_MS;
-  const exec = (args, input) => runBounded(runtime, ["exec", ...(input !== undefined ? ["-i"] : []), "-w", "/work", name, ...args], { input, timeoutMs: limit });
+  // `vars` become -e NAME=value: a custom tool's arguments, as variables and
+  // never as command text (bin/tools.mjs).
+  const exec = (args, input, vars = {}) =>
+    runBounded(runtime, ["exec", ...(input !== undefined ? ["-i"] : []), ...Object.entries(vars).flatMap(([k, v]) => ["-e", `${k}=${v}`]), "-w", "/work", name, ...args], { input, timeoutMs: limit });
   const inRepo = (p) => confine("/work", p);
   return {
     setLimit(ms) {
@@ -248,8 +254,8 @@ export function containerExecutor({ runtime, name }) {
       const r = await exec(["sh", "-c", 'mkdir -p "$(dirname "$1")" && cat > "$1"', "sh", rel], String(content));
       return { ok: r.status === 0, output: r.status === 0 ? `wrote ${Buffer.byteLength(String(content))} bytes to ${rel}` : r.stderr.trim() };
     },
-    async run(command) {
-      const r = await exec(["sh", "-c", String(command)]);
+    async run(command, { vars } = {}) {
+      const r = await exec(["sh", "-c", String(command)], undefined, vars);
       return { ok: r.status === 0, output: cap(`exit ${r.status ?? r.signal}\n${r.stdout}${r.stderr}${timedOutNote(r)}`) };
     },
     close() {
@@ -261,7 +267,7 @@ export function containerExecutor({ runtime, name }) {
 
 /* ------------------------------------------------------------------ loop */
 
-async function dispatch(ex, call, offered, skill, timeoutMs) {
+async function dispatch(ex, call, offered, skill, timeLeft, approval) {
   const name = call?.function?.name;
   const names = new Set(offered.map((t) => t.name));
   if (!names.has(name)) return { invented: true, ok: false, output: `error: there is no tool named ${JSON.stringify(name)}. The tools are: ${[...names].join(", ")}` };
@@ -275,8 +281,24 @@ async function dispatch(ex, call, offered, skill, timeoutMs) {
   const spec = offered.find((t) => t.name === name);
   const missing = spec.parameters.required.filter((k) => typeof args[k] !== "string");
   if (missing.length) return { malformed: true, ok: false, output: `error: ${name} needs ${missing.join(", ")} as string(s)` };
+  // Asked AFTER the call is known to be well formed, so the operator is only
+  // ever asked about a call that would really run.
+  if (approval) {
+    const verdict = await approval(name, args);
+    if (!verdict.allow) return { refused: true, ok: false, output: `refused by the operator: this call was not run.${verdict.why ? ` Their reason: ${verdict.why}` : ""}` };
+  }
   if (name === "read_skill") return skill(args.name, args.file);
+  // Measured after the operator answered: waiting for a yes spends the run's time.
+  const timeoutMs = timeLeft();
+  if (timeoutMs <= 0) return { ok: false, output: "error: the run's time ran out before this call could run" };
   ex.setLimit?.(timeoutMs);
+  if (spec.kind === "custom") {
+    // Only the tool's declared arguments, and only strings, become variables.
+    const bad = spec.argNames.filter((a) => args[a] !== undefined && typeof args[a] !== "string");
+    if (bad.length) return { malformed: true, ok: false, output: `error: ${name} takes ${bad.join(", ")} as string(s)` };
+    const vars = Object.fromEntries(spec.argNames.filter((a) => typeof args[a] === "string").map((a) => [a, args[a]]));
+    return ex.run(spec.command, { timeoutMs, vars });
+  }
   if (name === "list_files") return ex.list(args.path);
   if (name === "read_file") return ex.read(args.path);
   if (name === "write_file") return ex.write(args.path, args.content);
@@ -363,14 +385,30 @@ export async function openaiCompatibleAdapter({ workspace, prompt, policy, paths
   const err = (line) => appendFileSync(paths.stderr, `${line}\n`);
   const skills = policy.skillsDir ? staged(policy.skillsDir) : [];
   const skillNames = new Set(skills.map((s) => s.name));
-  const offered = skills.length ? [...TOOLS, READ_SKILL] : TOOLS;
+  const offered = [...menu(policy.tools, TOOLS), ...(skills.length ? [{ ...READ_SKILL, kind: "builtin" }] : [])];
   const skill = (name, file) => readSkill(policy.skillsDir, skillNames, name, file);
   const messages = [
     { role: "system", content: systemPrompt(Boolean(container), skills) },
     { role: "user", content: prompt },
   ];
-  const tools = offered.map((t) => ({ type: "function", function: t }));
-  const toolUse = { calls: 0, malformed: 0, invented: 0, stopped: false, turns: 0 };
+  const tools = offered.map((t) => ({ type: "function", function: forModel(t) }));
+  const toolUse = { calls: 0, malformed: 0, invented: 0, refused: 0, stopped: false, turns: 0 };
+  // The operator's yes (bin/tools.mjs). A library caller may pass its own
+  // `policy.approver`, which is how a UI answers instead of a terminal.
+  const ask = policy.approver ?? terminalApprover;
+  const always = new Set();
+  const approval = async (name, args) => {
+    if (!needsApproval(policy.tools, name) || always.has(name)) return { allow: true };
+    let v;
+    try {
+      v = await ask(name, args);
+    } catch (e) {
+      v = { allow: false, why: `the approval could not be asked (${e.message}), so the call was refused`, via: "error" };
+    }
+    if (v?.allow && v.always) always.add(name);
+    log({ type: "approval", turn: toolUse.turns, name, allow: Boolean(v?.allow), ...(v?.always ? { always: true } : {}), why: v?.why ?? null, via: v?.via ?? "approver" });
+    return { allow: Boolean(v?.allow), why: v?.why ?? null };
+  };
   const usage = { prompt_tokens: 0, completion_tokens: 0, cached_input_tokens: 0 };
   let usageSeen = false;
   const startedAt = Date.now();
@@ -399,7 +437,9 @@ export async function openaiCompatibleAdapter({ workspace, prompt, policy, paths
         res = await fetch(url, {
           method: "POST",
           headers,
-          body: JSON.stringify({ model: policy.model, messages, tools, tool_choice: "auto" }),
+          // No tools at all is a setting, not a mistake: some servers refuse an
+          // empty list, so an empty menu is sent as no menu.
+          body: JSON.stringify({ model: policy.model, messages, ...(tools.length ? { tools, tool_choice: "auto" } : {}) }),
           signal: AbortSignal.timeout(remaining),
         });
         // Inside the try, under the same deadline: a server that sends its
@@ -471,12 +511,13 @@ export async function openaiCompatibleAdapter({ workspace, prompt, policy, paths
         try {
           // Each tool gets what is left of the run, never more: the ceiling
           // holds inside a turn, not only between turns.
-          out = await dispatch(ex, call, offered, skill, Math.min(CMD_TIMEOUT_MS, deadline - Date.now()));
+          out = await dispatch(ex, call, offered, skill, () => Math.min(CMD_TIMEOUT_MS, deadline - Date.now()), approval);
         } catch (e) {
           out = { ok: false, output: `error: the ${call?.function?.name ?? "tool"} call failed: ${e.message}` };
         }
         if (out.malformed) toolUse.malformed += 1;
         if (out.invented) toolUse.invented += 1;
+        if (out.refused) toolUse.refused += 1;
         log({ type: "tool", turn: toolUse.turns, name: call?.function?.name ?? null, ok: out.ok, output: out.output });
         messages.push({ role: "tool", tool_call_id: call.id, content: out.output });
       }

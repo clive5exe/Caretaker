@@ -97,7 +97,7 @@ const policy = (model, over = {}) => ({ adapter: "openai-compatible", endpoint: 
   ok("the model's write landed in the workspace", readFileSync(join(ws, "src", "hello.js"), "utf8") === "export const hi = 1;\n");
   ok("…and the harness MEASURED it, as for any vendor", out.diff.measured && out.diff.files.map((f) => f.path).join() === "src/hello.js");
   ok("tool results went back to the model", lastToolReply("normal").some((c) => c.includes("hello.js")) && lastToolReply("normal").some((c) => /^exit 0/.test(c)));
-  ok("tool use is scored: calls, nothing malformed or invented, and it stopped", JSON.stringify(out.verdict.toolUse) === JSON.stringify({ calls: 3, malformed: 0, invented: 0, stopped: true, turns: 3 }), JSON.stringify(out.verdict.toolUse));
+  ok("tool use is scored: calls, nothing malformed, invented or refused, and it stopped", JSON.stringify(out.verdict.toolUse) === JSON.stringify({ calls: 3, malformed: 0, invented: 0, refused: 0, stopped: true, turns: 3 }), JSON.stringify(out.verdict.toolUse));
   const t = out.cost.tokens;
   ok("cost sums every turn, with the cached part split out of input", t.in === 360 && t.cached === 90 && t.out === 35 && t.total === 485 && out.cost.turns === 3, JSON.stringify(out.cost));
   ok("the four tools were offered, and only those", JSON.stringify(seen.find((s) => s.model === "normal").tools.map((x) => x.function.name)) === '["list_files","read_file","write_file","run"]');

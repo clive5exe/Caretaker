@@ -78,6 +78,18 @@
           "ac": "one review and one triage run end to end on GitHub Actions with the owner's CLAUDE_CODE_OAUTH_TOKEN, in the podman sandbox, and their transcripts archived",
           "note": "Needs the owner: claude setup-token, then the token as a repository secret.",
           "blockedReason": "needs the owner's subscription token as a repository secret"
+        },
+        {
+          "id": "F-7",
+          "title": "Control the harness's tools: which, your own, and your yes",
+          "owner": "backend",
+          "est": "1h",
+          "status": "doing",
+          "deps": [
+            "H-10"
+          ],
+          "ac": "harness settings `tools` choose the built-in tools the API adapter offers, add named custom tools whose arguments reach the command only as environment variables, and stop for the operator's y/a/n before listed calls (n's reason goes to the model); for the claude CLI they become --allowedTools, --disallowedTools and --permission-mode, bypassPermissions only in the container (with IS_SANDBOX=1) and refused on the host; any part a run cannot use is named in its warnings",
+          "note": "bin/tools.mjs, bin/tools.test.mjs (fake model server, fake claude, a real pty for the terminal prompt; mutations each fail it). Controls what the agent may do: needs security. Gate verdicts not recorded."
         }
       ]
     },
