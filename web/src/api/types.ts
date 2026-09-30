@@ -396,3 +396,10 @@ export interface EventsResponse {
 export type CommandResult =
   | { ok: true; task: WorkItem }
   | { ok: false; status: number; refused?: { missing: string[]; docsOnly: boolean }; error?: string };
+
+/** A live run's steering channel (bin/steer.mjs): its unanswered questions and the messages sent to it. */
+export interface RunControl {
+  live: boolean;
+  pending: { n: number; name: string; args: Record<string, unknown>; t: string }[];
+  messages: { t: string; text: string; by: string | null }[];
+}

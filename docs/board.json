@@ -90,6 +90,19 @@
           ],
           "ac": "harness settings `tools` choose the built-in tools the API adapter offers, add named custom tools whose arguments reach the command only as environment variables, and stop for the operator's y/a/n before listed calls (n's reason goes to the model); for the claude CLI they become --allowedTools, --disallowedTools and --permission-mode, bypassPermissions only in the container (with IS_SANDBOX=1) and refused on the host; any part a run cannot use is named in its warnings",
           "note": "bin/tools.mjs, bin/tools.test.mjs (fake model server, fake claude, a real pty for the terminal prompt; mutations each fail it). Controls what the agent may do: needs security. Gate verdicts not recorded."
+        },
+        {
+          "id": "F-8",
+          "title": "Steer a live run from the web: answer its questions, message it",
+          "owner": "backend",
+          "est": "2h",
+          "status": "doing",
+          "deps": [
+            "F-7",
+            "W-4"
+          ],
+          "ac": "a run started with runstore --steer web on the API adapter asks its tools.approve questions through <run>/control/ and reads operator messages there before each turn; GET /runs/:id/control shows them, POST /runs/:id/answer and /steer write them under the existing POST protections and refuse a finished run, an unknown or answered question; the Run detail page shows the panel only while the run listens; an unanswered question gives up at the run's time limit; the operator's words are never harvested as the agent's; a CLI run says steering does not reach it",
+          "note": "bin/steer.mjs, bin/steer.test.mjs (fake model and a stand-in operator through the files), serve.test steering block, and a real-browser check (Refuse with a reason and a message, both reached the run's files, no page errors). A new write endpoint that steers an agent: needs security. Gate verdicts not recorded."
         }
       ]
     },

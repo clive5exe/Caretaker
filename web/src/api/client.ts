@@ -61,3 +61,22 @@ export async function runCommand(task: string, cmd: string, args: Record<string,
   if (r.ok && body.task) return { ok: true, task: body.task };
   return { ok: false, status: r.status, refused: body.refused, error: body.error ?? (body.refused ? undefined : `${r.status} ${r.statusText}`) };
 }
+
+/**
+ * Steer a live run: answer its question, or send it a message. The server
+ * writes it into the run's control directory; the run reads it (bin/steer.mjs).
+ */
+export async function steerRun(
+  id: string,
+  what: "answer" | "steer",
+  body: { n: number; allow: boolean; always?: boolean; why?: string } | { text: string },
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const r = await fetch(`${API}/runs/${encodeURIComponent(id)}/${what}`, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json", "X-Caretaker": "1", Accept: "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (r.ok) return { ok: true };
+  return { ok: false, error: (await errorOf(r)).message };
+}

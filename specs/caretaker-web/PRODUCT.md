@@ -1,7 +1,7 @@
 ---
 title: Caretaker Web v1 — product
 status: accepted
-updated: 2026-09-29
+updated: 2026-09-30
 ---
 
 ```spec
@@ -271,6 +271,7 @@ Everything Caretaker measured about one run. Each section shows its source, and
 | gate results | drift gate events recorded against this run; the work item's gate verdicts, shown as *task-level with their dates*, never attributed to this run unless the record says so |
 | egress | each connection the run's proxy decided: `allowed`, `refused` (with its reason) or `error` (with why), as `bin/egress.mjs` writes them. With no log, the reason, from the run's archived record: sandbox none (the host's network, uncontrolled), a proxy that saw no connection, no network at all, another network (not recorded), or no record. For the API adapter, also that its model calls left from this machine, and to which host |
 | artifacts | patch, transcript, stderr, drift report, PR link |
+| steer | while the run is live and listening: each question the agent is waiting on (the tool and its arguments) with **Allow**, **Allow for the rest of this run** and **Refuse**, a reason that goes to the agent with a refusal, and a box to **send the agent a message** it reads before its next turn; the messages sent so far. Hidden for a run that never listened. Reaches only a run started with `--steer web` on the API adapter: a CLI answers its own prompts, and the page says so |
 
 What is available today and what waits on prerequisite core work is spelled
 out in TECH.md §Run detail. Until then, those sections say *not recorded*.

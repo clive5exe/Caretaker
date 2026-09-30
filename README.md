@@ -131,11 +131,18 @@ node bin/review.mjs 12 --task T-1 --sandbox none   # uses your own claude login
   reviewer gate.
 - **Posting:** nothing goes to GitHub unless you add `--post`.
 
-**6. Watch it:**
+**6. Watch it, and steer it:**
 
 ```sh
 node bin/serve.mjs ops/caretaker/config.json   # prints a local URL
 ```
+
+- **Steering a run** only works for a run started with
+  `runstore.mjs run --steer web` on the API adapter.
+- **What you can do on its Run page:**
+  - answer the agent's approval questions: allow, or refuse with a reason
+    that goes to the AI;
+  - send it a message it reads before its next turn.
 
 ## The rules the board enforces
 

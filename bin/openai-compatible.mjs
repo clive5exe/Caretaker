@@ -401,7 +401,11 @@ export async function openaiCompatibleAdapter({ workspace, prompt, policy, paths
     if (!needsApproval(policy.tools, name) || always.has(name)) return { allow: true };
     let v;
     try {
-      v = await ask(name, args);
+      // An answer that never comes must not outlast the run.
+      let timer;
+      const out = new Promise((r) => (timer = setTimeout(() => r({ allow: false, why: "the run's time ran out waiting for an answer", via: "timeout" }), Math.max(0, deadline - Date.now()))));
+      v = await Promise.race([Promise.resolve(ask(name, args)), out]);
+      clearTimeout(timer);
     } catch (e) {
       v = { allow: false, why: `the approval could not be asked (${e.message}), so the call was refused`, via: "error" };
     }
@@ -431,6 +435,12 @@ export async function openaiCompatibleAdapter({ workspace, prompt, policy, paths
         break;
       }
       toolUse.turns += 1;
+      // The operator's messages, sent mid-run (bin/steer.mjs), reach the
+      // model before this turn, marked as the operator's.
+      for (const m of policy.steer?.() ?? []) {
+        messages.push({ role: "user", content: `[operator, mid-run] ${m.text}` });
+        log({ type: "steer", turn: toolUse.turns, text: m.text, by: m.by ?? null });
+      }
       let res;
       let bodyText;
       try {

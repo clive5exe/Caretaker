@@ -515,6 +515,39 @@ const line = (n) => `${JSON.stringify({ t: `2026-09-29T10:00:0${n}Z`, kind: "sys
   await hs.close();
 }
 
+{
+  // Steering a live run from the web (bin/steer.mjs): a run directory with no
+  // run.json yet is live; one question pending.
+  const live = join(state, "runs", "r_0000000c");
+  mkdirSync(join(live, "control"), { recursive: true });
+  writeFileSync(join(live, "control", "ask-1.json"), JSON.stringify({ n: 1, name: "run", args: { command: "npm publish --token sk-ant-api03-" + "k".repeat(40) }, t: "2026-09-30T00:00:00Z" }));
+  let r = await req("GET", "/api/v1/runs/r_0000000c/control", { headers: {} });
+  ok("steering: no cookie, no control (401)", r.status === 401);
+  r = await get("/api/v1/runs/r_0000000c/control");
+  ok("steering: a live run's pending question is served", r.status === 200 && r.json?.live === true && r.json?.pending?.[0]?.name === "run", JSON.stringify(r.json));
+  ok("…with key-shaped text redacted again on the way out", !JSON.stringify(r.json).includes("k".repeat(40)));
+  r = await post("/api/v1/runs/r_0000000c/answer", { n: 1, allow: false, why: "not from here" }, { Cookie: cookie, Origin: "http://evil.example", "Content-Type": "application/json", "X-Caretaker": "1" });
+  ok("steering: a cross-origin answer is refused", r.status === 403 && !existsSync(join(live, "control", "answer-1.json")));
+  r = await post("/api/v1/runs/r_0000000c/answer", { n: 1, allow: false, why: "not from here" }, { Cookie: cookie, Origin: ORIGIN, "Content-Type": "application/json" });
+  ok("steering: an answer without X-Caretaker is refused", r.status === 403 && !existsSync(join(live, "control", "answer-1.json")));
+  r = await post("/api/v1/runs/r_0000000c/answer", { n: 1, allow: false, why: "not from here" });
+  const written = existsSync(join(live, "control", "answer-1.json")) ? JSON.parse(readFileSync(join(live, "control", "answer-1.json"), "utf8")) : null;
+  ok("steering: the answer is written for the run to read, with who answered", r.status === 200 && written?.allow === false && written.why === "not from here" && typeof written.by === "string", JSON.stringify(written));
+  r = await post("/api/v1/runs/r_0000000c/answer", { n: 1, allow: true });
+  ok("steering: a second answer to the same question is 409", r.status === 409 && r.json?.code === "ANSWERED");
+  r = await post("/api/v1/runs/r_0000000c/answer", { n: 7, allow: true });
+  ok("steering: an answer to a question never asked is 400", r.status === 400 && r.json?.code === "NO_ASK");
+  r = await post("/api/v1/runs/r_0000000c/steer", { text: "use the staging config" });
+  ok("steering: a message is appended for the run", r.status === 200 && /use the staging config/.test(readFileSync(join(live, "control", "steer.jsonl"), "utf8")));
+  writeFileSync(join(live, "run.json"), "{}");
+  r = await post("/api/v1/runs/r_0000000c/steer", { text: "too late" });
+  ok("steering: a finished run takes no message (409)", r.status === 409 && r.json?.code === "NOT_LIVE");
+  r = await post("/api/v1/runs/r_zzzzzzzz/steer", { text: "x" });
+  ok("steering: a malformed run id matches no route", r.status === 404);
+  r = await post("/api/v1/runs/r_0000dead/steer", { text: "x" });
+  ok("steering: a run with no archive is 404", r.status === 404);
+}
+
 await s.close();
 rmSync(root, { recursive: true, force: true });
 console.log(failures ? `\n[serve] ${failures} FAILED` : "\n[serve] all checks passed");

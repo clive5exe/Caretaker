@@ -154,6 +154,9 @@ const DEFAULTS = {
   // answers `tools.approve` instead of the terminal. A function, so it is
   // never in a settings file and never in a recorded policy (JSON drops it).
   approver: null,
+  // A library caller's function() -> [{ text, by? }]: the operator's messages
+  // since the last call, handed to the model before each turn (bin/steer.mjs).
+  steer: null,
 };
 
 /**
@@ -214,6 +217,9 @@ export function normalisePolicy(policy = {}) {
   }
   if (p.approver !== null && typeof p.approver !== "function") {
     throw new HarnessError("approver must be a function or null");
+  }
+  if (p.steer !== null && typeof p.steer !== "function") {
+    throw new HarnessError("steer must be a function or null");
   }
   return p;
 }
@@ -566,7 +572,7 @@ export function finalTextOf(transcriptText) {
  *                        ("user" events carry tool results: skipped)
  *   codex exec --json    an item of type "agent_message"
  *                        (command_execution and other items: skipped)
- *   openai-compatible    "assistant" content ("tool" and "approval": skipped)
+ *   openai-compatible    "assistant" content ("tool", "approval", "steer": skipped)
  * A JSON line of no known shape (a custom CLI's) is read as every string it
  * holds, as before: its tool output cannot be told apart, and dropping it
  * would lose what that agent said. Plain lines are kept, consecutive ones as
@@ -583,7 +589,8 @@ export function agentTexts(raw) {
     if (typeof v === "string") texts.push(v);
     else if (v && typeof v === "object") for (const x of Array.isArray(v) ? v : Object.values(v)) walk(x);
   };
-  const NOT_THE_AGENT = new Set(["user", "system", "tool", "approval"]);
+  // "steer" is the operator's own message: never the agent's statement.
+  const NOT_THE_AGENT = new Set(["user", "system", "tool", "approval", "steer"]);
   for (const line of String(raw ?? "").split("\n")) {
     let v;
     try {
@@ -913,6 +920,7 @@ async function cliAdapter({ workspace, prompt, policy, paths, warnings }) {
   // `tools` is named as not applied rather than silently dropped.
   const cliName = cliLabel(policy.cli);
   warnings.push(...unreachable(policy.tools, "cli", cliName));
+  if (policy.steer) warnings.push(`steering NOT applied: the ${cliName} CLI runs its own loop, so messages sent to this run are not delivered`);
   const { toolArgs, toolEnv } = cliToolSetup(policy, cliName);
   const cliArgv = [
     ...(typeof preset.argv === "function" ? preset.argv({ model: policy.model }) : preset.argv),

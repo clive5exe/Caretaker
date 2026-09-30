@@ -356,7 +356,7 @@ export async function startServer({ cfgPath, dist = DIST, port = 7420, host = "1
       }
       if (path === `${API}/inbox`) return send(res, 200, rm.inbox());
       if (path === `${API}/runs`) return send(res, 200, rm.runs({ task: q.get("task"), state: q.get("state"), agent: q.get("agent"), model: q.get("model") }));
-      m = path.match(/^\/api\/v1\/runs\/([^/]+)(?:\/(transcript|stderr|diff|egress|stream))?$/);
+      m = path.match(/^\/api\/v1\/runs\/([^/]+)(?:\/(transcript|stderr|diff|egress|stream|control))?$/);
       if (m) {
         const id = decodeURIComponent(m[1]);
         if (!/^r_[0-9a-f]{8}$/.test(id)) return send(res, 400, { error: "a run id is r_ and eight hex digits" });
@@ -365,6 +365,10 @@ export async function startServer({ cfgPath, dist = DIST, port = 7420, host = "1
           return r ? send(res, 200, r) : send(res, 404, { error: "no such run" });
         }
         if (m[2] === "stream") return openRunStream(req, res, id);
+        if (m[2] === "control") {
+          const c = rm.runControl(id);
+          return c ? send(res, 200, c) : send(res, 404, { error: "no such run" });
+        }
         const name = { transcript: rm.runFilePath(id, "transcript.log") ? "transcript.log" : "transcript.live.log", stderr: "stderr.log", diff: "diff.patch", egress: "egress.jsonl" }[m[2]];
         const r = rm.runFile(id, name, q.get("from") ?? 0);
         if (!r) return send(res, 404, { error: `not recorded: no ${name} in the run archive` });
@@ -379,6 +383,18 @@ export async function startServer({ cfgPath, dist = DIST, port = 7420, host = "1
       return send(res, 404, { error: "no such route" });
     }
     if (req.method === "POST") {
+      // Steering a live run: answer its question, or send it a message.
+      const r = path.match(/^\/api\/v1\/runs\/(r_[0-9a-f]{8})\/(answer|steer)$/);
+      if (r) {
+        let body;
+        try {
+          body = JSON.parse(await readBody(req));
+        } catch (e) {
+          return send(res, e.status ?? 400, { error: e.status ? e.message : "body is not JSON" });
+        }
+        const out = rm.steerRun(r[1], r[2], body);
+        return send(res, out.status, out.body);
+      }
       const m = path.match(/^\/api\/v1\/work\/([^/]+)\/commands$/);
       if (!m) return send(res, 404, { error: "no such route" });
       let body;

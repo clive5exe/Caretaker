@@ -36,6 +36,8 @@
  *        [--sandbox podman|none] [--net NET] [--timeout MS]
  *        [--egress host,host [--egress-network NET]]   per-run proxy, log in the archive (C-5)
  *        [--skills yes]                                 stage the config's skills for the run (S-1)
+ *        [--steer web]                                  answer its questions and message it from the
+ *                                                       web UI (bin/steer.mjs; API adapter only)
  *   node bin/runstore.mjs where [--config F]      print the state dir
  */
 import { StringDecoder } from "node:string_decoder";
@@ -252,7 +254,7 @@ export function archive(result, { stateDir, workspace = null, task = null, paren
  * runs. The run id and the harness log dir are chosen here, up front, so the
  * mirror knows where the transcript is before the first byte is written.
  */
-export async function runArchived(workspace, prompt, policy = {}, { stateDir, task = null, parent = null, secrets = {}, harness, egress = null } = {}) {
+export async function runArchived(workspace, prompt, policy = {}, { stateDir, task = null, parent = null, secrets = {}, harness, egress = null, steer = false } = {}) {
   const h = harness ?? (await import("./harness.mjs"));
   const runId = policy.runId ?? newRunId();
   if (!RUN_ID.test(runId)) throw new RunStoreError("BAD_RUN_ID", `run id ${runId} is not r_ plus eight hex digits`);
@@ -271,6 +273,14 @@ export async function runArchived(workspace, prompt, policy = {}, { stateDir, ta
   // own environment, so a value is never in argv, the image, the repo or the
   // log (the redactor below, built from the same values, scrubs the archive).
   const harnessPolicy = { ...policy, runId, logDir, ...(task ? { task } : {}), env: { ...(policy.env ?? {}), ...secrets } };
+  // --steer web: the run's questions and the operator's messages go through
+  // <dir>/control/ (bin/steer.mjs), which bin/serve.mjs answers from the web.
+  if (steer) {
+    const { fileApprover, fileInbox } = await import("./steer.mjs");
+    mkdirSync(dir, { recursive: true });
+    harnessPolicy.approver = fileApprover(dir, { redact });
+    harnessPolicy.steer = fileInbox(dir);
+  }
   let result;
   let egressRecord = null;
   try {
@@ -332,7 +342,7 @@ if (isEntry) {
   const KNOWN = new Set([
     "workspace", "prompt-file", "prompt", "config", "state-dir", "task", "parent", "secret",
     "adapter", "cli", "model", "sandbox", "net", "timeout", "image", "egress", "egress-network",
-    "endpoint", "api-key-env", "max-turns", "skills", "harness-config", "build-network",
+    "endpoint", "api-key-env", "max-turns", "skills", "harness-config", "build-network", "steer",
   ]);
   const flags = { secret: [] };
   for (let i = 0; i < argv.length; i++) {
@@ -391,6 +401,7 @@ if (isEntry) {
         egress: flags.egress !== undefined
           ? { allow: flags.egress.split(",").map((h) => h.trim()).filter(Boolean), egressNetwork: flags["egress-network"] }
           : null,
+        steer: flags.steer === "web",
       });
       console.log(`[runstore] ${out.verdict.runId} ${out.verdict.state} -> ${out.archived}`);
       // B-2: the run's cost goes on the project's run log, through run.mjs

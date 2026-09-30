@@ -166,13 +166,14 @@ The same patches:
 Warp's skill files themselves are unchanged. The workflow prompt overrides
 their push step.
 
-## After the 5 hours (not in this window)
+## Part 2 (after the 5 hours)
 
-1. Land the parked tool control. It lets you choose the tools the model gets,
-   add your own, and approve calls live.
-2. Retire `prompt.txt`, the verify refuter and graduate's CI generator, after
-   their Warp replacements have each done one real run.
-3. Watch runs and steer them from the web UI (layer 5).
+| item | state | commit |
+|---|---|---|
+| Tool control (F-7): which tools, your own, your yes before a call; the claude CLI's tool flags | done | cd823da |
+| Round-3 fixes: P-5 (merges), P-4 (ADR status, uncommitted removals, history shapes), B-5 (the agent's own words; the loop records as it streams), B-2 (loop rows carry their task), G-1 (CI from a `ran` list, not prose) | done | fd854df, dedea49, e3ebfa3, 655a9a8 |
+| Steer a run from the web (F-8): answer its questions, message it mid-run | done for the API adapter; a CLI's own loop is out of reach | this commit |
+| Retire `prompt.txt`, the verify refuter, graduate's CI generator | waits on F-6, the first real run | |
 
 ## What is paused
 

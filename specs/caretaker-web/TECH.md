@@ -1,7 +1,7 @@
 ---
 title: Caretaker Web v1 — architecture and technical spec
 status: accepted
-updated: 2026-09-29
+updated: 2026-09-30
 ---
 
 ```spec
@@ -403,6 +403,7 @@ zero.
 | `GET /runs?task=&state=&agent=&model=` | runs, folded by id | `runs.jsonl` plus `<stateDir>/runs/*/run.json` |
 | `GET /runs/:id` | one run: identity, parent, children, verdict, cost, diff summary, drift events for it, and `egress.state` (host, proxied, sealed, network or unknown) from its archived record, plus `egress.modelCalls` for the openai-compatible adapter, whose model calls leave from this machine and are not in the egress log | same, plus the event log |
 | `GET /runs/:id/transcript?from=<byte>`, `/stderr?from=`, `/diff`, `/egress` | raw text or JSONL, byte-ranged. `/egress` only once the run is archived: until then the proxy's log is unredacted | the run archive (C-4, C-5) |
+| `GET /runs/:id/control` | a live run's steering channel: `live`, its unanswered questions (`pending`: n, tool name, arguments, key-shape redacted again) and the messages sent to it | `<stateDir>/runs/<id>/control/` (`bin/steer.mjs`) |
 | `GET /agents` | roles, models, runs and tokens aggregate, current work | `agentsDir` frontmatter (as `dashboard.mjs` `agents()` reads it), runs |
 | `GET /specs` | specs, `governs`, parse errors, and `freshness` (stale, lying, undated; null outside git) | `drift.loadSpecs`, `freshness.freshness` |
 | `GET /specs/ownership` | the ownership map, unowned, orphaned | `drift.buildOwnership`, `findOrphaned`, `treeFromGit` |
@@ -435,6 +436,23 @@ POST /work/:id/commands   { "cmd": "start", "args": { ... } }
   The UI shows it verbatim.
 - On success the server returns the updated task, and emits
   `invalidate {resource:"board"}` on the stream.
+
+**Steering a live run** (`bin/steer.mjs`; F-8):
+
+```
+POST /runs/:id/answer   { "n": 1, "allow": false, "always": false, "why": "put it under src/" }
+POST /runs/:id/steer    { "text": "use the staging config" }
+```
+
+- Each writes a file in the run's `control/` directory and nothing else; the
+  run reads it between turns. The server holds no connection to the run.
+- The same POST protections as every write: the cookie, the exact Origin,
+  `application/json` and `X-Caretaker: 1`.
+- A run is live while its archive has no `run.json`. A finished run, a
+  question already answered or one never asked is `409` or `400`, named.
+- Only a run started with `runstore.mjs run --steer web` on the
+  openai-compatible adapter listens. A CLI's own loop is out of reach, and the
+  run's warnings say so.
 
 **Deliberately absent in v1:**
 - **`reviewer` / `qa` / `security` verdicts.** A one-click pass in a browser is

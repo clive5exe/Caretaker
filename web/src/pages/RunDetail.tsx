@@ -7,9 +7,9 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router";
 import { gateLabel } from "../api/labels";
-import { getRunFile } from "../api/client";
+import { getJson, getRunFile, steerRun } from "../api/client";
 import { useResource } from "../api/store";
-import type { RunDetail, Runs } from "../api/types";
+import type { RunControl, RunDetail, Runs } from "../api/types";
 import { Failed, fmtDuration, fmtTokens, fmtWhen, Loading, NotRecorded, RunLink, RunStatus, Tabs, TaskLink, Tile, Val, Verdict } from "../components/ui";
 import { RunsTable } from "./Runs";
 
@@ -46,6 +46,104 @@ function useRunFile(id: string, file: FileName, live: boolean, present: boolean)
     };
   }, [id, file, live, present]);
   return state;
+}
+
+/**
+ * Steer a live run (bin/steer.mjs): answer the questions it is waiting on, and
+ * send it messages it reads before its next turn. Shown only while the run is
+ * live and listening; the server decides both, this only displays and sends.
+ */
+function SteerPanel({ id }: { id: string }) {
+  const [ctl, setCtl] = useState<RunControl | null>(null);
+  const [why, setWhy] = useState<Record<number, string>>({});
+  const [text, setText] = useState("");
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const load = async () => {
+    try {
+      setCtl(await getJson<RunControl>(`/runs/${encodeURIComponent(id)}/control`));
+    } catch {
+      /* retried on the next tick */
+    }
+  };
+  useEffect(() => {
+    void load();
+    const t = setInterval(load, 2000);
+    return () => clearInterval(t);
+  }, [id]);
+  if (!ctl || (!ctl.live && !ctl.messages.length)) return null;
+  const send = async (what: "answer" | "steer", body: Parameters<typeof steerRun>[2]) => {
+    setBusy(true);
+    const r = await steerRun(id, what, body);
+    setBusy(false);
+    setErr(r.ok ? null : r.error);
+    if (r.ok && what === "steer") setText("");
+    void load();
+  };
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      <h3>Steer this run</h3>
+      <div className="sub">
+        {ctl.live
+          ? "Answers and messages reach the agent between its turns. Only a run started with --steer web on the API adapter reads them."
+          : "The run has finished; it takes no more answers or messages."}
+      </div>
+      {ctl.pending.map((a) => (
+        <div key={a.n} className="stack" style={{ gap: 8, marginTop: 12 }}>
+          <div>
+            The agent is waiting to call <strong>{a.name}</strong> with:
+          </div>
+          <pre className="code">{JSON.stringify(a.args, null, 2)}</pre>
+          <input
+            className="text"
+            aria-label={`Reason for question ${a.n}`}
+            placeholder="Why (optional); a refusal's reason is shown to the agent"
+            value={why[a.n] ?? ""}
+            onChange={(e) => setWhy({ ...why, [a.n]: e.target.value })}
+          />
+          <div className="toolbar">
+            <button className="btn pri" type="button" disabled={busy} onClick={() => send("answer", { n: a.n, allow: true, why: why[a.n] })}>
+              Allow
+            </button>
+            <button className="btn" type="button" disabled={busy} onClick={() => send("answer", { n: a.n, allow: true, always: true, why: why[a.n] })}>
+              Allow for the rest of this run
+            </button>
+            <button className="btn danger" type="button" disabled={busy} onClick={() => send("answer", { n: a.n, allow: false, why: why[a.n] })}>
+              Refuse
+            </button>
+          </div>
+        </div>
+      ))}
+      {ctl.live && !ctl.pending.length ? <div className="muted" style={{ marginTop: 12 }}>Nothing is waiting on you.</div> : null}
+      {ctl.live ? (
+        <form
+          className="stack"
+          style={{ gap: 8, marginTop: 12 }}
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (text.trim()) void send("steer", { text });
+          }}
+        >
+          <textarea aria-label="Message to the agent" placeholder="Tell the agent something; it reads it before its next turn" value={text} onChange={(e) => setText(e.target.value)} />
+          <div className="toolbar">
+            <button className="btn pri" type="submit" disabled={busy || !text.trim()}>
+              Send to the agent
+            </button>
+          </div>
+        </form>
+      ) : null}
+      {err ? <div className="ft">{err}</div> : null}
+      {ctl.messages.length ? (
+        <ul className="muted" style={{ marginTop: 12 }}>
+          {ctl.messages.map((m) => (
+            <li key={m.t}>
+              {fmtWhen(m.t)}{m.by ? `, ${m.by}` : ""}: {m.text}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
 }
 
 function Diff({ text }: { text: string }) {
@@ -153,6 +251,7 @@ export function RunDetailPage() {
 
       {tab === "overview" ? (
         <>
+          <SteerPanel id={r.id} />
           <div className="grid g3">
             <div className="card">
               <h3>Duration</h3>

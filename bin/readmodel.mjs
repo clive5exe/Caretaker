@@ -28,6 +28,7 @@ import { pending as harvestPending } from "./harvest.mjs";
 import { commandsFor, openQuestions, requiredGates, specApprovalNeeded, stageOf, STAGES } from "./lifecycle.mjs";
 import { KEY_SHAPES } from "./secrets.mjs";
 import { stateDirFor } from "./runstore.mjs";
+import * as steerLib from "./steer.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -551,6 +552,45 @@ export function createReadModel({ cfgPath, board, dash, now = () => new Date(), 
     }
   }
 
+  /** A run's archive directory, or null: the id's shape, then its real path under the archive. */
+  function runDirPath(id) {
+    if (!RUN_ID.test(String(id))) return null;
+    try {
+      const real = realpathSync(join(archiveDir, id));
+      const base = realpathSync(archiveDir);
+      return real.startsWith(base + sep) && statSync(real).isDirectory() ? real : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Steering a live run (bin/steer.mjs): its unanswered questions and the
+   * messages sent to it. The questions were redacted by the run as it wrote
+   * them; the key-shape pass runs over them again, as over every file served.
+   */
+  function runControl(id) {
+    const d = runDirPath(id);
+    if (!d) return null;
+    return JSON.parse(redactShapes(JSON.stringify(steerLib.control(d))));
+  }
+
+  /** POST answer / steer: { status, body }, with the refusal named. */
+  function steerRun(id, what, body) {
+    const d = runDirPath(id);
+    if (!d) return { status: 404, body: { error: "no such run" } };
+    try {
+      const by = board.operator(cfg);
+      const out = what === "answer"
+        ? steerLib.answer(d, body?.n, { allow: body?.allow, always: body?.always === true, why: typeof body?.why === "string" ? body.why : null, by })
+        : steerLib.steer(d, body?.text, { by });
+      return { status: 200, body: out };
+    } catch (e) {
+      if (e instanceof steerLib.SteerError) return { status: e.code === "NOT_LIVE" || e.code === "ANSWERED" ? 409 : 400, body: { error: e.message, code: e.code } };
+      throw e;
+    }
+  }
+
   /**
    * Bytes of an archived file from `from`, as whole lines, redacted. Returns
    * { text, next } where `next` is the offset on disk to resume from; a partial
@@ -805,7 +845,7 @@ export function createReadModel({ cfgPath, board, dash, now = () => new Date(), 
 
   return {
     cfg, root, stateDir, eventsDir, archiveDir, ctx,
-    sources, snapshot, work, workItem, inbox, runs: runsList, run, runFile, runFilePath,
+    sources, snapshot, work, workItem, inbox, runs: runsList, run, runFile, runFilePath, runControl, steerRun,
     agents, specs, metrics, settings, events: recentEvents, command,
     watchPaths: () => ({
       board: ctx.data,
