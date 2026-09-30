@@ -11,9 +11,8 @@
  *              with the commit.
  *   why <path> the specs that govern a path and the decisions that explain it —
  *              answered from the decision record, without reading the log.
- *   ci         a workflow built from the checks this repo was SEEN to run
- *              (a passing verdict's note that says it ran, or the drift
- *              gate's own events),
+ *   ci         a workflow built from the checks this repo RAN (a passing
+ *              verdict's `ran` list, or the drift gate's own events),
  *              each step carrying the evidence it was taken from. If there is no
  *              evidence of any check, no workflow is written: an empty or
  *              placeholder CI file claims a gate that does not exist.
@@ -299,39 +298,44 @@ export function why(root, path, { specsDir = "specs" } = {}) {
  * Nothing is included on the strength of a convention alone.
  */
 /*
- * A step is written only for a check this repo was SEEN to run, and only with a
- * script the repo has (independent QA: steps came from file presence, and
- * called bin/drift.mjs and ops/caretaker/board.mjs in repos without them):
- *   - a test file or npm script a gate verdict's note names as run;
+ * A step is written only for a check this repo RAN, and only with a script
+ * the repo has (independent QA: steps came from file presence, and called
+ * bin/drift.mjs and ops/caretaker/board.mjs in repos without them):
+ *   - a test file or npm script a passing gate verdict lists in `ran`
+ *     (board.mjs <gate> <id> pass "note" --ran "node bin/x.test.mjs");
  *   - the drift gate, from its own gate events, run with this repo's drift.mjs.
  * Anything seen but not runnable here goes to `skipped`, with the reason.
+ *
+ * NOT FROM PROSE. Commands were read out of a verdict's note, and no wording
+ * rule holds: "passes, but I skipped npm run deploy and node bin/b.test.mjs is
+ * broken" put deploy and a failing test in CI on every push (independent
+ * re-review, three rounds). A note is for people; `ran` is the record.
  */
 const DRIFT_SUMMARY = /^drift \d+, dismissed \d+, blocking conflicts \d+, spec errors \d+, unowned \d+ of \d+ governed-code path\(s\) changed$/;
-const NAMED = /\bnode\s+([\w./-]+\.test\.m?js)\b|\bnpm\s+(?:run\s+)?(test|[\w:-]+)\b/g;
+// The whole entry, not a fragment of it: `npm run deploy && rm -rf /` is not
+// an npm script, and nothing is cut out of a longer command.
+const RUNNABLE = /^(?:node\s+([\w./-]+\.test\.m?js)|npm\s+(?:run\s+)?([\w:-]+))$/;
 
-// A mention is not a run (independent re-review: "I did not run node x.test.mjs"
-// became a CI step citing that note as evidence). So a command counts only in
-// a PASSING verdict's note, in a sentence that says it ran or passed, and says
-// nothing that negates it.
-const RAN = /\b(ran|runs|run:|passe[sd]|pass(ing)?|green|exit(s|ed)? 0|all checks passed|succeed(s|ed)?)\b/i;
-// Negation of the RUN, not any negative word: every independent note says
-// "(fresh agent, not the builder)", and that is not a claim about a command.
-const NEGATED = /\b(not|n't|never)\s+(been\s+)?(run|ran|tried|executed|pass(ed)?)\b|\bnever\b|\bfail(s|ed|ing)?\b|\bred\b/i;
-const sentences = (note) => String(note ?? "").split(/(?<=[.;!?])\s+|\n+/);
-
-/** Commands a passing gate verdict's note says were run: Map(cmd -> {file?, script?, where}). */
-function namedInGates(board) {
+/** Commands passing verdicts list as run: Map(cmd -> {file?, script?, where}). Others go to `skipped`. */
+function ranInGates(board, skipped = []) {
   const out = new Map();
   for (const ph of board?.phases ?? []) {
     for (const t of ph.tasks ?? []) {
       for (const [gate, rec] of Object.entries(t.gate ?? {})) {
         for (const v of [...(rec.history ?? []), rec]) {
-          if (v.verdict !== "pass") continue;
-          for (const m of sentences(v.note).filter((x) => RAN.test(x) && !NEGATED.test(x)).flatMap((x) => [...x.matchAll(NAMED)])) {
-            const script = m[2] === "t" ? "test" : (m[2] ?? null);
+          if (v.verdict !== "pass" || !Array.isArray(v.ran)) continue;
+          const where = `${t.id} ${gate}${v.at ? ` ${v.at}` : ""}`;
+          for (const raw of v.ran) {
+            const cmd = String(raw).trim().replace(/\s+/g, " ");
+            const m = RUNNABLE.exec(cmd);
+            if (!m) {
+              skipped.push(`ci: \`${cmd}\` is listed as run by ${where}, but only \`node <file>.test.mjs\` and \`npm [run] <script>\` become steps`);
+              continue;
+            }
+            const script = m[2] ?? null;
             const key = m[1] ? `node ${m[1]}` : `npm ${script === "test" ? "test" : `run ${script}`}`;
             const cur = out.get(key) ?? { file: m[1] ?? null, script, where: [] };
-            cur.where.push(`${t.id} ${gate}${v.at ? ` ${v.at}` : ""}`);
+            cur.where.push(where);
             out.set(key, cur);
           }
         }
@@ -348,23 +352,23 @@ export function evidence(root, { specsDir = "specs", skipped = [] } = {}) {
   const cfgPath = ["ops/caretaker/config.json"].find(has);
   const cfg = cfgPath ? read(cfgPath) : {};
   const boardPath = cfg.board ?? "docs/board.json";
-  const named = namedInGates(has(boardPath) ? read(boardPath) : null);
+  const named = ranInGates(has(boardPath) ? read(boardPath) : null, skipped);
   const scripts = has("package.json") ? (read("package.json").scripts ?? {}) : {};
-  const seen = (w) => `${w.length} gate verdict note(s): ${w.slice(0, 3).join(", ")}${w.length > 3 ? ", …" : ""}`;
+  const seen = (w) => `${w.length} gate verdict(s): ${w.slice(0, 3).join(", ")}${w.length > 3 ? ", …" : ""}`;
 
   const tests = [...named].filter(([, n]) => n.file);
   const runnable = tests.filter(([, n]) => has(n.file));
-  for (const [cmd] of tests.filter(([, n]) => !has(n.file))) skipped.push(`ci: \`${cmd}\` is named in a gate note, but the file is not in this repo`);
+  for (const [cmd] of tests.filter(([, n]) => !has(n.file))) skipped.push(`ci: \`${cmd}\` is listed as run in a gate verdict, but the file is not in this repo`);
   if (runnable.length) {
     steps.push({
       name: "tests",
       run: runnable.map(([cmd]) => cmd).join(" && "),
-      evidence: `${runnable.length} test file(s) named as run in ${seen(runnable.flatMap(([, n]) => n.where))}`,
+      evidence: `${runnable.length} test file(s) listed as run in ${seen(runnable.flatMap(([, n]) => n.where))}`,
     });
   }
   for (const [cmd, n] of [...named].filter(([, x]) => x.script)) {
     if (!scripts[n.script] || /no test specified/.test(scripts[n.script])) {
-      if (n.script === "test" || n.script in scripts) skipped.push(`ci: \`${cmd}\` is named in a gate note, but package.json has no real ${n.script} script`);
+      skipped.push(`ci: \`${cmd}\` is listed as run in a gate verdict, but package.json has no real ${n.script} script`);
       continue;
     }
     // Install only the way the repo can: `npm ci` needs a lockfile, and
@@ -372,7 +376,7 @@ export function evidence(root, { specsDir = "specs", skipped = [] } = {}) {
     const pkg = read("package.json");
     const deps = Object.keys({ ...pkg.dependencies, ...pkg.devDependencies }).length > 0;
     const install = has("package-lock.json") ? "npm ci && " : deps ? "npm install && " : "";
-    steps.push({ name: cmd, run: `${install}${cmd}`, evidence: `package.json scripts.${n.script}: ${scripts[n.script]}; named as run in ${seen(n.where)}${install ? `; installed with ${install.slice(0, -4)}` : ""}` });
+    steps.push({ name: cmd, run: `${install}${cmd}`, evidence: `package.json scripts.${n.script}: ${scripts[n.script]}; listed as run in ${seen(n.where)}${install ? `; installed with ${install.slice(0, -4)}` : ""}` });
   }
 
   // The drift gate counts only if it has RUN here: its own gate event, whose

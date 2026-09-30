@@ -212,28 +212,33 @@ commit("2026-02-03", "round half even"); // an accepted decision rewritten in pl
   // Independent QA: steps came from file presence. None of this is evidence yet.
   ok("a test script or test files that no gate was seen to run are not evidence", evidence(R).length === 0, JSON.stringify(evidence(R)));
   write("ops/caretaker/config.json", JSON.stringify({ board: "docs/board.json", events: "ops/caretaker/events" }));
-  const note = (t, gate, text, at = "2026-02-01") => ({ id: t, title: t, status: "doing", gate: { [gate]: { verdict: "pass", at, note: text } } });
+  const pass = (t, gate, note, ran, at = "2026-02-01") => ({ id: t, title: t, status: "doing", gate: { [gate]: { verdict: "pass", at, note, ...(ran ? { ran } : {}) } } });
   write("docs/board.json", JSON.stringify({ phases: [{ name: "P", tasks: [
-    note("T-1", "qa", "ran node bin/a.test.mjs and npm test; node bin/gone.test.mjs passed too"),
-    { id: "T-2", title: "T-2", status: "doing", gate: { reviewer: { verdict: "pass", at: "2026-02-03", note: "fine", history: [{ verdict: "pass", at: "2026-02-02", note: "npm run lint passed" }] } } },
-    // Independent re-review: a mention is not a run. None of these may become a step.
-    { id: "T-3", title: "T-3", status: "doing", gate: { qa: { verdict: "fail", at: "2026-02-04", note: "ran node bin/b.test.mjs, which passed" } } },
-    note("T-4", "reviewer", "I did not run node bin/b.test.mjs. npm run build was never tried; do not run npm run deploy. Looks right."),
-    note("T-5", "qa", "Independent QA (fresh agent, not the builder): node bin/c.test.mjs green."),
+    pass("T-1", "qa", "fine", ["node bin/a.test.mjs", "npm test", "node bin/gone.test.mjs"]),
+    { id: "T-2", title: "T-2", status: "doing", gate: { reviewer: { verdict: "pass", at: "2026-02-03", note: "fine", history: [{ verdict: "pass", at: "2026-02-02", note: "", ran: ["npm run lint"] }] } } },
+    // A FAILING verdict's list is not evidence of a working check.
+    { id: "T-3", title: "T-3", status: "doing", gate: { qa: { verdict: "fail", at: "2026-02-04", note: "", ran: ["node bin/b.test.mjs"] } } },
+    // Independent re-review, three rounds: prose is never read. Each of these
+    // once became a CI step.
+    pass("T-4", "reviewer", "Looks good and passes, but I skipped npm run deploy and node bin/b.test.mjs is broken so I left it alone"),
+    pass("T-5", "qa", "Pass: node bin/b.test.mjs exits 1 on this branch. I ran node bin/b.test.mjs, which passed.", ["node bin/c.test.mjs"]),
+    // Only a whole runnable entry counts; nothing is cut out of a longer command.
+    pass("T-6", "qa", "", ["npm run deploy && rm -rf /", "make all"]),
   ] }] }));
   const skipped = [];
   const ev = evidence(R, { skipped });
   const tests = ev.find((s) => s.name === "tests");
-  ok("a test file a gate note names as run is a step, with where it was named", tests?.run === "node bin/a.test.mjs && node bin/c.test.mjs" && /T-1 qa 2026-02-01/.test(tests.evidence), JSON.stringify(ev));
+  ok("a test file a passing verdict lists in `ran` is a step, with where it was listed", tests?.run === "node bin/a.test.mjs && node bin/c.test.mjs" && /T-1 qa 2026-02-01/.test(tests.evidence), JSON.stringify(ev));
   ok("…and one that is only present is not", !/b\.test/.test(tests?.run ?? ""));
-  ok("…and a negative word about something else in the sentence does not hide a run", /node bin\/c\.test\.mjs/.test(tests?.run ?? ""), tests?.run);
-  ok("a command named in a FAILING verdict, or in a sentence that says it did not run, is not a step", !/b\.test/.test(tests?.run ?? "") && !ev.some((x) => /build|deploy/.test(x.name)), JSON.stringify(ev.map((x) => x.run)));
-  ok("a named test file the repo does not have is skipped, and said", skipped.some((x) => /node bin\/gone\.test\.mjs.*not in this repo/.test(x)) && !/gone/.test(tests?.run ?? ""), JSON.stringify(skipped));
-  ok("an npm script a gate note names is a step, with the script it runs", ev.some((s) => s.name === "npm test" && /scripts\.test: node --test; named as run in 1 gate/.test(s.evidence)));
-  ok("…including one named in an earlier verdict", ev.some((s) => s.name === "npm run lint" && /T-2 reviewer 2026-02-02/.test(s.evidence)), JSON.stringify(ev.map((s) => s.name)));
+  ok("a note's prose never makes a step, however it is worded", !/b\.test/.test(tests?.run ?? "") && !ev.some((x) => /deploy|build/.test(x.run)), JSON.stringify(ev.map((x) => x.run)));
+  ok("a failing verdict's `ran` list is not a step", !/b\.test/.test(tests?.run ?? ""));
+  ok("a listed entry that is not a whole test file or npm script is skipped, and said", !ev.some((x) => /rm -rf|make/.test(x.run)) && skipped.some((x) => /`npm run deploy && rm -rf \/` is listed as run by T-6 qa/.test(x)) && skipped.some((x) => /`make all`/.test(x)), JSON.stringify(skipped));
+  ok("a listed test file the repo does not have is skipped, and said", skipped.some((x) => /node bin\/gone\.test\.mjs.*not in this repo/.test(x)) && !/gone/.test(tests?.run ?? ""), JSON.stringify(skipped));
+  ok("an npm script a verdict lists is a step, with the script it runs", ev.some((s) => s.name === "npm test" && /scripts\.test: node --test; listed as run in 1 gate/.test(s.evidence)), JSON.stringify(ev));
+  ok("…including one listed in an earlier verdict", ev.some((s) => s.name === "npm run lint" && /T-2 reviewer 2026-02-02/.test(s.evidence)), JSON.stringify(ev.map((s) => s.name)));
   write("package.json", JSON.stringify({ scripts: { test: 'echo "Error: no test specified" && exit 1', lint: "eslint ." } }));
   const s2 = [];
-  ok("npm's default 'no test specified' script is not a check, even when named", !evidence(R, { skipped: s2 }).some((s) => s.name === "npm test") && s2.some((x) => /no real test script/.test(x)));
+  ok("npm's default 'no test specified' script is not a check, even when listed", !evidence(R, { skipped: s2 }).some((s) => s.name === "npm test") && s2.some((x) => /no real test script/.test(x)));
   write("package.json", JSON.stringify({ scripts: { test: "node --test", lint: "eslint ." } }));
 
   ok("a drift gate is NOT added just because drift.mjs could run", !evidence(R).some((s) => s.name === "drift gate"));

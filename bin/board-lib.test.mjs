@@ -299,5 +299,17 @@ async function race(boardFile, n) {
   rmSync(f.root, { recursive: true, force: true });
 }
 
+{
+  // G-1: a verdict's `ran` list, the only thing graduate's CI steps come from.
+  const f = fixture(join(HERE, "board.mjs"));
+  const cli = (...a) => spawnSync(process.execPath, [join(f.ops, "board.mjs"), ...a], { cwd: f.root, encoding: "utf8" });
+  const r1 = cli("qa", "T-001", "pass", "suite", "green", "--ran", "node bin/a.test.mjs", "--ran", "npm test");
+  const gate = () => JSON.parse(readFileSync(join(f.root, "docs", "board.json"), "utf8")).phases.flatMap((ph) => ph.tasks).find((t) => t.id === "T-001").gate.qa;
+  ok("--ran records the commands as a list, apart from the note", r1.status === 0 && JSON.stringify(gate().ran) === '["node bin/a.test.mjs","npm test"]' && gate().note === "suite green", JSON.stringify(gate()));
+  cli("qa", "T-001", "fail", "broke");
+  ok("a later verdict keeps the earlier one's list in history", JSON.stringify(gate().history?.at(-1)?.ran) === '["node bin/a.test.mjs","npm test"]' && gate().ran === undefined, JSON.stringify(gate()));
+  rmSync(f.root, { recursive: true, force: true });
+}
+
 console.log(failures ? `\n[board-lib] ${failures} FAILED` : "\n[board-lib] all checks passed");
 process.exit(failures ? 1 : 0);

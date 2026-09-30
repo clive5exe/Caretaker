@@ -682,8 +682,12 @@ export function recordVerdict(d, id, gate, verdict, note, opts = {}) {
   // `by` and `via`, as every other fact carries (independent re-review: the
   // walk said every move records who made it, and verdicts recorded no one).
   const who = opts.by ? { by: String(opts.by), ...(opts.via ? { via: opts.via } : {}) } : {};
-  const entry = { verdict, at: today(), t: new Date().toISOString(), ...who, note: note || undefined };
-  const kept = (e) => ({ verdict: e.verdict, at: e.at, ...(e.t ? { t: e.t } : {}), ...(e.by ? { by: e.by } : {}), ...(e.via ? { via: e.via } : {}), note: e.note });
+  // G-1: the commands the gate RAN, as a list, not a sentence. graduate's CI
+  // steps come from this and nothing else: prose was read before, and "passes,
+  // but I skipped npm run deploy" put deploy in CI (independent re-review).
+  const ran = Array.isArray(opts.ran) ? opts.ran.map((c) => String(c).trim()).filter(Boolean) : [];
+  const entry = { verdict, at: today(), t: new Date().toISOString(), ...who, ...(ran.length ? { ran } : {}), note: note || undefined };
+  const kept = (e) => ({ verdict: e.verdict, at: e.at, ...(e.t ? { t: e.t } : {}), ...(e.by ? { by: e.by } : {}), ...(e.via ? { via: e.via } : {}), ...(e.ran ? { ran: e.ran } : {}), note: e.note });
   const history = previous ? [...(previous.history || []), kept(previous)] : [];
   hit.t.gate[gate] = { ...entry, ...(history.length ? { history } : {}) };
   d.meta.updated = today();
@@ -914,14 +918,20 @@ function cli(argv) {
     const o = build();
     console.log(`board rebuilt — ${o.currentPct}% (${o.currentDone}/${o.currentTotal} ${o.currentName})  ·  all phases ${o.done}/${o.total}`);
   } else if (GATE_CMDS.includes(cmd)) {
-    // record a gate verdict:  node ops/caretaker/board.mjs reviewer T-012 pass "notes"
+    // record a gate verdict:  node ops/caretaker/board.mjs reviewer T-012 pass "notes" [--ran "cmd"]...
     if (!id) { console.error("need a task id"); process.exit(1); }
     const ctx = loadConfig();
     const verdict = (rest[0] || "").toLowerCase();
+    const ran = [];
+    const words = [];
+    for (let i = 1; i < rest.length; i++) {
+      if (rest[i] === "--ran" && rest[i + 1] !== undefined) ran.push(rest[++i]);
+      else words.push(rest[i]);
+    }
     const res = mutate(ctx, (d) => {
       if (!find(d, id)) return noTask(id);
       if (!["pass", "fail"].includes(verdict)) return { ok: false, badVerdict: true };
-      return recordVerdict(d, id, cmd, verdict, rest.slice(1).join(" "), { by: operator(ctx.cfg), via: "cli" });
+      return recordVerdict(d, id, cmd, verdict, words.join(" "), { by: operator(ctx.cfg), via: "cli", ...(ran.length ? { ran } : {}) });
     });
     if (res.badVerdict) {
       console.error("verdict must be pass or fail:  node ops/caretaker/board.mjs " + cmd + " " + id + " pass");
