@@ -141,6 +141,54 @@ commit("2026-02-03", "round half even"); // an accepted decision rewritten in pl
   ok("…text in a code fence, and a spec with none, are not", !hp.some((p) => /a\.md:10|specs\/b\.md/.test(p)));
 }
 
+{
+  // Independent re-review, round 3: three more ways past P-4.
+  const S = join(TMP, "fourth");
+  mkdirSync(join(S, "docs/decisions/archive"), { recursive: true });
+  mkdirSync(join(S, "specs"), { recursive: true });
+  const g = (...a) => spawnSync("git", ["-C", S, ...a], { encoding: "utf8", env: { ...process.env, GIT_AUTHOR_DATE: "2026-04-01T12:00:00Z", GIT_COMMITTER_DATE: "2026-04-01T12:00:00Z" } });
+  const put = (p, t) => writeFileSync(join(S, p), t);
+  const adr = (title, status, extra = "") => `---\ntitle: ${title}\nstatus: ${status}\n${extra}---\n\n${title} is decided.\n`;
+  const snap = (msg) => (g("add", "-A"), g("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", msg));
+  g("init", "-q");
+  put("docs/decisions/0001-a.md", adr("A", "accepted"));
+  put("docs/decisions/0002-b.md", adr("B", "accepted"));
+  put("docs/decisions/0003-c.md", adr("C", "accepted"));
+  put("docs/decisions/0004-d.md", adr("D", "accepted"));
+  put("docs/decisions/0006-f.md", adr("F", "accepted"));
+  put("docs/decisions/0007-g.md", adr("G", "accepted"));
+  put("docs/decisions/0008-h.md", adr("H", "draft"));
+  put("docs/archive-keep.md", "keeps docs/ alive\n");
+  snap("init");
+  put("docs/decisions/0001-a.md", adr("A", "proposed"));
+  put("docs/decisions/0002-b.md", adr("B", "rejected"));
+  put("docs/decisions/0003-c.md", adr("C", "superseded"));
+  put("docs/decisions/0004-d.md", adr("D", "superseded-by: ADR-0005"));
+  put("docs/decisions/0005-e.md", adr("E", "accepted", "supersedes: ADR-0004\n"));
+  snap("statuses");
+  // Uncommitted: a decided ADR removed, one moved out, and a draft removed.
+  rmSync(join(S, "docs/decisions/0006-f.md"));
+  g("mv", "docs/decisions/0007-g.md", "docs/decisions/archive/0007-g.md");
+  rmSync(join(S, "docs/decisions/0008-h.md"));
+  const { problems } = decisions(S);
+  const has = (re) => problems.some((p) => re.test(p));
+  ok("accepted -> proposed after deciding is a named problem", has(/^ADR-0001 changed status from accepted to proposed after it was decided: [0-9a-f]{8} 2026-04-01 "statuses"/), JSON.stringify(problems));
+  ok("accepted -> rejected after deciding is a named problem", has(/^ADR-0002 changed status from accepted to rejected/));
+  ok("accepted -> bare superseded (nothing superseding it) is a named problem", has(/^ADR-0003 changed status from accepted to superseded/) && has(/^ADR-0003 has status "superseded"/));
+  ok("accepted -> superseded-by with a record that supersedes it is allowed", !has(/ADR-0004|ADR-0005/), JSON.stringify(problems.filter((p) => /ADR-000[45]/.test(p))));
+  ok("an uncommitted rm of a decided ADR is named as uncommitted", has(/^docs\/decisions\/0006-f\.md was DELETED after it was decided \(accepted\): uncommitted, in the working tree/), JSON.stringify(problems));
+  ok("an uncommitted git mv out of the record is named, with where it went", has(/^docs\/decisions\/0007-g\.md was MOVED OUT of the decision record \(to docs\/decisions\/archive\/0007-g\.md\) after it was decided \(accepted\): uncommitted/), JSON.stringify(problems));
+  ok("an uncommitted rm of a draft is not a problem", !has(/0008-h/));
+
+  put("specs/c.md", "# C\n\nTrue now.\n\n## 2026-09-01\n\n## [1.0.0] - 2026-09-01\n\n## Change history\n\n| 2026-09-01 | added retries |\n\n1. 2026-09-02 removed retries\n");
+  put("specs/d.md", "# D\n\n## Fields\n\n| Field | Type |\n|---|---|\n| created | 2026-09-01 is an example value |\n\n1. Step one\n2. Step two\n\nThe launch is on 2026-10-01.\n");
+  const hp = decisions(S).problems.filter((p) => /carries history/.test(p));
+  for (const [line, what] of [[5, "a date heading"], [7, "a keep-a-changelog heading"], [9, "a 'Change history' heading"], [11, "a table row starting with a date"], [13, "a numbered item starting with a date"]]) {
+    ok(`a spec's history as ${what} is named (specs/c.md:${line})`, hp.some((p) => p.startsWith(`specs/c.md:${line} carries history`)), JSON.stringify(hp));
+  }
+  ok("ordinary tables, numbered steps and a date in a sentence are not history", !hp.some((p) => p.startsWith("specs/d.md")), JSON.stringify(hp));
+}
+
 /* -------------------------------------------------------------------- why */
 {
   const w = why(R, "src/fees/calc.js");

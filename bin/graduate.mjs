@@ -61,8 +61,15 @@ function frontmatter(text) {
  * Declared shapes only: a heading named for history, or list items that
  * start with a date. [{ file, line, text }].
  */
-const HISTORY_HEADING = /^#{1,6}\s*(change ?log|history|revision history|revisions?|changes)\b/i;
-const DATED_ITEM = /^\s*[-*]\s*\**\d{4}-\d{2}-\d{2}\b/;
+const HISTORY_HEADING = /^#{1,6}\s*(change ?log|change history|history|revision history|revisions?|changes|release notes)\b/i;
+// A heading holding a date: "## 2026-09-01", keep-a-changelog's
+// "## [1.0.0] - 2026-09-01". A version alone is not taken: "## 1.2.3 Retry"
+// is how numbered specs title sections.
+const DATED_HEADING = /^#{1,6}\s.*\b\d{4}-\d{2}-\d{2}\b/;
+// A bulleted or numbered item, or a table row, that STARTS with a date. A
+// date later in the line is a value, not an entry.
+const DATED_ITEM = /^\s*(?:[-*+]|\d+[.)])\s*[*_[]*\d{4}-\d{2}-\d{2}\b/;
+const DATED_ROW = /^\s*\|\s*[*_[]*\d{4}-\d{2}-\d{2}\b/;
 export function specHistory(root, specsDir = "specs") {
   const out = [];
   const walk = (d) => {
@@ -80,7 +87,7 @@ export function specHistory(root, specsDir = "specs") {
         let fence = false;
         lines.forEach((l, i) => {
           if (/^\s*```/.test(l)) fence = !fence;
-          if (!fence && (HISTORY_HEADING.test(l) || DATED_ITEM.test(l))) out.push({ file: rel, line: i + 1, text: l.trim() });
+          if (!fence && [HISTORY_HEADING, DATED_HEADING, DATED_ITEM, DATED_ROW].some((re) => re.test(l))) out.push({ file: rel, line: i + 1, text: l.trim() });
         });
       }
     }
@@ -94,10 +101,11 @@ export function decisions(root, { specsDir = "specs" } = {}) {
   const dir = join(root, DECISIONS_DIR);
   // Removals first: deleting the LAST decision takes the directory with it,
   // and returning early on that hid the deletion (independent re-review).
+  const where = (g) => (g.sha ? `${g.sha.slice(0, 8)} ${g.day} "${g.subject}"` : "uncommitted, in the working tree");
   const removed = deletedDecisions(root).map((g) =>
     g.movedTo
-      ? `${g.file} was MOVED OUT of the decision record (to ${g.movedTo}) after it was decided (${g.status}): ${g.sha.slice(0, 8)} ${g.day} "${g.subject}". A decision is superseded, never removed`
-      : `${g.file} was DELETED after it was decided (${g.status}): ${g.sha.slice(0, 8)} ${g.day} "${g.subject}". A decision is superseded, never removed`,
+      ? `${g.file} was MOVED OUT of the decision record (to ${g.movedTo}) after it was decided (${g.status}): ${where(g)}. A decision is superseded, never removed`
+      : `${g.file} was DELETED after it was decided (${g.status}): ${where(g)}. A decision is superseded, never removed`,
   );
   // A spec that carries history belongs in the same report: both are one
   // tier holding what another tier should (independent re-review).
@@ -115,10 +123,12 @@ export function decisions(root, { specsDir = "specs" } = {}) {
     });
   const byId = new Map(list.map((d) => [d.id, d]));
   const problems = [];
-  const STATUSES = /^(draft|proposed|accepted|rejected|superseded(-by: ADR-\d{4})?)$/;
+  // Bare "superseded" is not a status: what superseded it has to be named,
+  // or the record points nowhere (independent re-review).
+  const STATUSES = /^(draft|proposed|accepted|rejected|superseded-by: ADR-\d{4})$/;
   for (const d of list) {
     if (!d.status) problems.push(`${d.id} has no status`);
-    else if (!STATUSES.test(d.status)) problems.push(`${d.id} has status "${d.status}", which is not draft, accepted, rejected or superseded-by: ADR-NNNN`);
+    else if (!STATUSES.test(d.status)) problems.push(`${d.id} has status "${d.status}", which is not draft, proposed, accepted, rejected or superseded-by: ADR-NNNN`);
     for (const s of d.supersedes) {
       const target = byId.get(s);
       if (!target) problems.push(`${d.id} supersedes ${s}, which does not exist`);
@@ -132,7 +142,14 @@ export function decisions(root, { specsDir = "specs" } = {}) {
   }
   problems.push(...removed);
   for (const d of list) {
-    for (const e of editsAfterDecided(root, d.file) ?? []) problems.push(`${d.id} was edited after it was decided (${e.status}): ${e.sha ? `${e.sha.slice(0, 8)} ${e.day} "${e.subject}"` : "uncommitted change in the working tree"}. Write a new decision that supersedes it instead`);
+    for (const e of editsAfterDecided(root, d.file) ?? []) {
+      const at = e.sha ? `${e.sha.slice(0, 8)} ${e.day} "${e.subject}"` : "uncommitted change in the working tree";
+      problems.push(
+        e.statusTo !== undefined
+          ? `${d.id} changed status from ${e.status} to ${e.statusTo || "(none)"} after it was decided: ${at}. Once decided, a record's status only moves to superseded-by: ADR-NNNN`
+          : `${d.id} was edited after it was decided (${e.status}): ${at}. Write a new decision that supersedes it instead`,
+      );
+    }
   }
   return { list, problems };
 }
@@ -173,6 +190,19 @@ export function deletedDecisions(root) {
       if (status && !UNDECIDED.test(status)) out.push({ file, sha, day, subject: subject.join("\t"), status, ...(kind.startsWith("R") ? { movedTo: to } : {}) });
     }
   }
+  // Not yet committed: HEAD against the working tree, staged or not. An
+  // uncommitted edit was already reported and an uncommitted rm or git mv was
+  // silent (independent re-review). No HEAD yet means nothing was decided.
+  if (git("rev-parse", "--verify", "-q", "HEAD").status === 0) {
+    const wt = git("diff", "-M", "--diff-filter=DR", "--name-status", "HEAD", "--", DECISIONS_DIR);
+    for (const line of wt.stdout.split("\n").map((l) => l.trim()).filter(Boolean)) {
+      const [kind, file, to] = line.split("\t");
+      if (!RECORD.test(file ?? "")) continue;
+      if (kind.startsWith("R") && RECORD.test(to ?? "")) continue;
+      const status = frontmatter(git("show", `HEAD:${file}`).stdout).status ?? "";
+      if (status && !UNDECIDED.test(status)) out.push({ file, sha: null, day: null, subject: null, status, ...(kind.startsWith("R") ? { movedTo: to } : {}) });
+    }
+  }
   return out;
 }
 
@@ -208,6 +238,14 @@ export function editsAfterDecided(root, file) {
     if (decided === null) {
       if (status && !UNDECIDED.test(status)) decided = { text: decidedText(st.text), status };
       continue;
+    }
+    // The status may move once, to superseded-by. Any other change of it
+    // after deciding rewrites the decision (independent re-review: accepted ->
+    // proposed, -> rejected and -> bare superseded all passed).
+    if (status !== decided.status) {
+      const superseding = /^superseded-by: ADR-\d{4}$/.test(status) && !/^superseded-by:/.test(decided.status);
+      if (!superseding) edits.push({ sha: st.sha, day: st.day, subject: st.subject, status: decided.status, statusTo: status });
+      decided.status = status;
     }
     const t = decidedText(st.text);
     if (t !== decided.text) {
