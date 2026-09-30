@@ -30,6 +30,7 @@ import {
   emptyCost,
   normalisePolicy,
   parseUsage,
+  permissionDenials,
   run,
   spliceRunFlags,
 } from "./harness.mjs";
@@ -422,6 +423,25 @@ sleep 30
   ok("prose with no JSON parses to all-null, not all-zero", none.tokens.total === null && none.reported === false, JSON.stringify(none.tokens));
 }
 
+{
+  // The shape claude --print --output-format json printed on 2026-09-29 when
+  // its Edit was refused: exit 0, "completed", and the work not done.
+  const doc = '{"type":"result","is_error":false,"permission_denials":[{"tool_name":"Edit","tool_use_id":"t1","tool_input":{}},{"tool_name":"Edit","tool_use_id":"t2","tool_input":{}},{"tool_name":"Bash","tool_use_id":"t3","tool_input":{}}]}';
+  ok("permission denials are read from the CLI's JSON", JSON.stringify(permissionDenials(doc)) === '["Edit","Edit","Bash"]', JSON.stringify(permissionDenials(doc)));
+  ok("no denials field reads as none", permissionDenials('{"usage":{}}').length === 0 && permissionDenials("prose").length === 0);
+}
+
+{
+  const ws = makeWorkspace("denied");
+  const DENIED = fakeCli(`
+cat > /dev/null
+echo '{"type":"result","is_error":false,"permission_denials":[{"tool_name":"Edit","tool_use_id":"t1","tool_input":{}}]}'
+`);
+  const r = await run(ws, "go", basePolicy("denied", DENIED));
+  ok("a run the CLI refused tool calls in still ends as the exit code says", r.verdict.state === "completed", r.verdict.state);
+  ok("...but the refusal is a warning on the verdict, not silence", r.verdict.warnings.some((w) => /refused 1 tool call.*Edit/.test(w)), JSON.stringify(r.verdict.warnings));
+}
+
 /* ============================================================= transcript */
 
 {
@@ -553,6 +573,13 @@ exit 2
     "the sandbox root is read-only; a CLI writing its own config under HOME dies with what looks like a permissions bug");
   ok("both shipped CLI presets are non-interactive", JSON.stringify(CLI_PRESETS.claude.argv({ model: null })).includes("--print") && JSON.stringify(CLI_PRESETS.codex.argv({ model: null })).includes("exec"),
     "a TUI in a container with no tty hangs instead of failing");
+  const claudeArgv = CLI_PRESETS.claude.argv({ model: null });
+  ok("the claude preset sets a permission mode that lets --print edit",
+    claudeArgv[claudeArgv.indexOf("--permission-mode") + 1] === "auto", JSON.stringify(claudeArgv),
+    );
+  const codexArgv = CLI_PRESETS.codex.argv({ model: null });
+  ok("the codex preset asks for a writable workspace, not exec's read-only default",
+    codexArgv[codexArgv.indexOf("--sandbox") + 1] === "workspace-write", JSON.stringify(codexArgv));
 }
 
 /* ============================================================ event log */

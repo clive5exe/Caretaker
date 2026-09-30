@@ -31,7 +31,7 @@
  *
  * Usage:
  *   node bin/runstore.mjs run --workspace DIR (--prompt-file F | --prompt T)
- *        [--config ops/.../config.json | --state-dir DIR] [--task T-1] [--parent r_…]
+ *        [--config ops/.../config.json | --state-dir DIR] [--events-dir DIR] [--task T-1] [--parent r_…]
  *        [--secret NAME ...] [--adapter cli] [--cli claude] [--model M]
  *        [--sandbox podman|none] [--net NET] [--timeout MS]
  *        [--egress host,host [--egress-network NET]]   per-run proxy, log in the archive (C-5)
@@ -272,7 +272,7 @@ if (isEntry) {
   const KNOWN = new Set([
     "workspace", "prompt-file", "prompt", "config", "state-dir", "task", "parent", "secret",
     "adapter", "cli", "model", "sandbox", "net", "timeout", "image", "egress", "egress-network",
-    "endpoint", "api-key-env", "max-turns", "skills", "harness-config",
+    "endpoint", "api-key-env", "max-turns", "skills", "harness-config", "events-dir",
   ]);
   const flags = { secret: [] };
   for (let i = 0; i < argv.length; i++) {
@@ -288,11 +288,24 @@ if (isEntry) {
     if (key === "secret") flags.secret.push(val);
     else flags[key] = val;
   }
-  const stateDirFromFlags = () => {
-    if (flags["state-dir"]) return resolve(flags["state-dir"]);
+  const projectFromFlags = () => {
     const cfgPath = resolve(flags.config ?? "ops/caretaker/config.json");
     const cfg = existsSync(cfgPath) ? JSON.parse(readFileSync(cfgPath, "utf8")) : {};
-    return stateDirFor(resolve(dirname(cfgPath), "..", "..", cfg.repo ?? "."), cfg);
+    return { cfg, root: resolve(dirname(cfgPath), "..", "..", cfg.repo ?? ".") };
+  };
+  const stateDirFromFlags = () => {
+    if (flags["state-dir"]) return resolve(flags["state-dir"]);
+    const { cfg, root } = projectFromFlags();
+    return stateDirFor(root, cfg);
+  };
+  // The project's event log, where its read model looks (readmodel.mjs), as
+  // verify.mjs and reconcile.mjs already do. Left to the harness default, a
+  // run on another repo logged into THIS checkout's ops/caretaker/events, so
+  // that repo's web client never saw it and this one showed runs it never had.
+  const eventsDirFromFlags = () => {
+    if (flags["events-dir"]) return resolve(flags["events-dir"]);
+    const { cfg, root } = projectFromFlags();
+    return join(root, cfg.events ?? "ops/caretaker/events");
   };
 
   if (cmd === "where") {
@@ -311,6 +324,7 @@ if (isEntry) {
       // are only ever from the command line.
       const { load: loadHarnessSettings, policyFlags, policyFor } = await import("./harness-config.mjs");
       const { policy } = policyFor("builder", loadHarnessSettings({ path: flags["harness-config"], workspace }), policyFlags(flags));
+      policy.events ??= eventsDirFromFlags();
       // --skills yes: stage the project's configured skills (S-1) into a fresh
       // directory OUTSIDE the workspace, for this run only.
       if (flags.skills === "yes") {

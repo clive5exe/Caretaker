@@ -23,7 +23,7 @@ import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 import {
   loadSpecs, buildOwnership, createGlobResolver, analyse, gate, findOrphaned,
-  validateDismissals, eventLines, writeEvents, norm,
+  validateDismissals, eventLines, writeEvents, norm, pathsFromDiffText,
 } from "./drift.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -409,6 +409,13 @@ const cli = (args, opts = {}) => {
     "--diff", "/dev/null"]);
   ok("CLI: an empty diff exits zero", empty.code === 0, `exit ${empty.code}`);
 
+  // A run's diff.patch, as runstore archives it. Read as a list of paths it is
+  // eight "paths" no spec owns, and the gate passed the very change it was given.
+  const patch = join(repo, "run.patch");
+  writeFileSync(patch, "diff --git a/src/lib/pricing.ts b/src/lib/pricing.ts\nindex 12ee743..4693ad3 100644\n--- a/src/lib/pricing.ts\n+++ b/src/lib/pricing.ts\n@@ -1,2 +1,2 @@\n-  return a - b\n+  return a + b\n");
+  const fromPatch = cli(["check", "--repo", repo, "--no-tree", "--events", events, "--quiet", "--diff", patch]);
+  ok("CLI: A UNIFIED PATCH ON --diff IS READ FOR ITS PATHS, and drift blocks", fromPatch.code === 1 && JSON.parse(fromPatch.stdout).drift[0]?.path === "src/lib/pricing.ts", fromPatch.stdout.slice(0, 300));
+
   ok("CLI: an unknown flag is refused rather than ignored",
     cli(["check", "--repo", repo, "--nope", "x"]).code === 2);
 
@@ -421,6 +428,16 @@ const cli = (args, opts = {}) => {
     JSON.parse(explained.stdout).owners.join() === "specs/checkout.md");
   ok("CLI: explain on an unowned path says unowned and exits non-zero",
     JSON.parse(cli(["explain", "src/x.ts", "--repo", repo]).stdout).verdict === "unowned");
+}
+
+{
+  ok("a path list stays a path list", JSON.stringify(pathsFromDiffText("b.ts\na.ts\n\n")) === '["a.ts","b.ts"]');
+  const rename = "diff --git a/old/x.ts b/new/x.ts\nsimilarity index 90%\nrename from old/x.ts\nrename to new/x.ts\n";
+  ok("a rename names both sides", JSON.stringify(pathsFromDiffText(rename)) === '["new/x.ts","old/x.ts"]', JSON.stringify(pathsFromDiffText(rename)));
+  const added = "diff --git a/n.ts b/n.ts\nnew file mode 100644\n--- /dev/null\n+++ b/n.ts\n@@ -0,0 +1 @@\n+x\n";
+  ok("a new file is its path, never /dev/null", JSON.stringify(pathsFromDiffText(added)) === '["n.ts"]', JSON.stringify(pathsFromDiffText(added)));
+  const tricky = "diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n--- a/not-a-header.ts\n+++ b/not-a-header.ts\n";
+  ok("known limit: a hunk line shaped like a header adds a path (over-reports, never under)", pathsFromDiffText(tricky).includes("a.ts") && pathsFromDiffText(tricky).includes("not-a-header.ts"));
 }
 
 console.log(failures === 0 ? "\n[drift] all checks passed" : `\n[drift] ${failures} FAILURE(S) above.`);
