@@ -4,7 +4,7 @@ summary: Every planned task with owner, estimate, dates and status. Generated fr
 status: current
 audience: [founder, eng, design, ops]
 owner: clive
-updated: 2026-09-29
+updated: 2026-09-30
 order: 2
 ---
 

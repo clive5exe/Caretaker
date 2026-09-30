@@ -46,17 +46,27 @@ export function claimedUpdated(text) {
 
 const gitOut = (repo, args) => execFileSync("git", ["-C", repo, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 256 * 1024 * 1024 });
 
-/** The last commit touching any of `paths`: { day, sha, subject }, or null if none. */
+/**
+ * The MAIN LINE, with each merge's changes: `--first-parent` walks the branch
+ * the repo is on, and `--diff-merges=first-parent` gives a merge the files it
+ * brought in. Without them a merge listed no files, and a change that
+ * reached the main line by a merge was dated by its branch commit, which can
+ * be older than the claim it broke (independent re-review, reproduced in
+ * bin/freshness.test.mjs).
+ */
+const MAIN_LINE = ["--first-parent", "--diff-merges=first-parent"];
+
+/** The last main-line commit touching any of `paths`: { day, sha, subject }, or null if none. */
 export function lastCommit(repo, paths) {
   if (!paths.length) return null;
-  const out = gitOut(repo, ["log", "-1", "--format=%cs%x09%h%x09%s", "--", ...paths]).trim();
+  const out = gitOut(repo, ["log", "-1", ...MAIN_LINE, "--format=%cs%x09%h%x09%s", "--", ...paths]).trim();
   if (!out) return null;
   const [day, sha, ...rest] = out.split("\t");
   return { day, sha, subject: rest.join("\t") };
 }
 
 /**
- * The last commit touching anything each spec governs, from the WHOLE history
+ * The last main-line commit touching anything each spec governs, from the WHOLE history
  * and matched with the SAME resolver ownership uses. History, because a
  * governed file that was deleted is a change the spec should know about.
  * The same resolver, because git's own glob pathspecs matched differently:
@@ -68,7 +78,7 @@ export function lastCommitsBySpec(repo, specIds, resolver) {
   const want = new Set(specIds);
   const out = new Map();
   if (!want.size) return out;
-  const log = gitOut(repo, ["log", "--no-renames", "--name-only", "--format=%x00%cs%x09%h%x09%s"]);
+  const log = gitOut(repo, ["log", ...MAIN_LINE, "--no-renames", "--name-only", "--format=%x00%cs%x09%h%x09%s"]);
   for (const chunk of log.split("\0")) {
     if (!chunk.trim()) continue;
     const [head, ...files] = chunk.split("\n");

@@ -131,6 +131,34 @@ ok("an unknown flag exits 2", spawnSync("node", [join(HERE, "freshness.mjs"), "-
   ok("a spec is never reported both orphaned (governs nothing) and stale (what it governs moved)", !(payOrphan && payStale), JSON.stringify({ payOrphan, payStale }));
 }
 
+{
+  // P-5, independent re-review: a change that reached the main line by a
+  // MERGE was dated by its branch commit, and `git log --name-only` lists no
+  // files for the merge itself. A branch commit older than the spec's claim,
+  // merged after it, left the spec looking current.
+  const at = (day) => ({ ...process.env, GIT_AUTHOR_DATE: `${day}T12:00:00Z`, GIT_COMMITTER_DATE: `${day}T12:00:00Z` });
+  const g = (day, ...a) => spawnSync("git", ["-C", R, "-c", "user.email=t@t", "-c", "user.name=t", ...a], { env: at(day), encoding: "utf8" });
+  const main = g("2026-08-10", "rev-parse", "--abbrev-ref", "HEAD").stdout.trim();
+  mkdirSync(join(R, "mg"), { recursive: true });
+  writeFileSync(join(R, "specs", "merge.md"), spec("2026-08-10", "mg/**"));
+  writeFileSync(join(R, "mg", "x.js"), "1\n");
+  writeFileSync(join(R, "docs", "merged.md"), "---\nupdated: 2026-08-10\n---\nx\n");
+  commit("2026-08-10", "mg", "specs/merge.md", "mg/x.js", "docs/merged.md");
+  g("2026-08-10", "checkout", "-q", "-b", "feat");
+  writeFileSync(join(R, "mg", "x.js"), "2\n");
+  writeFileSync(join(R, "docs", "merged.md"), "---\nupdated: 2026-08-10\n---\nedited\n");
+  g("2026-08-09", "add", "mg/x.js", "docs/merged.md");
+  g("2026-08-09", "commit", "-qm", "branch work, dated before the claim");
+  g("2026-08-20", "checkout", "-q", main);
+  const m = g("2026-08-20", "merge", "-q", "--no-ff", "-m", "merge feat", "feat");
+  ok("(setup) the branch merged", m.status === 0, m.stderr);
+  const d = freshness({ repo: R });
+  const st = d.stale.find((x) => x.spec === "specs/merge.md");
+  ok("code that arrived by a merge after the claim makes the spec stale, dated by the merge", st?.lastGoverned?.day === "2026-08-20" && st.lastGoverned.subject === "merge feat", JSON.stringify(st ?? d.governed.find((x) => x.spec === "specs/merge.md")));
+  const ly = d.lying.find((x) => x.doc === "docs/merged.md");
+  ok("a doc edited on a branch and merged after its claim is caught lying, dated by the merge", ly?.lastCommit?.day === "2026-08-20", JSON.stringify(ly));
+}
+
 rmSync(TMP, { recursive: true, force: true });
 console.log(failures ? `\n[freshness] ${failures} FAILED` : "\n[freshness] all checks passed");
 process.exit(failures ? 1 : 0);
