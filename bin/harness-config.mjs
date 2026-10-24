@@ -19,7 +19,9 @@
  *   }
  *
  * A role's settings are laid over `default`, and flags given for one run are
- * laid over both. The roles are the jobs the harness is asked to do:
+ * laid over both. `tools` is one setting: a role's `tools` REPLACES the
+ * default's whole, never merged key by key, so what a role's model may call
+ * is read in one place (bin/tools.mjs has the shape). The roles are the jobs the harness is asked to do:
  * `builder` (runstore run), `refuter` (verify refute), `reconciler`
  * (reconcile propose). `cli` names a built-in preset (claude, codex) or one of
  * the `clis` defined here; a custom CLI may not reuse a built-in's name,
@@ -47,11 +49,13 @@
  *   node bin/harness-config.mjs path
  * Exit: 0 ok, 1 the file is refused (the reason is printed), 2 misuse.
  */
-import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { CLI_PRESETS, cliLabel } from "./harness.mjs";
+import { within } from "./paths.mjs";
+import { ToolsError, checkTools } from "./tools.mjs";
 
 export class HarnessConfigError extends Error {
   constructor(code, message) {
@@ -63,8 +67,8 @@ export class HarnessConfigError extends Error {
 
 export const ROLES = ["builder", "refuter", "reconciler"];
 /** What a profile may set: which AI, which model, how long. Nothing about isolation. */
-export const PROFILE_KEYS = ["adapter", "cli", "model", "endpoint", "apiKeyEnv", "maxTurns", "timeoutMs", "image"];
-const ISOLATION = new Set(["sandbox", "net", "extraRunFlags", "extraCliArgs", "env", "allowLogDirInWorkspace", "logDir", "devcontainer", "graceMs", "events"]);
+export const PROFILE_KEYS = ["adapter", "cli", "model", "endpoint", "apiKeyEnv", "maxTurns", "timeoutMs", "image", "tools"];
+const ISOLATION = new Set(["sandbox", "net", "buildNetwork", "extraRunFlags", "extraCliArgs", "env", "allowLogDirInWorkspace", "logDir", "devcontainer", "graceMs", "events"]);
 const CLI_KEYS = ["argv", "modelFlag", "env", "skillsPath"];
 const SECRET_NAME = /KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL/i;
 const ADAPTERS = ["cli", "openai-compatible"];
@@ -73,17 +77,7 @@ export function defaultPath() {
   return join(process.env.XDG_CONFIG_HOME || join(homedir(), ".config"), "caretaker", "harness.json");
 }
 
-const real = (p) => {
-  try {
-    return realpathSync(p);
-  } catch {
-    return resolve(p);
-  }
-};
-const inside = (p, root) => {
-  const rel = relative(real(root), real(p));
-  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
-};
+const inside = within;
 
 function checkProfile(where, prof, clis) {
   if (prof === null || typeof prof !== "object" || Array.isArray(prof)) throw new HarnessConfigError("BAD_SHAPE", `${where} must be an object`);
@@ -105,6 +99,14 @@ function checkProfile(where, prof, clis) {
       throw new HarnessConfigError("BAD_VALUE", `${where}.apiKeyEnv must be the NAME of an environment variable, not a key`);
     }
     if ((k === "model" || k === "image") && typeof v !== "string") throw new HarnessConfigError("BAD_VALUE", `${where}.${k} must be a string`);
+    if (k === "tools") {
+      try {
+        checkTools(`${where}.tools`, v);
+      } catch (e) {
+        if (e instanceof ToolsError) throw new HarnessConfigError(e.code, e.message);
+        throw e;
+      }
+    }
   }
 }
 
@@ -223,6 +225,7 @@ export function policyFlags(flags) {
     timeoutMs: num("timeout"),
     sandbox: flags.sandbox,
     net: flags.net,
+    buildNetwork: flags["build-network"],
     image: flags.image,
   };
   return Object.fromEntries(Object.entries(out).filter(([, v]) => v !== undefined));

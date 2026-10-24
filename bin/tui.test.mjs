@@ -40,6 +40,10 @@ copyFileSync(join(HERE, "dashboard.mjs"), join(ops, "dashboard.mjs"));
 const cfgPath = join(ops, "config.json");
 writeFileSync(cfgPath, JSON.stringify({ name: "Fixture", board: "docs/board.json", runs: "ops/caretaker/runs.jsonl", repo: ".", activePhase: "P", operator: "five" }));
 const boardFile = join(root, "docs", "board.json");
+// Dates are relative to today. The Metrics screen reads a 14-day window, so a
+// fixture with fixed dates passed until the window moved past it (it did:
+// written 2026-09-29, failing by 2026-10-24 with "no verdict in range").
+const daysAgo = (n) => new Date(Date.now() - n * 86_400_000).toISOString().slice(0, 10);
 writeFileSync(
   boardFile,
   `${JSON.stringify(
@@ -49,9 +53,9 @@ writeFileSync(
         {
           name: "P",
           tasks: [
-            { id: "T-1", title: "rework me", owner: "b", est: "2h", status: "doing", ac: "x", gate: { qa: { verdict: "fail", at: "2026-09-29", history: [{ verdict: "fail", at: "2026-09-26" }] } } },
-            { id: "T-2", title: "queued one", owner: "b", est: "3h", status: "todo", ac: "y", questions: [{ id: "q1", q: "which port?", by: "b", at: "2026-09-28T10:00:00Z" }] },
-            { id: "T-3", title: "closed one", owner: "b", est: "1h", status: "done", completed: "2026-09-28", ac: "z", gate: { reviewer: { verdict: "pass", at: "2026-09-28" }, qa: { verdict: "pass", at: "2026-09-28" } } },
+            { id: "T-1", title: "rework me", owner: "b", est: "2h", status: "doing", ac: "x", gate: { qa: { verdict: "fail", at: daysAgo(1), history: [{ verdict: "fail", at: daysAgo(4) }] } } },
+            { id: "T-2", title: "queued one", owner: "b", est: "3h", status: "todo", ac: "y", questions: [{ id: "q1", q: "which port?", by: "b", at: `${daysAgo(2)}T10:00:00Z` }] },
+            { id: "T-3", title: "closed one", owner: "b", est: "1h", status: "done", completed: daysAgo(2), ac: "z", gate: { reviewer: { verdict: "pass", at: daysAgo(2) }, qa: { verdict: "pass", at: daysAgo(2) } } },
             { id: "T-4", title: "nobody looked", status: "todo" },
           ],
         },
@@ -66,9 +70,9 @@ const RUN = "r_0000abcd";
 writeFileSync(
   join(ops, "runs.jsonl"),
   [
-    { t: "2026-09-28T09:00:00Z", kind: "start", name: "builder", task: "T-1", run: RUN, model: "m-1" },
-    { t: "2026-09-28T09:30:00Z", kind: "end", name: "builder", task: "T-1", run: RUN, state: "completed", tokens: 1200, in: 200, cached: 800, write: 100, out: 100, turns: 4 },
-    { t: "2026-09-20T09:30:00Z", kind: "end", name: "builder", task: "T-3", state: "completed", tokens: 500 },
+    { t: `${daysAgo(2)}T09:00:00Z`, kind: "start", name: "builder", task: "T-1", run: RUN, model: "m-1" },
+    { t: `${daysAgo(2)}T09:30:00Z`, kind: "end", name: "builder", task: "T-1", run: RUN, state: "completed", tokens: 1200, in: 200, cached: 800, write: 100, out: 100, turns: 4 },
+    { t: `${daysAgo(10)}T09:30:00Z`, kind: "end", name: "builder", task: "T-3", state: "completed", tokens: 500 },
   ]
     .map((r) => JSON.stringify(r))
     .join("\n") + "\n",

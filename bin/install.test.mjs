@@ -60,6 +60,7 @@ const oldBoardSha = sha(join(DEST, "board.mjs"));
 
 const { open } = await import("./readmodel.mjs");
 let refusedBefore = false;
+let upgradeHint = false;
 // The pre-C-1 board runs its CLI when imported (no entry guard; that is what
 // C-1 fixed), so its status output is swallowed here rather than printed.
 const realLog = console.log;
@@ -68,10 +69,14 @@ try {
   await open(join(DEST, "config.json"));
 } catch (e) {
   refusedBefore = /predates the web API/.test(e.message);
+  // Independent QA: the message said to cp the files, which skips the
+  // backup and the rollback install.sh --upgrade gives.
+  upgradeHint = /bash \S+install\.sh --upgrade \S+/.test(e.message) && !/\bcp bin\//.test(e.message);
 } finally {
   console.log = realLog;
 }
 ok("the old install is one the web server refuses (so the upgrade has something to fix)", refusedBefore);
+ok("…and the refusal names install.sh --upgrade, not a bare cp", upgradeHint);
 
 /* ----------------------------------------------------------------- upgrade */
 const up = install(["--upgrade", T]);

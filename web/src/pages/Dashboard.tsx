@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { Link } from "react-router";
 import { KIND, levelTone } from "../api/labels";
+import { itemKey } from "../api/read";
 import { useResource, useStream } from "../api/store";
 import type { LogEvent, Snapshot } from "../api/types";
 import { ago, BarChart, Failed, fmtDuration, fmtTokens, fmtWhen, Loading, NotRecorded, PageHead, Provenance, RunLink, RunStatus, Seg, shortDay, TaskLink, Tile } from "../components/ui";
@@ -130,10 +131,10 @@ export function Dashboard() {
               {s.inbox.oldest.map((i) => {
                 const k = KIND[i.kind];
                 return (
-                  <div key={`${i.task}${i.kind}${i.since}`} style={{ display: "flex", gap: 10, alignItems: "center", padding: "7px 0", borderBottom: "1px solid var(--line)" }}>
+                  <div key={itemKey(i)} style={{ display: "flex", gap: 10, alignItems: "center", padding: "7px 0", borderBottom: "1px solid var(--line)" }}>
                     <Tile tone={k.tile} icon={k.icon} small />
                     <span style={{ minWidth: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {k.label} · <TaskLink id={i.task} /> {i.title}
+                      {k.label} · {i.task ? <TaskLink id={i.task} /> : null} {i.title}
                     </span>
                     <span className="muted" style={{ fontSize: 12 }}>
                       {ago(i.since) ?? "undated"}

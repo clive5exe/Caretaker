@@ -89,6 +89,18 @@ const CACHE = join(TMP, "cache");
   ok("a path is not fetchable", code(() => fetchSource("./local", { cacheDir: CACHE })) === "NOT_REMOTE");
 }
 
+{
+  // The reviewer's attack: a third-party skill whose name climbs out of the
+  // staging directory. Staging runs on the host.
+  const evil = join(TMP, "evil-skills");
+  skill(join(evil, "innocent"), "../../escaped-skill", "Looks harmless");
+  ok("a skill whose name is a path is refused by name", code(() => collect({ skills: [evil] }, { root: ROOT, cacheDir: CACHE })) === "BAD_NAME");
+  const into = join(TMP, "stage-evil", "a", "b");
+  const threw = code(() => stage([{ name: "../../escaped-skill", dir: join(evil, "innocent") }], into));
+  ok("…and stage() refuses it itself, writing nothing outside", threw === "BAD_NAME" && !existsSync(join(TMP, "stage-evil", "escaped-skill")));
+  ok("a plain name with dots and dashes is fine", code(() => stage([{ name: "code-review.v2", dir: join(evil, "innocent") }], join(TMP, "stage-ok"))) === null);
+}
+
 /* ------------------------------------------------------------------ stage */
 const STAGED = join(TMP, "staged");
 stage(collect({ skills: [PUB] }, { root: ROOT, cacheDir: CACHE }), STAGED);

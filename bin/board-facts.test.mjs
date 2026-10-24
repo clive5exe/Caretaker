@@ -64,6 +64,29 @@ function fixture(boardFile = join(HERE, "board.mjs")) {
 const task = (f, id) => JSON.parse(readFileSync(join(f.root, "docs", "board.json"), "utf8")).phases[0].tasks.find((t) => t.id === id);
 const ISO = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d+Z$/;
 
+/* 0. B-3: the spec on a card --------------------------------------------- */
+{
+  const f = fixture();
+  const b = JSON.parse(readFileSync(join(f.root, "docs", "board.json"), "utf8"));
+  b.phases[0].tasks.push(
+    { id: "T-4", title: "four", owner: "b", status: "todo", spec: "https://evil.example/x" },
+    { id: "T-5", title: "five", owner: "b", status: "todo", spec: "../outside.md" },
+    { id: "T-6", title: "six", owner: "b", status: "todo", spec: 'specs/"><script>x</script>.md' },
+    { id: "T-7", title: "seven", owner: "b", status: "todo", spec: "docs/javascript:alert(document.cookie)" },
+  );
+  writeFileSync(join(f.root, "docs", "board.json"), JSON.stringify(b));
+  const r = f.cli("build");
+  const md = readFileSync(join(f.root, "docs", "board.md"), "utf8");
+  // Independent review: the spec was on no card, and plain text where it was shown.
+  ok("a card links its spec, relative to board.md", r.status === 0 && md.includes('spec <a href="../specs/gov.md">specs/gov.md</a>') && md.includes('<a href="context.md">docs/context.md</a>'), md.slice(0, 600));
+  ok("a URL, an absolute path or one climbing out with .. is text, not a link", md.includes("spec https://evil.example/x</span>") && md.includes("spec ../outside.md</span>") && !md.includes('href="https:') && !md.includes('href="../../'));
+  ok("a spec path is escaped, in the text and in the href", !md.includes("<script>x") && md.includes("&lt;script&gt;x"));
+  // Independent re-review: the scheme check ran before the relative path
+  // stripped "docs/", so this became href="javascript:…".
+  ok("a scheme that only appears after the relative path is taken is not a link either", !/href="javascript/i.test(md) && md.includes("spec docs/javascript:alert(document.cookie)</span>"));
+  rmSync(f.root, { recursive: true, force: true });
+}
+
 /* 1. commands ------------------------------------------------------------- */
 {
   const f = fixture();
@@ -93,13 +116,35 @@ const ISO = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d+Z$/;
   ok("pr needs an http(s) url", f.cli("pr", "T-1", "not-a-url").status === 1);
   f.cli("pr", "T-1", "https://github.com/o/r/pull/9");
   ok("pr records the url", task(f, "T-1").pr.url === "https://github.com/o/r/pull/9");
+  const firstPr = task(f, "T-1").pr;
+  f.cli("pr", "T-1", "https://github.com/o/r/pull/10");
+  const pr = task(f, "T-1").pr;
+  // Independent QA: a second pr overwrote the first, and its by and at with it.
+  ok("a later pr is current, and the one it replaced is kept with its by and at", pr.url.endsWith("/10") && pr.history?.length === 1 && pr.history[0].url === firstPr.url && pr.history[0].by === "five" && pr.history[0].at === firstPr.at, JSON.stringify(pr));
 
   ok("drop needs a reason", f.cli("drop", "T-2").status === 1);
   r = f.cli("drop", "T-2", "out", "of", "scope");
   t = task(f, "T-2");
   ok("drop sets status dropped and records why", r.status === 0 && t.status === "dropped" && t.dropped.why === "out of scope");
   ok("a dropped task cannot be dropped again", f.cli("drop", "T-2", "again").status === 1);
+  const firstDrop = task(f, "T-2").dropped;
+  f.cli("todo", "T-2");
+  r = f.cli("drop", "T-2", "gone", "for", "good");
+  t = task(f, "T-2");
+  ok("a task reopened and dropped again keeps the earlier drop, with its by and at", r.status === 0 && t.dropped.why === "gone for good" && t.dropped.history?.[0]?.why === "out of scope" && t.dropped.history[0].at === firstDrop.at, JSON.stringify(t.dropped));
   ok("an unknown task is refused", f.cli("ask", "T-404", "x").status === 1);
+  // B-8: a verdict carries its instant beside its date, and history keeps it.
+  f.cli("qa", "T-2", "fail", "x");
+  f.cli("qa", "T-2", "pass", "y");
+  const qa = task(f, "T-2").gate.qa;
+  ok("a verdict records who (the operator) and via, and history keeps them", qa.by === "five" && qa.via === "cli" && qa.history?.[0]?.by === "five", JSON.stringify(qa));
+  ok("a verdict records the instant (t) beside the date (at), and history keeps the earlier one's", ISO.test(qa.t) && qa.at === qa.t.slice(0, 10) && ISO.test(qa.history?.[0]?.t ?? "") && qa.history[0].t <= qa.t, JSON.stringify(qa));
+  // W-4: a transition records who, when and from where; a refused one records nothing.
+  f.cli("start", "T-1");
+  const refused = f.cli("done", "T-1");
+  const moves = task(f, "T-1").transitions ?? [];
+  ok("a CLI transition records by the operator, an ISO at, via cli", moves.length === 1 && moves[0].cmd === "start" && moves[0].by === "five" && moves[0].via === "cli" && ISO.test(moves[0].at), JSON.stringify(moves));
+  ok("a refused done records no transition", refused.status === 1 && moves.every((m) => m.cmd !== "done"));
   ok("the usage lists the new commands", /spec-approve/.test(f.cli("help").stdout));
   rmSync(f.root, { recursive: true, force: true });
 }

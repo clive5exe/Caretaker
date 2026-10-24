@@ -153,6 +153,16 @@ const SECRET = "sk-test-EXFIL-9f8e7d6c5b4a";
   ok("run.json names the network, the proxy and the allowlist", rec.egress?.network === `fm-int-${RUN}` && rec.egress?.proxy === `fm-egress-${RUN}` && rec.egress?.allow?.[0] === "a.com");
   ok("run.json records the teardown", rec.egress?.cleanup?.length === 2);
   ok("the proxy variables' values are not in run.json's policy", !JSON.stringify(rec.policy).includes("http://proxy:8080"));
+  {
+    // A harness that THROWS: archive() never runs, and the proxy's raw log
+    // must not stay on disk with the secret in it.
+    const RUN2 = "r_0000beef";
+    const boom = { run: async () => { throw new Error("harness blew up"); } };
+    await runArchived(ws, "p", { runId: RUN2, sandbox: "podman" }, { stateDir: state, task: "T-1", secrets: { TEST_KEY: SECRET }, harness: boom, egress: { allow: ["a.com"], exec: f.exec } }).catch(() => null);
+    const raw = join(state, "runs", RUN2, "egress.jsonl");
+    const text = existsSync(raw) ? readFileSync(raw, "utf8") : "";
+    ok("when the harness throws, the egress log is still redacted on disk", text.includes("[redacted:TEST_KEY]") && !text.includes(SECRET), text || "(no log)");
+  }
   ok("an egress-attributed run with sandbox:none is refused", await throws(
     () => runArchived(ws, "p", { sandbox: "none" }, { stateDir: state, secrets: {}, harness, egress: { allow: [], exec: f.exec } }),
     /needs the agent in a container/,

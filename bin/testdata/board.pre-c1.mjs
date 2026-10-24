@@ -17,6 +17,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
+import os from "node:os";
 
 // PATHS COME FROM config.json, so this file is the same in every project. It
 // Paths come from config.json beside this file, so board.mjs is identical in
@@ -392,10 +393,12 @@ if (!cmd || cmd === "status") {
   // oldest first, and is only read by the code that wants it.
   hit.t.gate = hit.t.gate || {};
   const previous = hit.t.gate[cmd];
-  const entry = { verdict, at: today(), note: rest.slice(1).join(" ") || undefined };
-  const history = previous
-    ? [...(previous.history || []), { verdict: previous.verdict, at: previous.at, note: previous.note }]
-    : [];
+  // B-8 and W-16, mirrored: the instant beside the date, and who recorded it.
+  let by = "unknown";
+  try { by = CFG.operator ? String(CFG.operator) : os.userInfo().username; } catch { /* unknown */ }
+  const entry = { verdict, at: today(), t: new Date().toISOString(), by, via: "cli", note: rest.slice(1).join(" ") || undefined };
+  const kept = (e) => ({ verdict: e.verdict, at: e.at, ...(e.t ? { t: e.t } : {}), ...(e.by ? { by: e.by } : {}), ...(e.via ? { via: e.via } : {}), note: e.note });
+  const history = previous ? [...(previous.history || []), kept(previous)] : [];
   hit.t.gate[cmd] = { ...entry, ...(history.length ? { history } : {}) };
   d.meta.updated = today();
   save(d);
@@ -419,8 +422,9 @@ if (!cmd || cmd === "status") {
       // THE LOOP IS NOT OPTIONAL. A task is done when the gate passed, not when
       // the builder says so. Money/auth/tenant tasks additionally need security.
       const g = t.gate || {};
-      const needsSecurity = /fee|refund|stripe|payment|auth|tenant|plan gat|domain|entitle|money|sign in|oauth|consent|webhook/i
-        .test(`${t.title} ${t.note || ""}`);
+      const needsSecurity =
+    /\b(money|payments?|billing|auth|oauth|sign[- ]?in|login|credentials?|secrets?|api[- ]key|bearer|sandbox(ed|ing)?|isolation|egress|allowlist|escape|container socket|permission mode|cookies?|csrf|csp|cors|redact(ed|ion)?|needs security)\b/i
+      .test(`${t.title} ${t.note || ""}`);
       // Docs-only work has no executable surface — reviewer is the whole gate.
       // Roles that never write code, on tasks that name no code path.
       const DOC_ROLES = ["product-architect", "legal", "marketing", "product-manager"];
@@ -430,12 +434,42 @@ if (!cmd || cmd === "status") {
       const missing = [];
       if (g.reviewer?.verdict !== "pass") missing.push("reviewer");
       if (!docsOnly && g.qa?.verdict !== "pass") missing.push("qa");
-      if (!docsOnly && needsSecurity && g.security?.verdict !== "pass") missing.push("security (money/auth/tenant)");
+      if (!docsOnly && needsSecurity && g.security?.verdict !== "pass") missing.push("security (money/auth/isolation)");
+      // A FAIL blocks whether or not the gate was required: a refutation recorded
+      // on a docs-only task is still a failing check (independent review).
+      if (docsOnly && g.qa?.verdict === "fail") missing.push("qa");
+      // H-4: the drift gate's latest verdict for this task, from the event log.
+      // H-4, mirrored: a pass clears only the flagged paths it checked.
+      let drift = null;
+      try {
+        const dir = path.join(ROOT, CFG.events ?? "ops/caretaker/events");
+        const evs = [];
+        for (const f of fs.readdirSync(dir).filter((x) => /^events-\d{4}-\d{2}-\d{2}\.jsonl$/.test(x)).sort()) {
+          for (const line of fs.readFileSync(path.join(dir, f), "utf8").split("\n")) {
+            try { evs.push(JSON.parse(line)); } catch { continue; }
+          }
+        }
+        const open = new Map();
+        for (const e of evs.filter((x) => x?.kind === "gate" && x.task === t.id && x.verdict && x.source === undefined).sort((x, y) => (String(x.t) < String(y.t) ? -1 : String(x.t) > String(y.t) ? 1 : 0))) {
+          if (e.verdict === "fail") for (const p of Array.isArray(e.flagged) && e.flagged.length ? e.flagged : ["*"]) open.set(p, e);
+          else if (!Array.isArray(e.checked)) open.clear();
+          else { open.delete("*"); for (const p of e.checked) open.delete(p); }
+        }
+        if (open.size) {
+          const last = [...open.values()].sort((x, y) => (String(x.t) < String(y.t) ? 1 : -1))[0];
+          const paths = [...open.keys()].filter((p) => p !== "*");
+          drift = { verdict: "fail", detail: `${last.detail ?? "the drift gate failed"}${paths.length ? ` (still open: ${paths.join(", ")})` : ""}` };
+        }
+      } catch { /* no event log */ }
+      if (drift?.verdict === "fail") missing.push("drift gate");
       if (missing.length) {
         console.error(`\n  REFUSED — ${t.id} has not passed the gate${docsOnly ? " (docs-only: reviewer required)" : ""}.\n`);
         console.error(`  Missing: ${missing.join(", ")}\n`);
         console.error(`  Record verdicts first:`);
-        for (const m of missing) console.error(`    node ops/caretaker/board.mjs ${m.split(" ")[0]} ${t.id} pass`);
+        for (const m of missing) {
+          if (m === "drift gate") console.error(`    node bin/drift.mjs check --task ${t.id}   (the drift gate is failing: ${drift.detail ?? "the drift gate failed"}; change the spec, reconcile, or dismiss with a reason)`);
+          else console.error(`    node ops/caretaker/board.mjs ${m.split(" ")[0]} ${t.id} pass`);
+        }
         console.error(`\n  This is enforced. Builder-says-done is a status report, not a completion.\n`);
         process.exit(1);
       }
@@ -447,6 +481,10 @@ if (!cmd || cmd === "status") {
     else delete t.blockedReason;
     if (cmd === "block" && text) t.note = t.note ? `${t.note} — BLOCKED: ${text}` : `BLOCKED: ${text}`;
   }
+  // W-4 (an intentional change, mirrored here): who moved it, when, from where.
+  let by = "unknown";
+  try { by = CFG.operator ? String(CFG.operator) : os.userInfo().username; } catch { /* unknown */ }
+  (t.transitions ||= []).push({ cmd, by, at: new Date().toISOString(), via: "cli" });
   d.meta.updated = today();
   save(d);
   const o = build();

@@ -25,6 +25,7 @@ function Card({ t, gates }: { t: WorkSummary; gates: string[] }) {
         <span>{t.est ?? "no estimate"}</span>
         {t.runs ? <span>{t.runs} run{t.runs === 1 ? "" : "s"}</span> : null}
         {t.tokens != null ? <span>{fmtTokens(t.tokens)} tokens</span> : null}
+        {t.specPath ? <span className="mono">spec {t.specPath}</span> : null}
         {t.missingGates.length && !isFinished(t.lifecycle) ? <span>needs {t.missingGates.join(", ")}</span> : null}
       </div>
       {!isQueued(t.lifecycle) && !isFinished(t.lifecycle) ? <div className="why">{t.blocked ? `blocked: ${t.blocked}` : t.reason}</div> : null}

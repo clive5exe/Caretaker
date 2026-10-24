@@ -16,6 +16,7 @@ const WHY: Record<InboxKind, [string, string]> = {
   "spec-approval": ["The work item's governing spec changed since it was approved, or was never approved.", "Approved or rejected at its current content."],
   "gate-failure": ["Security failed, the drift gate failed, or the same gate failed repeatedly.", "A later pass, or the item is dropped."],
   "pr-review": ["Every required gate passed and a PR is recorded.", "Merged outside Caretaker, then closed."],
+  decision: ["A run declared a decision that no spec or ADR records.", "Kept as a draft ADR, or discarded with a reason."],
 };
 
 function Pane({ item, read }: { item: InboxItem; read: boolean }) {
@@ -34,9 +35,16 @@ function Pane({ item, read }: { item: InboxItem; read: boolean }) {
         </div>
       </div>
       <div className="chips">
-        <Link className="chip" to={`/work/${encodeURIComponent(item.task)}`}>
-          Work item {item.task}
-        </Link>
+        {item.task ? (
+          <Link className="chip" to={`/work/${encodeURIComponent(item.task)}`}>
+            Work item {item.task}
+          </Link>
+        ) : null}
+        {item.decision ? (
+          <Link className="chip" to={`/runs/${encodeURIComponent(item.decision.run)}`}>
+            Run {item.decision.run}
+          </Link>
+        ) : null}
         {item.owner ? <span className="chip">{item.owner}</span> : null}
       </div>
       <p style={{ margin: 0 }}>{item.fact}</p>
@@ -70,6 +78,14 @@ function Pane({ item, read }: { item: InboxItem; read: boolean }) {
           <pre className="code">{item.dismissCommand}</pre>
         </>
       ) : null}
+      {item.keepCommand && item.discardCommand ? (
+        <>
+          <p className="dim" style={{ margin: "12px 0 6px" }}>
+            Keep it as a draft ADR, or discard it with a reason, in the terminal:
+          </p>
+          <pre className="code">{`${item.keepCommand}\n${item.discardCommand}`}</pre>
+        </>
+      ) : null}
       {item.kind === "pr-review" && item.pr ? (
         <p className="ft">
           Review and merge <span className="mono">{item.pr}</span> outside Caretaker, then close with done.
@@ -77,10 +93,10 @@ function Pane({ item, read }: { item: InboxItem; read: boolean }) {
       ) : null}
       <div className="stack" style={{ marginTop: 14, gap: 10 }}>
         {item.actions.map((c, i) => (
-          <CommandForm key={`${item.task}${c.cmd}${i}`} task={item.task} command={c} />
+          <CommandForm key={`${item.task}${c.cmd}${i}`} task={item.task ?? ""} command={c} />
         ))}
         {!item.actions.length && item.kind === "gate-failure" ? (
-          <Link className="btn pri" to={`/work/${encodeURIComponent(item.task)}`} style={{ alignSelf: "flex-start" }}>
+          <Link className="btn pri" to={`/work/${encodeURIComponent(item.task ?? "")}`} style={{ alignSelf: "flex-start" }}>
             Open work item
           </Link>
         ) : null}

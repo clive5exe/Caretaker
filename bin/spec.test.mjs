@@ -40,6 +40,13 @@ const devFile = (obj, name = "devcontainer.json") => {
 ok("a file with no spec block is refused", parseSpec("# just prose\n").ok === false);
 
 {
+  // Hosts reach the proxy's argv and a shell script; only host names may.
+  const r = parseSpec(block("hosts: api.example.com, .example.org, $(touch${IFS}/tmp/x), *, .com, com\ngoverns: src/**"));
+  ok("a host that is not a host name is an error, named", !r.ok && ["$(touch${IFS}/tmp/x)", "*", ".com", "com"].every((h) => r.errors.some((e) => e.includes(`"${h}"`))), r.errors.join("; "));
+  ok("…and is dropped, so it never reaches an allowlist or a shell", JSON.stringify(r.spec.hosts) === '["api.example.com",".example.org"]', JSON.stringify(r.spec.hosts));
+}
+
+{
   const r = parseSpec(block("host: api.stripe.com\ngoverns: src/**"));
   ok(
     "a TYPO'D FIELD is an error, not silently ignored",
@@ -158,6 +165,18 @@ ok("a missing devcontainer.json is null, not a throw", readDevcontainer(join(wor
 }
 
 {
+  // The reviewer's cases: a toolchain name inside another word, or in the
+  // devcontainer's free-text name, opened hosts nobody declared.
+  const { spec } = parseSpec(block("governs: src/**"));
+  const allow = (dev) => toEgress(spec, dev).allow;
+  ok("an image named javascript-node does not imply java's registry", !allow({ image: "mcr.microsoft.com/devcontainers/javascript-node:1" }).includes("repo1.maven.org"));
+  ok("the devcontainer's free-text name implies nothing", allow({ name: "Let us go, trustworthy rust" }).length === 0, JSON.stringify(allow({ name: "Let us go, trustworthy rust" })));
+  ok("a feature whose name only CONTAINS a toolchain implies nothing", allow({ features: { "ghcr.io/acme/trustworthy:1": {}, "ghcr.io/acme/golden:2": {} } }).length === 0);
+  ok("an image that IS a toolchain implies its registry", allow({ image: "docker.io/library/node:22-alpine" }).join() === "registry.npmjs.org");
+  ok("a prototype key is not a toolchain", allow({ features: { "x/constructor:1": {}, "x/__proto__:1": {} } }).length === 0);
+}
+
+{
   const { spec } = parseSpec(block("governs: src/**"));
   ok("no devcontainer at all still yields an empty, closed allowlist",
     toEgress(spec, null).allow.length === 0 && toEgress(spec, null).denyByDefault === true);
@@ -179,6 +198,8 @@ ok("a missing devcontainer.json is null, not a throw", readDevcontainer(join(wor
 
 ok("a/**/b matches a/b with no directory between", globToRegExp("a/**/b").test("a/b"));
 ok("a/**/b matches a/x/y/b", globToRegExp("a/**/b").test("a/x/y/b"));
+ok("a/**/b does NOT match a/xb: ** spans whole directories only", !globToRegExp("a/**/b").test("a/xb") && !globToRegExp("src/**/foo.ts").test("src/xfoo.ts"));
+ok("…while src/**/foo.ts still matches src/foo.ts and src/x/y/foo.ts", globToRegExp("src/**/foo.ts").test("src/foo.ts") && globToRegExp("src/**/foo.ts").test("src/x/y/foo.ts"));
 ok("a dot is literal, not any-character", !globToRegExp("a.ts").test("axts"));
 
 console.log(failures === 0 ? "\n[spec] all checks passed" : `\n[spec] ${failures} FAILURE(S) above.`);

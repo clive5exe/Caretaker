@@ -1,0 +1,105 @@
+diff --git a/.github/workflows/implement-ready-issues.yml b/.github/workflows/implement-ready-issues.yml
+index 088a16a..303ad9d 100644
+--- a/.github/workflows/implement-ready-issues.yml
++++ b/.github/workflows/implement-ready-issues.yml
+@@ -3,6 +3,11 @@ name: Implement Ready Issues
+ # Runs an Oz cloud agent when an issue receives a ready-to-implement label.
+ # The agent follows .agents/skills/implementation/SKILL.md to implement the issue,
+ # open a pull request, and report progress back to the original issue.
++#
++# Setup (Caretaker runs the agent in place of Oz): the CLAUDE_CODE_OAUTH_TOKEN
++# repository secret must be set: your Claude subscription token, from
++# `claude setup-token`. The agent works in a sandbox that cannot push; it
++# writes .caretaker/pr.md and the Caretaker step opens the pull request.
+ 
+ on:
+   issues:
+@@ -27,16 +32,15 @@ jobs:
+     steps:
+       - name: Checkout repository
+         uses: actions/checkout@v4
+-      - name: Install spec validation skill
+-        run: npx skills add warpdotdev/common-skills --skill validate-changes-match-specs --agent warp --yes
+ 
+-      - name: Implement issue with Oz agent
+-        uses: warpdotdev/oz-agent-action@v1.0.25
++      - name: Implement issue with Caretaker agent
++        uses: ./.github/actions/caretaker-agent
+         id: implement
+         env:
+           # Authenticates the `gh` CLI the agent uses for issues, branches, and PRs.
+           GH_TOKEN: ${{ github.token }}
+         with:
++          skill: "${{ github.repository }}:implementation"
+           name: "Implement issue #${{ github.event.issue.number }}"
+           prompt: |
+             Use the Implementation skill in this repository to implement the GitHub issue that was just labeled ready to implement.
+@@ -56,44 +60,28 @@ jobs:
+             `.agents/skills/validate-changes-match-specs/SKILL.md` to confirm the
+             implementation matches those specs.
+ 
+-            If the issue has visible UI / interactive behavior (including anything
+-            mentioning drag-and-drop, screenshots, video, browser use, computer
+-            use, or verify-behavior), you MUST run
+-            `.agents/skills/verify-behavior/SKILL.md` in `verify` mode after the
+-            code change. This outer run already has computer use enabled
+-            (`computer_use: true`).
++            If the issue has visible UI / interactive behavior, run
++            `.agents/skills/verify-behavior/SKILL.md` in `verify` mode as far as
++            this environment allows. Computer use is NOT available here (this
++            runs on Caretaker, not Oz): verify with the tools you have, such as
++            tests or a headless browser if one is installed, and say plainly on
++            the issue what could not be verified. Never claim verification you
++            did not perform.
+ 
+-            Delegate GUI verification through Oz's dedicated `computer_use`
+-            capability with a concrete task and expected evidence. Do NOT call
+-            `request_computer_use` (it is emitted automatically when the
+-            computer-use subagent starts). Do NOT call parent-level
+-            `start_recording`/`stop_recording`, launch generic remote children as
+-            a substitute, or shell out to ffmpeg/x11grab/avfoundation/Playwright
+-            video. The computer-use subagent records natively and reports
+-            screenshots.
+-
+-            Require a native Oz video artifact for meaningful UI flows, plus
+-            durable `https://oz.warp.dev/runs/<id>` links on the issue and PR
+-            write-ups. Screenshots are supplementary. Prefer platform PR artifact
+-            helpers when available; do not invent `gh --attach` uploads of Oz
+-            recordings. Do not skip verification because unit tests passed or
+-            because PR creation failed. Do not claim success without the Oz
+-            evidence links (or an explicit blocker).
+-
+-            Then create a branch, push it, and open a GitHub pull request. Post
+-            implementation progress comments to the original issue as directed by
+-            the skill. For Oz follow-along links use only
+-            `https://oz.warp.dev/runs/<run-id>` (or
+-            `https://oz.staging.warp.dev/runs/<run-id>` on staging). Never post
+-            `app.warp.dev` links or `/run/` (singular) paths, and never use the
+-            GitHub Actions workflow URL as the follow-along link. Do not post a
+-            final success comment until the pull request has been opened (if PR
+-            creation is blocked, still post verification results and the branch
+-            compare URL). The final issue comment must include the PR URL when
+-            available, and the PR body must link to this issue using
+-            `Closes #${{ github.event.issue.number }}` when the implementation
+-            fully resolves it.
+-          warp_api_key: ${{ secrets.WARP_API_KEY }}
+-          profile: ${{ vars.WARP_AGENT_PROFILE || '' }}
+-          cloud: true
+-          computer_use: true
++            You cannot commit, push, or open the pull request yourself: the
++            repository's git directory is read-only in this sandbox. Leave your
++            changes in the working tree and write the pull request title (first
++            line) and body (the rest) to `.caretaker/pr.md`. The body must link
++            to this issue using `Closes #${{ github.event.issue.number }}` when
++            the implementation fully resolves it. The step after you commits
++            exactly the files you changed, pushes a branch, opens the pull
++            request and posts its link on the issue. Post progress comments to
++            the original issue as the skill directs, but do not post a final
++            success comment with a PR URL yourself, and never post Oz run links.
++          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
++          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
++          openai_api_key: ${{ secrets.OPENAI_API_KEY }}
++          cli: ${{ vars.CARETAKER_CLI || 'claude' }}
++          model: ${{ vars.CARETAKER_MODEL || '' }}
++          open_pr: "true"
++          issue: ${{ github.event.issue.number }}

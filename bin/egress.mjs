@@ -87,7 +87,24 @@ export function createProxy({ allowlist, onEvent = () => {}, allowPorts = [443, 
 
   server.on("connect", (req, clientSocket, head) => {
     const { host, port } = splitHostPort(req.url);
+    // THE ERROR HANDLER GOES ON FIRST, before any branch. On a CONNECT, Node
+    // removes the socket's default error listener, so a client that resets
+    // while being refused raised an uncaught ECONNRESET and the proxy died,
+    // taking every later request in the run with it (found by review,
+    // reproduced by egress.test). Both directions are torn down together, or a
+    // half-open socket leaks a descriptor per connection and the proxy dies
+    // quietly under load, which reads as "the network is flaky".
+    let upstream = null;
+    let refused = false;
+    const bail = (why) => {
+      // A reset after a refusal is the client leaving, not an egress error.
+      if (!refused) onEvent({ kind: "error", host, port, why: String(why?.message ?? why) });
+      upstream?.destroy();
+      clientSocket.destroy();
+    };
+    clientSocket.on("error", bail);
     const deny = (reason) => {
+      refused = true;
       onEvent({ kind: "refused", reason, host, port });
       // 403 rather than a silent drop. A dropped connection is
       // indistinguishable from a network fault and gets debugged as one for an
@@ -102,23 +119,14 @@ export function createProxy({ allowlist, onEvent = () => {}, allowPorts = [443, 
     if (!allowPorts.includes(port)) return deny(`port-${port}`);
     if (!allowed(host, allowlist)) return deny("not-allowed");
 
-    const upstream = connect(port, host, () => {
+    upstream = connect(port, host, () => {
       onEvent({ kind: "allowed", host, port });
       clientSocket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
       if (head?.length) upstream.write(head);
       upstream.pipe(clientSocket);
       clientSocket.pipe(upstream);
     });
-    // Both directions must be torn down together, or a half-open socket leaks a
-    // file descriptor per refused connection and the proxy dies quietly under
-    // load — which reads as "the network is flaky".
-    const bail = (why) => {
-      onEvent({ kind: "error", host, port, why: String(why?.message ?? why) });
-      upstream.destroy();
-      clientSocket.destroy();
-    };
     upstream.on("error", bail);
-    clientSocket.on("error", bail);
   });
 
   return server;

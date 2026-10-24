@@ -2,12 +2,19 @@
  * Specs and drift (PRODUCT.md §7). Read-only for drift: dismissal stays with
  * drift.mjs, and the page shows the exact command.
  */
+import { useEffect, useRef } from "react";
+import { useSearchParams } from "react-router";
 import { useResource } from "../api/store";
 import type { Specs } from "../api/types";
 import { Failed, fmtWhen, Loading, NotRecorded, PageHead, TaskLink, Verdict } from "../components/ui";
 
 export function SpecsPage() {
   const { data, error } = useResource<Specs>("/specs");
+  // B-3: a work item links here with ?path=<spec>; that row is marked and scrolled to.
+  const [params] = useSearchParams();
+  const focus = params.get("path");
+  const row = useRef<HTMLTableRowElement>(null);
+  useEffect(() => row.current?.scrollIntoView({ block: "center" }), [data, focus]);
   if (error) return <Failed error={error} />;
   if (!data) return <Loading what="specs" />;
   return (
@@ -26,7 +33,7 @@ export function SpecsPage() {
             <tbody>
               {data.specs.length ? (
                 data.specs.map((s) => (
-                  <tr key={s.id}>
+                  <tr key={s.id} ref={s.id === focus ? row : undefined} className={s.id === focus ? "focus" : undefined}>
                     <td className="mono">{s.id}</td>
                     <td className="mono">{s.governs.length ? s.governs.join(", ") : <span className="muted">nothing declared</span>}</td>
                     <td>{s.errors.length ? <span className="chip fail">{s.errors.join("; ")}</span> : <span className="chip pass">ok</span>}</td>
@@ -43,6 +50,7 @@ export function SpecsPage() {
           </table>
         </div>
       </div>
+      {focus && !data.specs.some((s) => s.id === focus) ? <p className="ft">{focus} is not a spec with a spec block under {data.specsDir}/, so it governs nothing.</p> : null}
       {data.skipped.length ? <p className="ft">{data.skipped.length} file(s) skipped: {data.skipped.map((s) => s.path).join(", ")}</p> : null}
 
       <div className="card">

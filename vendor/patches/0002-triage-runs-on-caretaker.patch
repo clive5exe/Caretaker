@@ -1,0 +1,43 @@
+diff --git a/.github/workflows/triage-issues.yml b/.github/workflows/triage-issues.yml
+index 83648b4..e88f0d3 100644
+--- a/.github/workflows/triage-issues.yml
++++ b/.github/workflows/triage-issues.yml
+@@ -12,7 +12,10 @@ name: Triage New Issues
+ # v1.0.25–v1.0.27). The wait step below polls stable `oz run get` until the run
+ # finishes and forwards the final status message to the apply job.
+ #
+-# Setup: the WARP_API_KEY repository secret must be set (the Oz API key).
++# Setup: the CLAUDE_CODE_OAUTH_TOKEN repository secret must be set: your Claude
++# subscription token, from `claude setup-token`. Caretaker runs the agent in
++# place of Oz and returns the final triage JSON directly, so the wait step
++# below takes its fast path and never polls Oz.
+ 
+ on:
+   issues:
+@@ -36,8 +39,8 @@ jobs:
+       - name: Checkout repository
+         uses: actions/checkout@v4
+ 
+-      - name: Triage with Oz agent
+-        uses: warpdotdev/oz-agent-action@v1.0.25
++      - name: Triage with Caretaker agent
++        uses: ./.github/actions/caretaker-agent
+         id: triage
+         env:
+           GH_TOKEN: ${{ github.token }}
+@@ -66,10 +69,11 @@ jobs:
+             Return the JSON result the skill specifies as your final response;
+             the apply job applies the label and comment from it. Do not comment
+             on, label, or otherwise mutate the issue directly from this job.
+-          warp_api_key: ${{ secrets.WARP_API_KEY }}
+-          profile: ${{ vars.WARP_AGENT_PROFILE || '' }}
+-          cloud: true
+-          computer_use: true
++          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
++          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
++          openai_api_key: ${{ secrets.OPENAI_API_KEY }}
++          cli: ${{ vars.CARETAKER_CLI || 'claude' }}
++          model: ${{ vars.CARETAKER_MODEL || '' }}
+ 
+       # oz-agent-action@v1.0.25 sets agent_output to `oz agent run-cloud` stdout.
+       # For cloud runs that stdout is spawn metadata while the remote agent is

@@ -62,6 +62,11 @@ for (const [name, task, ctx, stage, reason] of rows) {
   ok("rework counts the fails on that gate", r.rework === 2);
   const sec = stageOf({ ...base, title: "rotate the auth token", gate: { reviewer: pass(), qa: pass() } }, { now: NOW });
   ok("an auth task with reviewer and qa passed is in review, waiting on security", sec.stage === "review" && /security/.test(sec.reason));
+  // QA review: nothing above tells missingGates from a hardcoded list of all
+  // three gates. A plain task does not need security, so a security fail on it
+  // is not a failed REQUIRED gate: it stays in review, waiting on qa.
+  const plain = stageOf({ ...base, status: "doing", gate: { reviewer: pass(), security: fail("2026-09-21") } }, { now: NOW });
+  ok("a plain task's security fail is not rework: it is not a required gate", plain.stage === "review" && /qa/.test(plain.reason) && !plain.rework, JSON.stringify(plain));
 }
 
 /* 2. commandsFor ----------------------------------------------------------- */

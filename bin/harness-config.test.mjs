@@ -44,7 +44,7 @@ const GOOD = {
   clis: { mine: { argv: ["mine", "--print"], modelFlag: "--model", env: { LANG: "C" }, skillsPath: "/tmp/agent-home/.mine/skills" } },
 };
 ok("a file choosing a CLI, a model and an API endpoint per role is accepted", code(() => validate(GOOD)) === null);
-for (const k of ["sandbox", "net", "extraRunFlags", "env", "allowLogDirInWorkspace"]) {
+for (const k of ["sandbox", "net", "buildNetwork", "extraRunFlags", "env", "allowLogDirInWorkspace"]) {
   ok(`isolation is not a setting: ${k} is refused by name`, code(() => validate({ default: { [k]: k === "sandbox" ? "none" : "x" } })) === "ISOLATION_KEY");
 }
 ok("a key value is refused: name the variable instead", code(() => validate({ roles: { builder: { apiKey: "sk-live-123" } } })) === "KEY_VALUE");
