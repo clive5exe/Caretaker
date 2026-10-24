@@ -173,10 +173,19 @@ export function buildArgs({ image, limits, workdir, net = "none", cmd, runtime =
     net,
   ];
   // A NULL LIMIT MEANS THE KERNEL CANNOT ENFORCE IT HERE, and the caller has
-  // already been told. Passing the flag anyway does not degrade gracefully — it
-  // fails the run with an OCI error that reads like a podman bug.
-  if (limits.memory) args.push("--memory", limits.memory);
-  if (limits.cpus) args.push("--cpus", limits.cpus);
+  // already been told (checkLimits sets exactly null). Passing the flag anyway
+  // does not degrade gracefully — it fails the run with an OCI error that reads
+  // like a podman bug. ONLY null is that signal: a limit that is missing, "",
+  // 0 or false reached here from a file the agent can edit, and used to drop
+  // the flag with no warning (independent security review, E-1). It is refused.
+  for (const [name, flag] of [["memory", "--memory"], ["cpus", "--cpus"]]) {
+    const v = limits[name];
+    if (v === null) continue;
+    if (typeof v !== "string" || !v.trim()) {
+      throw new Error(`refusing to run with ${name} ceiling ${JSON.stringify(v)}: only null (dropped by preflight, and warned about) means no ${flag}`);
+    }
+    args.push(flag, v);
+  }
   // A fork bomb is the cheapest way for a runaway agent to take the host down
   // and costs nothing to prevent. devcontainer.json has no field for it, so it
   // is a floor rather than something derived.

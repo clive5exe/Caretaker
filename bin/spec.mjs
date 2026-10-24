@@ -133,12 +133,36 @@ export function readDevcontainer(path) {
  * which is a deliberate reinterpretation and is why it is written down. A run
  * with no ceiling takes the box down, and "the file did not say" is not a reason
  * to allow it.
+ *
+ * NOR IS "THE FILE SAID SOMETHING THAT IS NOT A SIZE". The file is in the
+ * workspace, where the last run's agent could edit it. A `memory` of `""`, `0`
+ * or `false` used to pass `??` here, and `if (limits.memory)` in sandbox.mjs
+ * then emitted no --memory and no warning: the ceiling was gone, silently
+ * (independent security review, E-1, reproduced end to end). So a value that
+ * is present must be a size (`512m`, `2gb`, `1.5G`, or bytes as a positive
+ * integer) or a positive cpu count, and anything else is refused by name.
  */
+export const MEMORY_SIZE = /^\d+(\.\d+)?\s*[kmgt]?i?b?$/i;
+
+function memoryLimit(v) {
+  if (v === undefined) return "2gb";
+  if (typeof v === "number" && Number.isInteger(v) && v > 0) return String(v);
+  if (typeof v === "string" && MEMORY_SIZE.test(v.trim()) && parseFloat(v) > 0) return v.trim();
+  throw new Error(`refusing hostRequirements.memory ${JSON.stringify(v)}: a memory ceiling is a size such as "512m" or "2gb", and it is not optional`);
+}
+
+function cpuLimit(v) {
+  if (v === undefined) return "2";
+  const n = typeof v === "number" ? v : typeof v === "string" && /^\d+(\.\d+)?$/.test(v.trim()) ? Number(v) : NaN;
+  if (Number.isFinite(n) && n > 0) return String(n);
+  throw new Error(`refusing hostRequirements.cpus ${JSON.stringify(v)}: a cpu ceiling is a positive number, and it is not optional`);
+}
+
 export function toLimits(dev) {
   const hr = dev?.hostRequirements ?? {};
   return {
-    memory: hr.memory ?? "2gb",
-    cpus: String(hr.cpus ?? 2),
+    memory: memoryLimit(hr.memory),
+    cpus: cpuLimit(hr.cpus),
     // A `build.dockerfile` is not an image name; it is built by
     // environment.mjs (E-5), which is the one place that resolves an image.
     image: dev?.image ?? null,

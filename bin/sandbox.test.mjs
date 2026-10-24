@@ -44,6 +44,27 @@ const has = (a, flag, value) => {
 /* -------------------------------------------------------------- the flags */
 
 {
+  // Independent security review (E-1), reproduced: a falsy memory or cpus from
+  // the agent-editable devcontainer reached here and `if (limits.memory)`
+  // emitted no flag and no warning. Only null, which checkLimits sets after
+  // warning, means "no flag"; anything else that is not a size is refused.
+  const refuses = (over) => {
+    try {
+      args(over);
+      return false;
+    } catch (e) {
+      return /refusing to run with (memory|cpus) ceiling/.test(e.message);
+    }
+  };
+  for (const v of [undefined, "", 0, false, "   ", 5, {}]) {
+    ok(`a memory ceiling of ${v === undefined ? "undefined" : JSON.stringify(v)} is REFUSED, never a run with no --memory`, refuses({ memory: v }));
+    ok(`a cpu ceiling of ${v === undefined ? "undefined" : JSON.stringify(v)} is REFUSED, never a run with no --cpus`, refuses({ cpus: v }));
+  }
+  ok("null memory, set by preflight after a warning, is the one way to run without --memory", !has(args({ memory: null }), "--memory") && has(args({ memory: null }), "--cpus", "2"));
+  ok("null cpus likewise", !has(args({ cpus: null }), "--cpus") && has(args({ cpus: null }), "--memory", "2gb"));
+}
+
+{
   const a = args();
   ok("no network by default", has(a, "--network", "none"));
   ok("memory limit is passed", has(a, "--memory", "2gb"));
