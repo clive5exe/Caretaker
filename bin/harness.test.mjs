@@ -29,6 +29,7 @@ import {
   buildContainerArgv,
   emptyCost,
   finalTextOf,
+  devcontainerFor,
   normalisePolicy,
   parseUsage,
   permissionDenials,
@@ -197,6 +198,15 @@ ok("cli is the default adapter", normalisePolicy({}).adapter === "cli",
   "the SDKs are API-key only; defaulting to one bills API rates over a subscription");
 ok("the network is closed by default", normalisePolicy({}).net === "none");
 ok("there is always a timeout, even when nobody asked for one", normalisePolicy({}).timeoutMs > 0);
+{
+  // E-5, round 5: the devcontainer path is the WORKSPACE's. Read relative to
+  // the current directory, a run of this checkout against another repo read
+  // this checkout's file while judging it against the other workspace.
+  const ws = join(tmpdir(), "harness-devcontainer-ws");
+  ok("a relative devcontainer path resolves against the workspace, not the current directory", devcontainerFor(ws, normalisePolicy({})) === join(ws, ".devcontainer", "devcontainer.json") && !devcontainerFor(ws, normalisePolicy({})).startsWith(process.cwd()), devcontainerFor(ws, normalisePolicy({})));
+  ok("…a policy's own relative path likewise", devcontainerFor(ws, { devcontainer: "env/dc.json" }) === join(ws, "env", "dc.json"));
+  ok("…and an absolute path, the operator's own file outside the workspace, is kept", devcontainerFor(ws, { devcontainer: "/opt/env/devcontainer.json" }) === "/opt/env/devcontainer.json");
+}
 {
   // E-1: the operator's ceilings on what devcontainer.json may declare are
   // policy, per run, with defaults equal to toLimits' defaults.

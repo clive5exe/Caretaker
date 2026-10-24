@@ -339,7 +339,7 @@ const systemPrompt = (containerised, skills) =>
  * file, toolUse }, never throws for an outcome (a failed or killed run is a
  * result), and throws only when nothing could run at all.
  */
-export async function openaiCompatibleAdapter({ workspace, prompt, policy, paths, warnings, HarnessError, imageFor }) {
+export async function openaiCompatibleAdapter({ workspace, prompt, policy, paths, warnings, HarnessError, imageFor, devcontainerFor }) {
   if (!policy.endpoint) throw new HarnessError('adapter "openai-compatible" needs policy.endpoint, e.g. http://localhost:11434/v1');
   if (!policy.model) throw new HarnessError('adapter "openai-compatible" needs policy.model; the server serves more than one');
   const url = `${String(policy.endpoint).replace(/\/+$/, "")}/chat/completions`;
@@ -380,7 +380,7 @@ export async function openaiCompatibleAdapter({ workspace, prompt, policy, paths
   } else {
     // The workspace's devcontainer, not the current directory's (E-5, round 5:
     // harness.mjs cliAdapter says why). One resolved path for every reader.
-    const devPath = resolve(workspace, policy.devcontainer);
+    const devPath = devcontainerFor(workspace, policy);
     const dev = readDevcontainer(devPath);
     const limits = toLimits(dev);
     // The file can lower a ceiling; it cannot raise it past the operator's, or the host (E-1).

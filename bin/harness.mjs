@@ -180,6 +180,16 @@ export const cliLabel = (cli) =>
   cli === undefined ? DEFAULTS.cli : typeof cli === "string" ? cli : cli?.name ? `custom:${cli.name}` : "custom";
 
 /**
+ * THE WORKSPACE'S devcontainer file. `policy.devcontainer` defaults to a
+ * relative path, and read as written it was the CURRENT DIRECTORY's file:
+ * a run of one checkout against another repo read this checkout's
+ * devcontainer while judging acceptance against the other workspace, so an
+ * unaccepted workspace Dockerfile built (independent security review, E-5,
+ * round 5). Both adapters resolve through here; an absolute path is kept.
+ */
+export const devcontainerFor = (workspace, policy) => resolve(workspace, policy.devcontainer ?? DEFAULTS.devcontainer);
+
+/**
  * The image a containerised run uses (E-5): policy.image, else devcontainer
  * `image`, else its `build.dockerfile` built now. Returns the id it resolved
  * to as well, so the run records the environment it actually ran in.
@@ -1048,7 +1058,7 @@ async function cliAdapter({ workspace, prompt, policy, paths, warnings }) {
     // THIS checkout's file while judging it against the other workspace, so
     // an unaccepted workspace Dockerfile built (independent security review,
     // E-5, round 5). Resolved here once; everything below sees the same path.
-    const devPath = resolve(workspace, policy.devcontainer);
+    const devPath = devcontainerFor(workspace, policy);
     const dev = readDevcontainer(devPath);
     const limits = toLimits(dev);
     // The file can lower a ceiling; it cannot raise it past the operator's, or the host (E-1).
@@ -1159,7 +1169,7 @@ export const ADAPTERS = {
   sdk: sdkAdapter,
   "openai-compatible": (args) => {
     args.warnings.push(...unreachable(args.policy.tools, "openai-compatible", null));
-    return openaiCompatibleAdapter({ ...args, HarnessError, imageFor });
+    return openaiCompatibleAdapter({ ...args, HarnessError, imageFor, devcontainerFor });
   },
 };
 
