@@ -1,7 +1,7 @@
 {
   "meta": {
     "name": "Caretaker",
-    "updated": "2026-09-30"
+    "updated": "2026-10-24"
   },
   "phases": [
     {
@@ -147,7 +147,7 @@
           "title": "Appended gate verdicts, before there is data to lose",
           "owner": "backend",
           "est": "2h",
-          "status": "todo",
+          "status": "done",
           "deps": [],
           "ac": "a gate records every verdict rather than the latest, and rework rate and first-pass rate are computable from the board",
           "note": "CHEAP NOW, IMPOSSIBLE RETROACTIVELY. The board keeps one verdict per gate, so a task that failed qa three times and passed once reads as a pass. Two of the KPIs that matter most are therefore unmeasurable, and the dashboard already prints a warning saying so.",
@@ -162,14 +162,23 @@
               "at": "2026-09-29",
               "note": "Independent review (fresh agent, not the builder): recordVerdict (board.mjs:560) appends the previous verdict to history, oldest first, and keeps .verdict as the latest; gateStats and quality in dashboard.mjs count every attempt and treat any past fail as rework; bin and ops copies are identical, tests pass."
             }
-          }
+          },
+          "completed": "2026-10-24",
+          "transitions": [
+            {
+              "cmd": "done",
+              "by": "ghost",
+              "at": "2026-10-24T14:28:58.205Z",
+              "via": "cli"
+            }
+          ]
         },
         {
           "id": "P-3",
           "title": "A spec declares which paths it governs",
           "owner": "architect",
           "est": "4h",
-          "status": "todo",
+          "status": "done",
           "deps": [
             "P-1"
           ],
@@ -200,7 +209,16 @@
                 }
               ]
             }
-          }
+          },
+          "completed": "2026-10-24",
+          "transitions": [
+            {
+              "cmd": "done",
+              "by": "ghost",
+              "at": "2026-10-24T14:28:58.388Z",
+              "via": "cli"
+            }
+          ]
         },
         {
           "id": "P-4",
@@ -734,7 +752,7 @@
           "title": "Adversarial verify as a first-class step",
           "owner": "architect",
           "est": "1d",
-          "status": "doing",
+          "status": "done",
           "deps": [
             "H-1"
           ],
@@ -765,7 +783,16 @@
                 }
               ]
             }
-          }
+          },
+          "completed": "2026-10-24",
+          "transitions": [
+            {
+              "cmd": "done",
+              "by": "ghost",
+              "at": "2026-10-24T14:28:59.233Z",
+              "via": "cli"
+            }
+          ]
         },
         {
           "id": "H-4",
@@ -804,7 +831,7 @@
           "title": "Reconciliation run: propose the spec change, do not make it",
           "owner": "backend",
           "est": "1d",
-          "status": "doing",
+          "status": "done",
           "deps": [
             "H-4"
           ],
@@ -835,7 +862,16 @@
                 }
               ]
             }
-          }
+          },
+          "completed": "2026-10-24",
+          "transitions": [
+            {
+              "cmd": "done",
+              "by": "ghost",
+              "at": "2026-10-24T14:28:59.421Z",
+              "via": "cli"
+            }
+          ]
         },
         {
           "id": "H-6",
@@ -866,7 +902,7 @@
           "title": "Drift direction is a project default, overridable per task",
           "owner": "architect",
           "est": "1d",
-          "status": "doing",
+          "status": "done",
           "deps": [
             "H-4",
             "H-5"
@@ -892,7 +928,16 @@
                 }
               ]
             }
-          }
+          },
+          "completed": "2026-10-24",
+          "transitions": [
+            {
+              "cmd": "done",
+              "by": "ghost",
+              "at": "2026-10-24T14:28:59.635Z",
+              "via": "cli"
+            }
+          ]
         },
         {
           "id": "H-8",
@@ -1016,7 +1061,7 @@
           "title": "A task points at its spec, and a stale doc is visible",
           "owner": "backend",
           "est": "4h",
-          "status": "doing",
+          "status": "done",
           "deps": [
             "P-1"
           ],
@@ -1063,14 +1108,23 @@
                 }
               ]
             }
-          }
+          },
+          "completed": "2026-10-24",
+          "transitions": [
+            {
+              "cmd": "done",
+              "by": "ghost",
+              "at": "2026-10-24T14:28:59.879Z",
+              "via": "cli"
+            }
+          ]
         },
         {
           "id": "B-4",
           "title": "KPIs: delivery and AI, and the anti-KPIs left out on purpose",
           "owner": "backend",
           "est": "2d",
-          "status": "doing",
+          "status": "done",
           "deps": [
             "B-2",
             "P-2"
@@ -1102,7 +1156,16 @@
                 }
               ]
             }
-          }
+          },
+          "completed": "2026-10-24",
+          "transitions": [
+            {
+              "cmd": "done",
+              "by": "ghost",
+              "at": "2026-10-24T14:29:00.062Z",
+              "via": "cli"
+            }
+          ]
         },
         {
           "id": "B-5",
@@ -1164,7 +1227,7 @@
           "title": "One append-only event log, tailable, with the keys as fields",
           "owner": "backend",
           "est": "1d",
-          "status": "doing",
+          "status": "done",
           "deps": [],
           "spec": "docs/events.md",
           "ac": "every run appends JSONL to a day-rotated events file, tail -f and jq give the per-task, per-run and failures-only views with no extra tooling, and a half-written final line is skipped rather than throwing",
@@ -1187,7 +1250,16 @@
               "at": "2026-09-29",
               "note": "Independent QA (fresh agent, not the builder): bin/events.test.mjs passes and harness.run appends start/end events per run. By hand, the three documented jq -R 'fromjson?' views read a file with a fragment, tail -F showed a live append, and read() skipped and counted the fragment. Removing the fragment-terminating newline, or making parse throw, turns the test red. Minor: the documented failures view selects only .verdict=fail, so an errored run (level error, no verdict) is missing from it."
             }
-          }
+          },
+          "completed": "2026-10-24",
+          "transitions": [
+            {
+              "cmd": "done",
+              "by": "ghost",
+              "at": "2026-10-24T14:29:00.258Z",
+              "via": "cli"
+            }
+          ]
         },
         {
           "id": "B-7",
@@ -1374,7 +1446,7 @@
           "title": "ADR-0002 accepted or rejected",
           "owner": "founder",
           "est": "30m",
-          "status": "doing",
+          "status": "done",
           "deps": [],
           "ac": "docs/decisions/0002-an-optional-web-client.md says accepted or rejected, and records whether any W-task may start before H-1 passes qa",
           "note": "Spec: specs/caretaker-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Accepted 2026-09-29 by Five. It records that no W-task starts before H-1's qa gate passes. PR #9 carries W-tasks while H-1's latest qa verdict is still fail. Resolving that is a decision, not a build step.",
@@ -1389,14 +1461,23 @@
               "at": "2026-09-29",
               "note": "Independent QA (fresh agent, not the builder): read docs/decisions/0002-an-optional-web-client.md at 46927f2. Frontmatter status: accepted, and the Decision section says Accepted on 2026-09-29 by Five and records the ordering call explicitly: No W-task starts before H-1's qa gate passes; C-1/C-2/C-3/C-6 may start now; C-4/C-5 wait on H-1 and B-6. Both halves of the AC hold. Outside this AC: the board contradicts that recorded call (W-1..W-17 are doing while H-1 is todo with qa fail), and the ADR's closing line that the tasks are still not on the board is stale."
             }
-          }
+          },
+          "completed": "2026-10-24",
+          "transitions": [
+            {
+              "cmd": "done",
+              "by": "ghost",
+              "at": "2026-10-24T14:29:00.652Z",
+              "via": "cli"
+            }
+          ]
         },
         {
           "id": "C-1",
           "title": "board.mjs importable; golden CLI test; lock",
           "owner": "backend",
           "est": "1d",
-          "status": "doing",
+          "status": "done",
           "deps": [],
           "ac": "board.mjs exports its domain functions behind an entry guard, a golden test proves the CLI's output and exit codes unchanged, and the read-modify-write is locked",
           "note": "Spec: specs/caretaker-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built in PR #9, which also carries C-1, C-2, C-3, C-6 and U-2. Gate verdicts not recorded: nobody closes their own work.",
@@ -1411,14 +1492,23 @@
               "at": "2026-09-29",
               "note": "Independent QA (fresh agent, not the builder): bin/board-lib.test.mjs passes; the frozen testdata/board.pre-c1.mjs equals 15a73a2:bin/board.mjs (renamed), and mutating the REFUSED text, removing withLock, or dropping the isEntry guard each turns the golden, 12-writer race, or import checks red by name. A live lock holder is waited on and refused after 5s, and a 60s-old lock is taken over."
             }
-          }
+          },
+          "completed": "2026-10-24",
+          "transitions": [
+            {
+              "cmd": "done",
+              "by": "ghost",
+              "at": "2026-10-24T14:29:00.874Z",
+              "via": "cli"
+            }
+          ]
         },
         {
           "id": "C-2",
           "title": "dashboard metrics exported; identical page",
           "owner": "backend",
           "est": "1d",
-          "status": "doing",
+          "status": "done",
           "deps": [],
           "ac": "dashboard.mjs exports pure metric functions, and a back-to-back test proves docs/board.html is unchanged",
           "note": "Spec: specs/caretaker-web/TECH.md, accepted with ADR-0002, so there is no per-task spec approval here. Built in PR #9, which also carries C-1, C-2, C-3, C-6 and U-2. Gate verdicts not recorded: nobody closes their own work.",
@@ -1433,14 +1523,23 @@
               "at": "2026-09-29",
               "note": "Independent QA (fresh agent, not the builder): bin/dashboard-lib.test.mjs passes against a frozen pre-C-2 copy that matches 83a3107^ (renamed); all spec-named functions are exported and read no fs or clock beyond a defaulted now. Mutating esc(), the rework sum, and the isEntry guard each fails the back-to-back page diff or the import checks by name."
             }
-          }
+          },
+          "completed": "2026-10-24",
+          "transitions": [
+            {
+              "cmd": "done",
+              "by": "ghost",
+              "at": "2026-10-24T14:29:01.082Z",
+              "via": "cli"
+            }
+          ]
         },
         {
           "id": "C-3",
           "title": "lifecycle.mjs: stageOf, commandsFor",
           "owner": "backend",
           "est": "1d",
-          "status": "doing",
+          "status": "done",
           "deps": [
             "C-1"
           ],
@@ -1464,7 +1563,16 @@
                 }
               ]
             }
-          }
+          },
+          "completed": "2026-10-24",
+          "transitions": [
+            {
+              "cmd": "done",
+              "by": "ghost",
+              "at": "2026-10-24T14:29:01.399Z",
+              "via": "cli"
+            }
+          ]
         },
         {
           "id": "C-4",
@@ -1521,7 +1629,7 @@
           "title": "ask/answer, triage, spec review, pr, drop",
           "owner": "backend",
           "est": "1d",
-          "status": "doing",
+          "status": "done",
           "deps": [
             "C-1"
           ],
@@ -1545,7 +1653,16 @@
                 }
               ]
             }
-          }
+          },
+          "completed": "2026-10-24",
+          "transitions": [
+            {
+              "cmd": "done",
+              "by": "ghost",
+              "at": "2026-10-24T14:29:01.665Z",
+              "via": "cli"
+            }
+          ]
         },
         {
           "id": "W-1",
@@ -1583,7 +1700,7 @@
           "title": "read API over readmodel, sources everywhere",
           "owner": "backend",
           "est": "1d",
-          "status": "doing",
+          "status": "done",
           "deps": [
             "W-1",
             "C-2",
@@ -1612,14 +1729,23 @@
               "at": "2026-09-29",
               "note": "Independent QA (fresh agent, not the builder): every route handler in bin/serve.mjs calls a readmodel.mjs function and none opens a data file itself. Against a copy of this repo with runs.jsonl, the archive and agentsDir absent, curl of snapshot, work, work/W-2, inbox, runs, agents, specs, metrics, events and settings each returned a sources object naming them absent, and the stream's hello event carries sources too. Absent data comes back as null or as a 404 saying not recorded (snapshot.tokensPerClosedTask null, runs null, the raw transcript/diff/egress/stderr routes 404 not recorded: no <file> in the run archive), and in Chromium those pages say Not recorded. Gaps, not blocking: the raw byte-ranged file routes return text with no sources (TECH.md defines them as raw), 404 bodies carry none, serve.test.mjs asserts sources on one route only, and snapshot's m.medDays || null would turn a real 0 into null."
             }
-          }
+          },
+          "completed": "2026-10-24",
+          "transitions": [
+            {
+              "cmd": "done",
+              "by": "ghost",
+              "at": "2026-10-24T14:29:02.051Z",
+              "via": "cli"
+            }
+          ]
         },
         {
           "id": "W-3",
           "title": "SSE stream with offset resume",
           "owner": "backend",
           "est": "4h",
-          "status": "doing",
+          "status": "done",
           "deps": [
             "W-1"
           ],
@@ -1643,7 +1769,16 @@
                 }
               ]
             }
-          }
+          },
+          "completed": "2026-10-24",
+          "transitions": [
+            {
+              "cmd": "done",
+              "by": "ghost",
+              "at": "2026-10-24T14:29:02.251Z",
+              "via": "cli"
+            }
+          ]
         },
         {
           "id": "W-4",
@@ -1721,7 +1856,7 @@
           "title": "pages over the board: Dashboard, Work item, Inbox, Specs, Settings",
           "owner": "frontend",
           "est": "2d",
-          "status": "doing",
+          "status": "done",
           "deps": [
             "W-5"
           ],
@@ -1738,7 +1873,16 @@
               "at": "2026-09-29",
               "note": "Independent QA (fresh agent, not the builder): read Dashboard, WorkItem, Inbox, Specs, Settings (and Activity). Stage, reason, missing gates, offered commands and Inbox actions all come from the API: buttons map t.commands and item.actions, and labels.ts only maps names to words and colors. Loaded each page in Chromium against a copy of this repo with runs.jsonl, the archive and agentsDir absent. Dashboard says tokens per closed task is not recorded (no run log), and Closed vs started is Not recorded. The work item's Runs tab says not recorded and names the run log. Settings lists each source present or absent with its path. Specs shows Not recorded branches for no git and no event log. No verdict button anywhere. Actions on W-2 matched /api/v1/work/W-2 commands exactly. No page errors and no external requests."
             }
-          }
+          },
+          "completed": "2026-10-24",
+          "transitions": [
+            {
+              "cmd": "done",
+              "by": "ghost",
+              "at": "2026-10-24T14:29:02.614Z",
+              "via": "cli"
+            }
+          ]
         },
         {
           "id": "W-7",
@@ -1801,7 +1945,7 @@
           "title": "install upgrade mode; backward-compat end to end",
           "owner": "backend",
           "est": "4h",
-          "status": "doing",
+          "status": "done",
           "deps": [
             "C-1"
           ],
@@ -1818,7 +1962,16 @@
               "at": "2026-09-29",
               "note": "Independent QA (fresh agent, not the builder): node bin/install.test.mjs green. Independently: installed into /tmp/qa-w-inst with bash install.sh, swapped in bin/testdata/board.pre-c1.mjs and deleted run.mjs. serve.mjs then refused with predates the web API and exit 1. bash install.sh --upgrade replaced board.mjs and run.mjs, kept the old board.mjs in .upgrade-backup-<time>/, and sha256sum -c confirmed docs/board.json, config.json and prompt.txt unchanged. serve.mjs then started and served the board. A bad checkout whose board.mjs throws on load rolled back with ROLLED BACK and exit 1. Minor, not blocking: rollback restores only files that had a backup, so a tool file the old install lacked stays new. A cp failure mid-loop exits without rolling back. The check runs board.mjs status under the caller's FACTORY_CONFIG, if set. serve's refusal suggests cp rather than install.sh --upgrade."
             }
-          }
+          },
+          "completed": "2026-10-24",
+          "transitions": [
+            {
+              "cmd": "done",
+              "by": "ghost",
+              "at": "2026-10-24T14:29:02.797Z",
+              "via": "cli"
+            }
+          ]
         },
         {
           "id": "W-15",
@@ -1866,7 +2019,7 @@
           "title": "command menu over commandsFor, and the Getting started page",
           "owner": "frontend",
           "est": "1d",
-          "status": "doing",
+          "status": "done",
           "deps": [
             "W-5"
           ],
@@ -1907,7 +2060,16 @@
                 }
               ]
             }
-          }
+          },
+          "completed": "2026-10-24",
+          "transitions": [
+            {
+              "cmd": "done",
+              "by": "ghost",
+              "at": "2026-10-24T14:29:02.992Z",
+              "via": "cli"
+            }
+          ]
         },
         {
           "id": "W-17",
