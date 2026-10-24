@@ -37,8 +37,8 @@
  *        [--max-memory SIZE] [--max-cpus N]             the most devcontainer.json may declare (E-1);
  *                                                       default 2gb and 2, the file can only lower them
  *        [--accept-build DIGEST]                        accept a workspace Dockerfile for building (E-5);
- *                                                       a BUILD_NOT_ACCEPTED refusal prints the digest,
- *                                                       and the acceptance is kept in the state dir
+ *                                                       a BUILD_NOT_ACCEPTED refusal prints the digest; kept
+ *                                                       in ${XDG_CONFIG_HOME:-~/.config}/caretaker/accepted-builds.json
  *        [--egress host,host [--egress-network NET]]   per-run proxy, log in the archive (C-5)
  *        [--skills yes]                                 stage the config's skills for the run (S-1)
  *        [--steer web]                                  answer its questions and message it from the

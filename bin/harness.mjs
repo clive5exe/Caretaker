@@ -136,8 +136,9 @@ const DEFAULTS = {
   maxCpus: "2",
   // E-5: digests (sha256 hex) of workspace Dockerfiles a human has accepted
   // for building (environment.mjs resolveImage says why). Per run from
-  // `--accept-build`, kept by runstore in the state dir, never in the
-  // workspace or a settings file.
+  // `--accept-build`; runstore keeps the list in the operator's config dir
+  // (environment.mjs acceptedBuildsPath), never in the workspace, the state
+  // dir the workspace's config names, or a settings file.
   acceptBuilds: [],
   logDir: null,
   billing: null,

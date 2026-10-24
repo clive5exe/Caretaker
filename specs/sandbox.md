@@ -107,8 +107,9 @@ list, which lives in the operator's config dir
 (`${XDG_CONFIG_HOME:-~/.config}/caretaker/accepted-builds.json`, never the
 state dir, whose location the workspace's own config names) and grows only by
 the operator's `--accept-build <digest>`, once per version, checked to be a
-digest before it is written. The bytes hashed are the bytes built: podman reads
-the Dockerfile on stdin, so there is one read, not three. The refusal
+digest before it is written. The bytes hashed are the bytes built: podman is
+handed a private copy of them, outside the workspace, so the workspace file is
+read once, not three times. The refusal
 (`BUILD_NOT_ACCEPTED`) prints the digest and what a reader of the file found
 it would fetch, as advice with control bytes shown as escapes, so the human
 accepts knowing; the same reading is recorded in the run's warnings
@@ -125,8 +126,20 @@ accepting a Dockerfile without reading it.
 `podman run` fetch it on the host, from whatever registry the name says, with
 whatever the name carries. So such an image runs with `--pull=never`; if it is
 not local the run is refused (`IMAGE_NOT_LOCAL`) with the pull for the
-operator to read and make. An `--image` the operator gave, or a devcontainer
-outside the workspace, keeps podman's default.
+operator to read and make. The name is first held to the image-reference
+grammar (`IMAGE_NAME` otherwise), with control bytes shown as escapes in any
+message that repeats it. An `--image` the operator gave, or a devcontainer
+outside the workspace, keeps podman's default. `sandbox.mjs run` applies the
+same rule to an image its devcontainer names.
+
+**"The workspace's devcontainer" is judged by name as well as by where it
+lands.** A `.devcontainer` the agent symlinks to a sibling checkout resolves
+outside the workspace by real path and would read as the operator's file; a
+path the agent can write to, by name, is the agent's, so it is held to
+acceptance and to never-pull, and its build is bound to the workspace by real
+path, which such a link fails. Every entry point resolves the devcontainer
+path against the run's workspace (`--workspace`), never the current
+directory: the harness's two adapters, `environment.mjs image` and `check`.
 
 Devcontainer `features` are not installed by this runner; that is the
 devcontainer CLI's job. They are named in a warning rather than skipped.
