@@ -12,7 +12,7 @@
  */
 import { createServer } from "node:http";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SEAM_KEYS, run } from "./harness.mjs";
@@ -305,6 +305,26 @@ const policy = (model, over = {}) => ({ adapter: "openai-compatible", endpoint: 
     threw = err;
   }
   ok("a named key variable that is not set is refused by name", /OAC_NOT_SET_ANYWHERE/.test(threw?.message ?? ""));
+}
+{
+  // Independent security review (H-2): two holes, one archive. (1) A key given
+  // ONLY by name (--secret, so policy.env) was refused, because the adapter
+  // read process.env alone; the one working path was `export`. (2) On that
+  // path nothing told the redactor the value, and an OpenAI key with `_` or
+  // `-` in it is outside the old shape, so the model's echo of it, and the host
+  // shell's printenv of it, landed in transcript.log and run.json whole.
+  const ODD = "sk-proj-ab_cd-EF_gh-IJ_kl-MN_op-QR_st-UV_wx-YZ01";
+  delete process.env.OAC_BY_NAME;
+  scripts.byname = [say([call("run", { command: "echo working" })]), say(null, null, "done")];
+  const byName = await runArchived(workspace(), "x", policy("byname", { apiKeyEnv: "OAC_BY_NAME" }), { stateDir: join(TMP, "state-byname"), secrets: { OAC_BY_NAME: ODD } });
+  ok("a key given only by name (--secret) reaches the adapter, without an export", byName.verdict.state === "completed" && seen.filter((s) => s.model === "byname").every((s) => s.auth === `Bearer ${ODD}`), JSON.stringify(byName.verdict.state));
+  process.env.OAC_EXPORTED = ODD;
+  scripts.exported = [say([call("run", { command: "printenv OAC_EXPORTED" })]), say(null, null, `the key is ${ODD} and base64 ${Buffer.from(ODD).toString("base64")}`)];
+  const exp = await runArchived(workspace(), "x", policy("exported", { apiKeyEnv: "OAC_EXPORTED" }), { stateDir: join(TMP, "state-exported"), secrets: {} });
+  const dir = join(TMP, "state-exported", "runs", exp.verdict.runId);
+  const archived = readdirSync(dir).map((f) => readFileSync(join(dir, f), "utf8")).join("\n");
+  ok("a key that reached the adapter through the environment is still redacted everywhere in the archive: the policy named it", !archived.includes(ODD) && !archived.includes(Buffer.from(ODD).toString("base64")), [...archived.matchAll(/sk-proj-[^\s"]{0,20}/g)].map((m) => m[0]).join(","));
+  delete process.env.OAC_EXPORTED;
 }
 
 /* ------------------------------------------------------- the tool fixture */
