@@ -168,6 +168,13 @@ What codex forced in `bin/harness.mjs`, each pinned by a test:
   and it now visibly holds two adapters' settings. That is tolerable at two
   adapters, and worth splitting before a third.
 
+**A local server with no real key.** `apiKeyEnv` names a credential, and a
+named credential is redacted, so its value must be long enough to redact:
+`OPENAI_API_KEY=ollama` with `--api-key-env OPENAI_API_KEY` is refused
+(`SECRET_TOO_SHORT`) before any request. For a server on this machine that
+checks no key, leave `apiKeyEnv` unset; the adapter sends no Authorization
+header and nothing needs redacting.
+
 **The codex CLI has run for real; the API adapter has not.** Every check of
 `openai-compatible.mjs` ran against a scripted fake server, and the box these
 were built on has no GPU. The claim the task makes — that a local model
