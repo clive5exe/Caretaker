@@ -98,8 +98,10 @@ const cap = (s) => (s.length > OUTPUT_CAP ? `${s.slice(0, OUTPUT_CAP)}\n[truncat
 
 /**
  * A repository-relative path, or null if it leaves the repository. Absolute
- * paths, `..` segments that climb out, and (on the host) a symlink whose
- * target is outside are all refused.
+ * paths and `..` segments that climb out are refused here, lexically. Symlinks
+ * are not this function's business: on the host, hostExecutor's guard resolves
+ * them and judges the path by where it lands; in the container the mount is
+ * the boundary.
  */
 export function confine(root, p) {
   const raw = String(p ?? ".");
@@ -187,7 +189,13 @@ export function hostExecutor(ws) {
     if (write && isLink) return null;
     // Everything else is judged where it really lands, symlinks resolved
     // through the deepest part that exists (paths.mjs).
-    if (!within(abs, ws) || !within(dirname(abs), ws)) return null;
+    if (!within(abs, ws)) return null;
+    // A write also creates its parent chain, so the parent must land inside
+    // too. For a read or a list this check is not applied: the workspace root
+    // itself has an outside parent, and `list(".")`, the documented default of
+    // list_files, was refused as "outside the repository" (independent
+    // re-review, H-2).
+    if (write && !within(dirname(abs), ws)) return null;
     return abs;
   };
   return {
@@ -358,7 +366,7 @@ export async function openaiCompatibleAdapter({ workspace, prompt, policy, paths
   } else {
     const dev = readDevcontainer(policy.devcontainer);
     const limits = toLimits(dev);
-    const { image, imageId, built } = imageFor(policy, dev, warnings);
+    const { image, imageId, built } = imageFor(policy, dev, warnings, { workspace });
     for (const m of checkLimits(["memory", "cpus", "pids"], delegatedControllers().controllers)) {
       limits[m.limit] = null;
       warnings.push(`not limiting ${m.limit} — no "${m.controller}" cgroup controller is delegated, so the flag is omitted. This run is NOT bounded on ${m.limit}.`);

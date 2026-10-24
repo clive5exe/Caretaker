@@ -39,6 +39,7 @@ import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { within } from "./paths.mjs";
 import { buildArgs, checkLimits, delegatedControllers } from "./sandbox.mjs";
 import { HOST, readDevcontainer, toEgress, toLimits } from "./spec.mjs";
 
@@ -63,21 +64,42 @@ export function buildTag(devcontainerPath) {
  * The `podman build` argv for a devcontainer's `build` section, paths resolved
  * from its own directory.
  *
- * THE BUILD HAS NO NETWORK unless one is named. The Dockerfile and its context
- * are in the workspace, which the last run's agent could edit, and a build's
- * RUN steps are a container too: with the host's network they would reach the
- * internet with the repo as their build context, around the egress proxy the
- * run itself is held to. The base image is still pulled (podman fetches it,
- * not the build container); a RUN that downloads needs `buildNetwork`, given
- * per run on the command line and named in the run's warnings.
+ * THE DOCKERFILE AND CONTEXT MUST BE INSIDE THE WORKSPACE, and this refuses
+ * them otherwise (BUILD_OUTSIDE_WORKSPACE). Both come from a file the last
+ * run's agent could edit, and the build runs on the host as the operator:
+ * a `context` of `/` or enough `..` would hand podman any directory the
+ * operator can read as the build context, `COPY` needs no network to bring
+ * it into the image, and the next run reads it from inside the sandbox
+ * (independent security review, E-5, reproduced). The bound is `workspace`
+ * when given. Without one it is the project the file belongs to by the
+ * devcontainer convention: the parent of a `.devcontainer/` directory, else
+ * the file's own directory. The harness always gives the workspace.
+ *
+ * THE BUILD HAS NO NETWORK unless one is named. A build's RUN steps are a
+ * container too: with the host's network they would reach the internet with
+ * the repo as their build context, around the egress proxy the run itself is
+ * held to. The base image is still pulled (podman fetches it, not the build
+ * container); a RUN that downloads needs `buildNetwork`, given per run on the
+ * command line and named in the run's warnings.
  */
-export function buildArgv(dev, devcontainerPath, { network = "none" } = {}) {
+export function buildArgv(dev, devcontainerPath, { network = "none", workspace = null } = {}) {
   const base = dirname(resolve(devcontainerPath));
+  const bound = workspace ? resolve(workspace) : basename(base) === ".devcontainer" ? dirname(base) : base;
   const b = dev.build ?? {};
-  const args = ["build", "--network", network, "-t", buildTag(devcontainerPath), "-f", resolve(base, b.dockerfile)];
+  const dockerfile = resolve(base, b.dockerfile);
+  const context = resolve(base, b.context ?? ".");
+  for (const [what, p] of [["dockerfile", dockerfile], ["context", context]]) {
+    if (!within(p, bound)) {
+      throw new EnvironmentError(
+        "BUILD_OUTSIDE_WORKSPACE",
+        `${devcontainerPath}: build.${what} resolves to ${p}, outside the workspace ${bound}. The build runs on the host with that path as its input; only a path inside the workspace is built.`,
+      );
+    }
+  }
+  const args = ["build", "--network", network, "-t", buildTag(devcontainerPath), "-f", dockerfile];
   for (const [k, v] of Object.entries(b.args ?? {})) args.push("--build-arg", `${k}=${v}`);
   if (b.target) args.push("--target", String(b.target));
-  args.push(resolve(base, b.context ?? "."));
+  args.push(context);
   return args;
 }
 
@@ -85,7 +107,7 @@ export function buildArgv(dev, devcontainerPath, { network = "none" } = {}) {
  * The image for a run. `policy.image` wins; then devcontainer `image`; then
  * devcontainer `build`, built now. Returns { image, built, warnings }.
  */
-export function resolveImage({ image = null, dev, devcontainerPath, runtime = "podman", exec, buildNetwork = "none" }) {
+export function resolveImage({ image = null, dev, devcontainerPath, runtime = "podman", exec, buildNetwork = "none", workspace = null }) {
   const warnings = [];
   const features = Object.keys(dev?.features ?? {});
   if (features.length) {
@@ -98,7 +120,7 @@ export function resolveImage({ image = null, dev, devcontainerPath, runtime = "p
   if (dev?.image) return { image: dev.image, built: false, warnings };
   if (dev?.build?.dockerfile) {
     const run = exec ?? defaultExec(runtime);
-    const args = buildArgv(dev, devcontainerPath, { network: buildNetwork });
+    const args = buildArgv(dev, devcontainerPath, { network: buildNetwork, workspace });
     if (buildNetwork !== "none") {
       warnings.push(`the image was built with network "${buildNetwork}": its Dockerfile is in the workspace, where an agent can edit it, and its RUN steps were not held to the egress allowlist`);
     }

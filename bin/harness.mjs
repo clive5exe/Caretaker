@@ -171,9 +171,14 @@ export const cliLabel = (cli) =>
  * `image`, else its `build.dockerfile` built now. Returns the id it resolved
  * to as well, so the run records the environment it actually ran in.
  */
-export function imageFor(policy, dev, warnings, { exec } = {}) {
+export function imageFor(policy, dev, warnings, { exec, workspace = null } = {}) {
   try {
-    const r = resolveImage({ image: policy.image ?? null, dev, devcontainerPath: policy.devcontainer, runtime: policy.sandbox, exec, buildNetwork: policy.buildNetwork ?? "none" });
+    const r = resolveImage({
+      image: policy.image ?? null, dev, devcontainerPath: policy.devcontainer, runtime: policy.sandbox, exec,
+      buildNetwork: policy.buildNetwork ?? "none",
+      // The bound on build.dockerfile and build.context (environment.mjs buildArgv says why).
+      workspace,
+    });
     warnings.push(...r.warnings);
     return { image: r.image, built: r.built, imageId: imageId(r.image, { runtime: policy.sandbox, exec }) };
   } catch (e) {
@@ -280,8 +285,9 @@ export const CLI_PRESETS = {
      * `codex exec` reads instructions from stdin when no prompt argument is given.
      *
      * `--sandbox workspace-write` because `codex exec` defaults to a read-only
-     * sandbox, which fails the same way as claude above. NOT verified against a
-     * live codex: no codex CLI was on the box that found the claude failure.
+     * sandbox, which fails the same way as claude above. Verified on a real
+     * codex run, 2026-10-24 (r_f90a8a0e, codex-cli 0.149.1, ChatGPT-plan login,
+     * sandbox none): the one requested file was written and measured.
      */
     argv: ({ model }) => ["codex", "exec", "--json", "--sandbox", "workspace-write", ...(model ? ["--model", model] : [])],
     env: { HOME: "/tmp/agent-home" },
@@ -527,13 +533,26 @@ export function emptyCost(billing = null) {
  * objects of this shape, which proves the parser and says nothing about the
  * CLI. If a CLI's shape differs, the parser finds nothing and cost stays null,
  * which is the safe direction: unknown, not fabricated.
+ *
+ * `in` MEANS FRESH INPUT, and the two vendors disagree about whether their
+ * input figure is that. Claude's `input_tokens` excludes what was read from
+ * cache (`cache_read_input_tokens` is beside it). OpenAI's and codex's
+ * `input_tokens` / `prompt_tokens` INCLUDE the cached part
+ * (`cached_input_tokens`, or `prompt_tokens_details.cached_tokens`), so adding
+ * the two counted the cache twice: the first real codex run (r_f90a8a0e)
+ * recorded in 31052 / cached 26368 where fresh input was 4684 (independent
+ * QA, H-2). The first vendor's meaning had been baked in here; this is the
+ * seam change the second vendor forced, and docs/vendors.md records it. The
+ * cached KEY that matched says which semantics apply.
  */
 const USAGE_KEYS = {
   in: ["input_tokens", "prompt_tokens", "inputTokens"],
-  cached: ["cache_read_input_tokens", "cached_input_tokens", "cache_read_tokens"],
-  write: ["cache_creation_input_tokens", "cache_write_tokens", "cache_creation_tokens"],
+  cached: ["cache_read_input_tokens", "cached_input_tokens", "cached_tokens", "cache_read_tokens"],
+  write: ["cache_creation_input_tokens", "cache_write_input_tokens", "cache_write_tokens", "cache_creation_tokens"],
   out: ["output_tokens", "completion_tokens", "outputTokens"],
 };
+/** Cached-token keys whose vendor counts the cached part INSIDE the input figure. */
+const CACHED_INSIDE_INPUT = new Set(["cached_input_tokens", "cached_tokens"]);
 const TURN_KEYS = ["num_turns", "turns", "turn_count"];
 
 /** Every JSON value the text holds: the whole thing, or one object per line. */
@@ -671,15 +690,22 @@ export function parseUsage(transcriptText, { billing = null, source = "transcrip
   if (!docs.length) return cost;
 
   let found = false;
+  const matched = {};
   for (const [field, names] of Object.entries(USAGE_KEYS)) {
     for (const doc of docs) {
-      const n = findNumber(doc, names);
-      if (n !== null) {
-        cost.tokens[field] = n;
+      // One name at a time, in order, so the key that matched is known: the
+      // cached key decides whether `in` already holds the cached part.
+      const name = names.find((k) => findNumber(doc, [k]) !== null);
+      if (name !== undefined) {
+        cost.tokens[field] = findNumber(doc, [name]);
+        matched[field] = name;
         found = true;
         break;
       }
     }
+  }
+  if (CACHED_INSIDE_INPUT.has(matched.cached) && typeof cost.tokens.in === "number" && typeof cost.tokens.cached === "number") {
+    cost.tokens.in = Math.max(0, cost.tokens.in - cost.tokens.cached);
   }
   for (const doc of docs) {
     const t = findNumber(doc, TURN_KEYS);
@@ -987,7 +1013,7 @@ async function cliAdapter({ workspace, prompt, policy, paths, warnings }) {
   } else {
     const dev = readDevcontainer(policy.devcontainer);
     const limits = toLimits(dev);
-    const { image, imageId, built } = imageFor(policy, dev, warnings);
+    const { image, imageId, built } = imageFor(policy, dev, warnings, { workspace });
     if (policy.net === "none") {
       warnings.push(
         "net:none — the container has no route off the host, so a real agent CLI cannot " +
