@@ -10,7 +10,7 @@
  */
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -122,9 +122,14 @@ const server = createServer((req, res) => {
   });
 });
 await new Promise((r) => server.listen(0, "127.0.0.1", r));
+const CWD = join(TMP, "cwd");
+mkdirSync(CWD);
 const node = (args, env = {}) =>
   new Promise((res) => {
-    const p = spawn("node", args, { env: { ...process.env, ...env } });
+    // Its own cwd: runstore's default config is relative to cwd, and from the
+    // repo root that is this checkout's, whose event log is no test's to write.
+    // Not TMP itself, which holds the settings file `show` must see as outside.
+    const p = spawn("node", args, { cwd: CWD, env: { ...process.env, ...env } });
     let out = "";
     p.stdout.on("data", (d) => (out += d));
     p.stderr.on("data", (d) => (out += d));
@@ -147,6 +152,15 @@ const node = (args, env = {}) =>
   writeFileSync(bad, JSON.stringify({ default: { sandbox: "none" } }));
   const iso = await node([join(HERE, "runstore.mjs"), "run", "--workspace", WS, "--prompt", "hi", "--state-dir", state, "--harness-config", bad]);
   ok("a settings file that tries to set the sandbox stops the run", iso.status === 2 && /sandbox is refused/.test(iso.out) && seen.length === 1, iso.out);
+  // The event log goes to the project the config names, where its read model
+  // looks, not to whichever checkout runstore.mjs happens to live in.
+  const proj = join(TMP, "proj");
+  mkdirSync(join(proj, "ops", "caretaker"), { recursive: true });
+  writeFileSync(join(proj, "ops", "caretaker", "config.json"), JSON.stringify({ name: "p", board: "docs/board.json", events: "log/ev" }));
+  const inProj = await node([join(HERE, "runstore.mjs"), "run", "--workspace", WS, "--prompt", "hi", "--sandbox", "none", "--state-dir", state, "--harness-config", settings, "--config", join(proj, "ops", "caretaker", "config.json")], { E2E_KEY: "k-e2e-value" });
+  const projRun = /\b(r_[0-9a-f]{8})\b/.exec(inProj.out)?.[1];
+  const logged = existsSync(join(proj, "log", "ev")) ? readdirSync(join(proj, "log", "ev")).map((f) => readFileSync(join(proj, "log", "ev", f), "utf8")).join("") : "";
+  ok("runstore logs a run's events into the project its config names", inProj.status === 0 && !!projRun && logged.includes(projRun), inProj.out);
   const show = await node([join(HERE, "harness-config.mjs"), "show", "--harness-config", FILE]);
   ok("`show` prints each role's settings and where each came from", show.status === 0 && /refuter:[\s\S]*cli\s+codex\s+\(settings roles\.refuter\)/.test(show.out) && /model\s+"big"\s+\(settings default\)/.test(show.out), show.out);
 }
