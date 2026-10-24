@@ -31,7 +31,7 @@
  *   node spec.mjs owns    <file> <path>
  *   node spec.mjs parse   <file>
  */
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, statSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
 
@@ -114,6 +114,16 @@ export function parseSpec(markdown) {
  */
 export function readDevcontainer(path) {
   if (!path || !existsSync(path)) return null;
+  // Only a regular file is read. A FIFO or a device at this path hung every
+  // reader before any refusal (independent security review, E-5, round 8);
+  // the file is in the workspace, so the agent can put one there.
+  let st;
+  try {
+    st = statSync(path);
+  } catch (e) {
+    return { __error: `${path} could not be read: ${e.code ?? e.message}` };
+  }
+  if (!st.isFile()) return { __error: `${path} is not a regular file` };
   const raw = readFileSync(path, "utf8")
     .replace(/\/\*[\s\S]*?\*\//g, "")
     .replace(/(^|[^:"'\\])\/\/.*$/gm, "$1")

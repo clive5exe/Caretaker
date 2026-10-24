@@ -111,6 +111,17 @@ const has = (a, flag, value) => {
     writeFileSync(devFile, JSON.stringify({ image: "evil.example/leak\x1b[2K:data" }));
     const esc = runCli();
     ok("a devcontainer image name outside the grammar is refused by this CLI too, control bytes escaped", esc.status === 2 && /not an image reference/.test(esc.stderr) && !/\x1b/.test(esc.stderr), esc.stderr.slice(0, 200));
+    // Round 8: the same rule as the harness, from one function. A short name
+    // or an ID prefix names whatever is local; a build tag is another
+    // project's accepted image.
+    podman(true);
+    for (const [name, why] of [["caretaker-env-7b2653b4c90b", /not fully qualified/], ["7b26", /not fully qualified/], ["node:22", /not fully qualified/], ["localhost/caretaker-env-7b2653b4c90b", /build tag/]]) {
+      writeFileSync(devFile, JSON.stringify({ image: name }));
+      const r = runCli();
+      ok(`sandbox.mjs run refuses devcontainer image ${name}: ${why.source}`, r.status === 2 && why.test(r.stderr) && !/^run /m.test(r.stdout), r.stderr.slice(0, 200));
+    }
+    const opShort = runCli("--image", "7b26");
+    ok("…while --image 7b26 from the operator runs: it is the operator's", /^run /m.test(opShort.stdout) && / 7b26 /.test(` ${opShort.stdout} `), opShort.stdout.slice(0, 200));
     rmSync(devDir, { recursive: true, force: true });
   }
   // Round 7: the grammar lives here, where every run's argv is built.
@@ -195,7 +206,7 @@ const has = (a, flag, value) => {
   {
     const devDir = mkdtempSync(join(tmpdir(), "sandbox-cap-"));
     const devFile = join(devDir, "devcontainer.json");
-    writeFileSync(devFile, JSON.stringify({ image: "img", hostRequirements: { memory: "999999g", cpus: "9999" } }));
+    writeFileSync(devFile, JSON.stringify({ image: "docker.io/library/img", hostRequirements: { memory: "999999g", cpus: "9999" } }));
     const fake = join(devDir, "bin");
     mkdirSync(fake);
     writeFileSync(join(fake, "podman"), "#!/bin/sh\nif [ \"$1\" = info ]; then echo true; exit 0; fi\nif [ \"$1\" = --version ]; then echo 'podman version 5.0.0'; exit 0; fi\necho \"$@\"\n");
@@ -204,7 +215,7 @@ const has = (a, flag, value) => {
     const out = `${r.stdout}\n${r.stderr}`;
     ok("sandbox.mjs run clamps a devcontainer above the operator's ceiling and warns", /WARNING: .*999999g.*--max-memory/.test(out) && !/--memory 999999g/.test(out), out.slice(0, 400));
     ok("…to the operator's value", new RegExp(`--memory ${3 * 1024 ** 3}\\b`).test(out) || /not limiting memory/.test(out), out.slice(0, 400));
-    writeFileSync(devFile, JSON.stringify({ image: "img", hostRequirements: { memory: "" } }));
+    writeFileSync(devFile, JSON.stringify({ image: "docker.io/library/img", hostRequirements: { memory: "" } }));
     const bad = spawnSync(process.execPath, [join(HERE, "sandbox.mjs"), "run", "--devcontainer", devFile, "--", "true"], { encoding: "utf8", env: { ...process.env, PATH: `${fake}:${process.env.PATH}` } });
     ok("sandbox.mjs run refuses a ceiling that is not a size by name, exit 2, no stack trace", bad.status === 2 && /REFUSING — refusing hostRequirements\.memory/.test(bad.stderr) && !/at .*\.mjs:\d+/.test(bad.stderr), `${bad.status} ${bad.stderr.slice(0, 300)}`);
     rmSync(devDir, { recursive: true, force: true });

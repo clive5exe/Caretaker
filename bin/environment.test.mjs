@@ -267,7 +267,8 @@ const DEV = join(DEVDIR, "devcontainer.json");
     // Round 6: a name is a name. An image reference from the agent's file is
     // held to the distribution grammar before anything is done with it.
     const present = () => ({ status: 0 });
-    for (const good of ["docker.io/library/node:22-alpine", "localhost:5000/x", "ghcr.io/a/b@sha256:" + "0".repeat(64), "node", "my_app/svc-1:v1.2_3"]) ok(`image reference ${good} is accepted as a name`, IMAGE_REF.test(good) && resolveImage({ dev: { image: good }, devcontainerPath: DEV, workspace: PROJ, exec: present }).pull === "never");
+    for (const good of ["docker.io/library/node:22-alpine", "localhost:5000/x", "ghcr.io/a/b@sha256:" + "0".repeat(64), "node", "my_app/svc-1:v1.2_3"]) ok(`image reference ${good} is a name by the grammar`, IMAGE_REF.test(good));
+    for (const good of ["docker.io/library/node:22-alpine", "localhost:5000/x", "ghcr.io/a/b@sha256:" + "0".repeat(64)]) ok(`fully-qualified devcontainer image ${good} runs with pull never`, resolveImage({ dev: { image: good }, devcontainerPath: DEV, workspace: PROJ, exec: present }).pull === "never");
     for (const bad of ["--privileged", "evil.example/x y", "Node:22", "a\x1b[2Kb", "x:" + "t".repeat(129), "img:tag@sha256:short"]) {
       ok(`image reference ${JSON.stringify(bad).slice(0, 30)} is REFUSED BY NAME, control bytes escaped`, (() => {
         try {
@@ -366,6 +367,26 @@ const DEV = join(DEVDIR, "devcontainer.json");
       const calls = [];
       resolveImage({ dev: { image: "docker.io/library/alpine:3" }, devcontainerPath: DEV, workspace: PROJ, runtime: "docker", exec: (a) => (calls.push(a), { status: 0 }) });
       return calls.some((a) => a[0] === "image" && a[1] === "inspect");
+    })());
+    // Round 8: the tag rule was one spelling. A short name or an image-ID
+    // prefix is resolved by podman against localhost/ and every local image,
+    // so `caretaker-env-7b26…` or `7b26` named whatever was local. A
+    // devcontainer image must be fully qualified.
+    for (const short of ["caretaker-env-7b2653b4c90b", "7b2653b4c90b", "7b26", "node:22-alpine", "library/node:22", "my-app"]) {
+      ok(`a short devcontainer image ${short} is refused as not fully qualified, before any probe`, (() => {
+        const calls = [];
+        try {
+          resolveImage({ dev: { image: short }, devcontainerPath: DEV, workspace: PROJ, exec: (a) => (calls.push(a), { status: 0 }) });
+          return false;
+        } catch (e) {
+          return e.code === "IMAGE_NAME" && /not fully qualified/.test(e.message) && calls.length === 0;
+        }
+      })());
+    }
+    ok("…while the operator's --image may be short: it is the operator's", resolveImage({ image: "7b26", dev: {}, devcontainerPath: DEV, workspace: PROJ, exec: present }).image === "7b26");
+    ok("feature keys in the warning are escaped too", (() => {
+      const r = resolveImage({ image: "x:1", dev: { image: "y", features: { "ghcr.io/a/b\x1b[2K:1": {} } }, devcontainerPath: DEV, workspace: PROJ, exec: present });
+      return r.warnings.every((w) => !/\x1b/.test(w)) && r.warnings.some((w) => /\\x1b/.test(w));
     })());
   }
 

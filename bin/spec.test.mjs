@@ -9,7 +9,8 @@
  *
  * Run: node bin/spec.test.mjs
  */
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -162,6 +163,22 @@ ok("a missing devcontainer.json is null, not a throw", readDevcontainer(join(wor
     const got = toLimits({ hostRequirements: { cpus: v } }).cpus;
     ok(`a cpu ceiling of ${JSON.stringify(v)} is accepted as ${want}`, got === want, got);
   }
+}
+
+{
+  // Independent security review (E-5, round 8): a FIFO named devcontainer.json
+  // hung every reader before any refusal. Only a regular file is read.
+  const dir = mkdtempSync(join(tmpdir(), "spec-fifo-"));
+  const fifo = join(dir, "devcontainer.json");
+  if (spawnSync("mkfifo", [fifo]).status !== 0) console.log("SKIP a FIFO devcontainer.json is an error, not a hang — mkfifo not available");
+  else {
+    const t0 = Date.now();
+    const d = readDevcontainer(fifo);
+    ok("a FIFO devcontainer.json is an error, not a hang", Boolean(d?.__error) && /not a regular file/.test(d.__error) && Date.now() - t0 < 2000, `${JSON.stringify(d)} ${Date.now() - t0}ms`);
+    const dirAsFile = readDevcontainer(dir);
+    ok("a directory at the path is an error too", Boolean(dirAsFile?.__error));
+  }
+  rmSync(dir, { recursive: true, force: true });
 }
 
 /* ------------------------------------------------------------------ egress */
