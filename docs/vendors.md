@@ -99,14 +99,16 @@ rather than leaving it to be inferred from a model name.
 The owner's decision of 2026-09-29 made the second vendor **ChatGPT/OpenAI**,
 in two forms: `codex` as a second CLI preset behind the `cli` adapter, and
 `bin/openai-compatible.mjs` as a second adapter behind
-`run(workspace, prompt, policy)`. Nothing above the harness changed for
-either: `runstore.mjs`, `verify.mjs` and the read model run them unmodified,
-and their tests archive and read back a run made through them. One function
-below the seam did change for the API adapter: `reconcile.parseProposal`
-learned to find `DIRECTION:` inside a JSON transcript line, because the API
-adapter's transcript is JSON lines where the CLI's was prose. What had to
-move is recorded here, because each item is a place where the first vendor's
-shape had been taken for the general one.
+`run(workspace, prompt, policy)`. `runstore.mjs` and the read model run both
+unmodified, and their tests archive and read back a run made through them.
+Two consumers of the seam did change for the API adapter, and both changes
+are the first vendor's prose shape having been taken for the general one:
+`reconcile.parseProposal` learned to find `DIRECTION:` inside a JSON
+transcript line, and `verify.mjs` (e60736d) had `parseVerdict` rewritten
+because an API refuter's transcript is JSON lines and every refutation read
+as inconclusive, and its same-builder check now compares adapter and endpoint
+rather than CLI name, since two runs on the same API are the same builder.
+What else had to move is recorded here.
 
 ### The first real codex run
 

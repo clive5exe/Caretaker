@@ -193,6 +193,27 @@ const policy = (model, over = {}) => ({ adapter: "openai-compatible", endpoint: 
   ok("list_files on a subdirectory still works", replies[2] === "", JSON.stringify(replies[2]));
   ok("a write to the root's parent is still refused", /refused: path is outside/.test(replies[3] ?? "") && !existsSync(join(ws, "..", "above.txt")), JSON.stringify(replies[3]));
 }
+{
+  // H-2, independent re-review: a DANGLING DIRECTORY link. The leaf check saw
+  // a plain path under an inside parent, and only mkdirSync's ENOENT on the
+  // missing target stopped the write: the control held by accident. The guard
+  // must refuse it itself, as a path outside, before anything is created.
+  const ws = workspace();
+  const outside = join(TMP, "outside-ddl");
+  symlinkSync(outside, join(ws, "ddl"));
+  mkdirSync(join(ws, "realdir"));
+  symlinkSync(join(ws, "realdir"), join(ws, "dirlink-in"));
+  scripts.ddl = [
+    say([call("write_file", { path: "ddl/child.txt", content: "x" }), call("write_file", { path: "ddl/deeper/child.txt", content: "x" }), call("write_file", { path: "dirlink-in/f.txt", content: "x" }), call("write_file", { path: "realdir/new/f.txt", content: "ok" })]),
+    say(null, null, "tried"),
+  ];
+  await run(ws, "x", policy("ddl"));
+  const replies = lastToolReply("ddl");
+  ok("a write through a dangling DIRECTORY link is refused BY THE GUARD, as outside, not by a failed mkdir", /^refused: path is outside/.test(replies[0] ?? "") && !existsSync(outside), JSON.stringify(replies[0]));
+  ok("…and so is one two levels under it", /^refused: path is outside/.test(replies[1] ?? ""), JSON.stringify(replies[1]));
+  ok("a write under a directory link that points INSIDE is refused too: a write never goes through a link", /^refused: path is outside/.test(replies[2] ?? ""), JSON.stringify(replies[2]));
+  ok("a write that creates plain new directories still works", replies[3]?.startsWith("wrote") && readFileSync(join(ws, "realdir", "new", "f.txt"), "utf8") === "ok", JSON.stringify(replies[3]));
+}
 
 {
   // The key goes only over https, or to this machine.
