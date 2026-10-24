@@ -117,6 +117,32 @@ The budget is 5 hours. Each step ends in a commit you can check.
   time.
 - **Merging.** Steps land on this branch and you merge. I don't merge.
 
+## Where it stands, 2026-10-24
+
+Written after the day's review rounds. Every item below is on the board with
+its verdicts; `node ops/caretaker/board.mjs status` is the live version.
+
+- **Steps 0 to 6 of this plan are done** as the table below says, proven with
+  a fake model. **F-6, the first real run on GitHub, still waits on the
+  operator's `claude setup-token`**, which cannot be minted from inside a
+  Claude Code session.
+- **The second vendor ran for real:** codex, on a ChatGPT-plan login, through
+  the unchanged seam (run `r_f90a8a0e`). H-2 is closed with reviewer, qa and
+  security passes.
+- **The sandbox's bound on the agent-editable devcontainer is closed** (E-1
+  and E-5, fourteen independent security rounds between them): ceilings the
+  file can lower but never raise, images it never pulls, a Dockerfile built
+  only after a human accepts its digest. The text of the Dockerfile is not
+  the control; four rounds got past every parser. See
+  [how-it-works.md](how-it-works.md) and
+  [specs/sandbox.md](../specs/sandbox.md).
+- **27 of 63 tasks closed**, each on verdicts from someone other than its
+  builder. Still open with a failing gate: P-4, P-5, E-2, E-6, H-0, H-9, H-10,
+  H-1, H-4, H-6, S-1, B-2, B-5, B-8, G-1, C-4, C-5, W-5, W-7, W-15, W-17, each
+  with the reviewer's reproduction in its note.
+- **What was retired, and what was not:** nothing yet. `prompt.txt`,
+  `verify.mjs`'s refuter prompt and `graduate.mjs` stay until F-6 has run.
+
 ## Progress
 
 | step | state | commit |

@@ -88,6 +88,19 @@ package installed by hand is gone next time; if it is needed, the spec changes
 and the image rebuilds, which makes the change reviewable and visible to the
 allowlist. See `environments.md`.
 
+**The file it is rebuilt from is the agent's to edit, so what it may declare
+is bounded** (built; closed on 2026-10-24 after ten independent security
+rounds on E-5). Ceilings can be lowered and never raised past the operator's
+`--max-memory` / `--max-cpus`. An image it names must be fully qualified,
+never under `localhost/`, and already local: the run never pulls it. A
+Dockerfile it names is built only after a human accepts its digest
+(`--accept-build`), from a private copy of the accepted bytes, with no
+network for `RUN`; the Dockerfile's text is read for advice, not as the
+control, because four rounds of review got past every parser. Every path is
+judged against the workspace, never the current directory, on every entry
+point. The rule, with the reasons, is `specs/sandbox.md`; the walk-through is
+`how-it-works.md`.
+
 ### Infra
 
 Where the dev environment is placed. Terraform provisions, Ansible converges,
