@@ -82,6 +82,20 @@ const DEV = join(DEVDIR, "devcontainer.json");
   ok("without a workspace the bound is the project by the devcontainer convention, so .. is allowed and ../.. is not",
     buildArgv(built, DEV).at(-1) === PROJ && code(() => buildArgv({ build: { dockerfile: "Dockerfile", context: "../.." } }, DEV)) === "BUILD_OUTSIDE_WORKSPACE");
   {
+    // An operator-owned devcontainer OUTSIDE the workspace (--devcontainer, and
+    // the live tests): the agent never had that file, so its own project is the
+    // bound, not the workspace it is being used for. It still cannot reach past
+    // its own project.
+    const OTHER = join(TMP, "operator-env");
+    mkdirSync(join(OTHER, ".devcontainer"), { recursive: true });
+    const ODEV = join(OTHER, ".devcontainer", "devcontainer.json");
+    const WS = join(TMP, "some-other-workspace");
+    mkdirSync(WS, { recursive: true });
+    ok("a devcontainer outside the workspace builds from its own project", buildArgv(built, ODEV, { workspace: WS }).at(-1) === OTHER);
+    ok("…and is still refused past its own project", code(() => buildArgv({ build: { dockerfile: "Dockerfile", context: "../.." } }, ODEV, { workspace: WS })) === "BUILD_OUTSIDE_WORKSPACE");
+    ok("…and cannot name the workspace it is used for as its context either", code(() => buildArgv({ build: { dockerfile: "Dockerfile", context: WS } }, ODEV, { workspace: WS })) === "BUILD_OUTSIDE_WORKSPACE");
+  }
+  {
     // A symlink inside the project pointing out of it is judged by where it lands.
     const LINK = join(PROJ, "escape");
     if (!existsSync(LINK)) symlinkSync(TMP, LINK);

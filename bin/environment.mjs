@@ -70,10 +70,16 @@ export function buildTag(devcontainerPath) {
  * a `context` of `/` or enough `..` would hand podman any directory the
  * operator can read as the build context, `COPY` needs no network to bring
  * it into the image, and the next run reads it from inside the sandbox
- * (independent security review, E-5, reproduced). The bound is `workspace`
- * when given. Without one it is the project the file belongs to by the
- * devcontainer convention: the parent of a `.devcontainer/` directory, else
- * the file's own directory. The harness always gives the workspace.
+ * (independent security review, E-5, reproduced).
+ *
+ * The bound is the project the devcontainer file belongs to. When the file
+ * is inside the workspace, which is the case that matters (the agent could
+ * edit it), that is the workspace. When the operator points a run at a file
+ * OUTSIDE the workspace (`--devcontainer`, the live tests), the agent never
+ * had it, and its project by the devcontainer convention is the bound: the
+ * parent of a `.devcontainer/` directory, else the file's own directory.
+ * The workspace is never the bound for a file that is not in it, because a
+ * build context must contain its own Dockerfile's neighbours to be useful.
  *
  * THE BUILD HAS NO NETWORK unless one is named. A build's RUN steps are a
  * container too: with the host's network they would reach the internet with
@@ -84,7 +90,8 @@ export function buildTag(devcontainerPath) {
  */
 export function buildArgv(dev, devcontainerPath, { network = "none", workspace = null } = {}) {
   const base = dirname(resolve(devcontainerPath));
-  const bound = workspace ? resolve(workspace) : basename(base) === ".devcontainer" ? dirname(base) : base;
+  const ownProject = basename(base) === ".devcontainer" ? dirname(base) : base;
+  const bound = workspace && within(base, workspace) ? resolve(workspace) : ownProject;
   const b = dev.build ?? {};
   const dockerfile = resolve(base, b.dockerfile);
   const context = resolve(base, b.context ?? ".");

@@ -89,8 +89,10 @@ is refused otherwise** (`BUILD_OUTSIDE_WORKSPACE`). Both paths come from
 on the host as the operator: a `context` of `/` or enough `..` would make any
 directory the operator can read the build's input, `COPY` brings it into the
 image without a network, and the next run reads it from inside the sandbox.
-The bound is the run's workspace, the harness passes it, and a symlink is
-judged by where it lands.
+The bound is the project the devcontainer file belongs to: the workspace when
+the file is in it, which is the agent-editable case; its own project (the
+parent of its `.devcontainer/`) when the operator points a run at a file
+outside the workspace. A symlink is judged by where it lands.
 
 **The build has no network.** A build's `RUN` steps would otherwise reach the
 internet with the repo as their context, around the egress proxy the run
