@@ -78,7 +78,7 @@ import { join, resolve } from "node:path";
 import { randomBytes } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { DEFAULT_DIR as DEFAULT_EVENTS_DIR, STAGES, append as appendEvents } from "./events.mjs";
-import { buildArgs, capLimits, checkLimits, delegatedControllers } from "./sandbox.mjs";
+import { buildArgs, capLimits, checkLimits, delegatedControllers, parseSize } from "./sandbox.mjs";
 import { readDevcontainer, toLimits } from "./spec.mjs";
 import { openaiCompatibleAdapter } from "./openai-compatible.mjs";
 import { EnvironmentError, imageId, resolveImage } from "./environment.mjs";
@@ -126,6 +126,14 @@ const DEFAULTS = {
   buildNetwork: "none",
   image: null,
   devcontainer: ".devcontainer/devcontainer.json",
+  // E-1: THE OPERATOR'S CEILING ON THE CEILING. devcontainer.json declares the
+  // run's memory and cpu limits, and it is in the workspace, so the last run's
+  // agent could raise them. These are the most it can get: a declared limit
+  // above them is clamped to them and warned about, naming the file. Per run,
+  // on the command line (`--max-memory`, `--max-cpus`), never in a settings
+  // file the agent can edit. The host's own total is a further cap.
+  maxMemory: "2gb",
+  maxCpus: "2",
   logDir: null,
   billing: null,
   env: {},
@@ -212,6 +220,16 @@ export function normalisePolicy(policy = {}) {
   if (p.task !== null && (typeof p.task !== "string" || !p.task)) {
     throw new HarnessError(`task must be a non-empty string or null, got ${JSON.stringify(p.task)}`);
   }
+  // E-1: the operator's ceilings are sizes, or the run does not start. A
+  // ceiling that cannot be read is no ceiling.
+  if (parseSize(p.maxMemory) === null) {
+    throw new HarnessError(`maxMemory must be a size such as "2gb" or "512m", got ${JSON.stringify(p.maxMemory)}`);
+  }
+  if (!(Number(p.maxCpus) > 0) || !/^\d+(\.\d+)?$/.test(String(p.maxCpus).trim())) {
+    throw new HarnessError(`maxCpus must be a positive number, got ${JSON.stringify(p.maxCpus)}`);
+  }
+  p.maxMemory = String(p.maxMemory).trim();
+  p.maxCpus = String(p.maxCpus).trim();
   if (p.tools !== null) {
     try {
       checkTools("tools", p.tools);
@@ -1013,8 +1031,8 @@ async function cliAdapter({ workspace, prompt, policy, paths, warnings }) {
   } else {
     const dev = readDevcontainer(policy.devcontainer);
     const limits = toLimits(dev);
-    // The file can raise a ceiling; it cannot raise it past the host (E-1).
-    warnings.push(...capLimits(limits, { source: policy.devcontainer }));
+    // The file can lower a ceiling; it cannot raise it past the operator's, or the host (E-1).
+    warnings.push(...capLimits(limits, { maxMemory: policy.maxMemory, maxCpus: policy.maxCpus, source: policy.devcontainer }));
     const { image, imageId, built } = imageFor(policy, dev, warnings, { workspace });
     if (policy.net === "none") {
       warnings.push(

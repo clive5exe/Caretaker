@@ -18,7 +18,8 @@
  *   sandbox.mjs detect
  *   sandbox.mjs install
  *   sandbox.mjs run [--devcontainer F] [--image I] [--workdir D] [--net none|NETWORK]
- *                   [--runtime podman|docker] [--allow-missing-limits] -- cmd...
+ *                   [--runtime podman|docker] [--max-memory SIZE] [--max-cpus N]
+ *                   [--allow-missing-limits] -- cmd...
  *   sandbox.mjs limits [--devcontainer F]
  */
 import { execFileSync, spawnSync } from "node:child_process";
@@ -150,27 +151,41 @@ export function parseSize(v) {
   return n > 0 ? Math.floor(n) : null;
 }
 
+/** The operator's default ceilings, the same as toLimits' defaults: what a devcontainer gets when it declares nothing. */
+export const DEFAULT_MAX = { memory: "2gb", cpus: "2" };
+
 /**
- * THE MACHINE IS THE CEILING ON THE CEILING. A declared memory or cpu limit
- * above what the host has is no limit: `memory: "999999g"` passed toLimits as
- * a well-formed size and the container ran under `--memory 999999g` with no
- * warning (independent security re-review, E-1). The file that declares the
- * limits is in the workspace, so the agent can raise them; it can never raise
- * them past the host. A value over the cap is clamped to the host total and
- * the warning names the file it came from. Returns the warnings; `limits` is
- * changed in place, like checkLimits' caller does for null.
+ * THE FILE CAN LOWER A CEILING; IT CAN NEVER RAISE ONE. devcontainer.json
+ * declares the run's limits and sits in the workspace, where the last run's
+ * agent could edit it. So the file's value is held to a ceiling the agent
+ * cannot touch: the operator's `maxMemory` / `maxCpus`, given per run on the
+ * command line, and the host's own total under that. A declared limit above
+ * the cap is clamped to it and the warning names the file and the flag that
+ * raises the cap. `memory: "999999g"` once ran unclamped and unwarned; then
+ * the cap was the host total, which nobody set, so a file could still take
+ * the whole machine without a word (independent security review, E-1,
+ * rounds 2 and 3). Returns the warnings; `limits` is changed in place, like
+ * checkLimits' caller does for null.
  */
-export function capLimits(limits, { totalMem = totalmem(), cpuCount = hostCpus().length, source = "devcontainer.json" } = {}) {
+export function capLimits(limits, { maxMemory = DEFAULT_MAX.memory, maxCpus = DEFAULT_MAX.cpus, totalMem = totalmem(), cpuCount = hostCpus().length, source = "devcontainer.json" } = {}) {
   const warnings = [];
+  const opMem = parseSize(maxMemory);
+  if (opMem === null) throw new Error(`refusing maxMemory ${JSON.stringify(maxMemory)}: the operator's ceiling must be a size`);
+  const opCpu = Number(maxCpus);
+  if (!(opCpu > 0) || !Number.isFinite(opCpu)) throw new Error(`refusing maxCpus ${JSON.stringify(maxCpus)}: the operator's ceiling must be a positive number`);
+  const memCap = Math.min(opMem, totalMem);
+  const cpuCap = Math.min(opCpu, cpuCount);
   const mem = typeof limits.memory === "string" ? parseSize(limits.memory) : null;
-  if (mem !== null && mem > totalMem) {
-    warnings.push(`${source} declares memory ${limits.memory}, more than this host has (${totalMem} bytes): a ceiling above the machine is no ceiling, so the run is held to the host's total`);
-    limits.memory = String(totalMem);
+  if (mem !== null && mem > memCap) {
+    const why = memCap === opMem ? `the operator's ceiling of ${maxMemory} (--max-memory raises it)` : `this host's total of ${totalMem} bytes`;
+    warnings.push(`${source} declares memory ${limits.memory}, above ${why}: the run is held to ${memCap} bytes. The file can lower a ceiling, never raise one.`);
+    limits.memory = String(memCap);
   }
   const cpu = typeof limits.cpus === "string" ? Number(limits.cpus) : null;
-  if (cpu !== null && Number.isFinite(cpu) && cpu > cpuCount) {
-    warnings.push(`${source} declares cpus ${limits.cpus}, more than this host has (${cpuCount}): the run is held to the host's count`);
-    limits.cpus = String(cpuCount);
+  if (cpu !== null && Number.isFinite(cpu) && cpu > cpuCap) {
+    const why = cpuCap === opCpu ? `the operator's ceiling of ${maxCpus} (--max-cpus raises it)` : `this host's count of ${cpuCount}`;
+    warnings.push(`${source} declares cpus ${limits.cpus}, above ${why}: the run is held to ${cpuCap}. The file can lower a ceiling, never raise one.`);
+    limits.cpus = String(cpuCap);
   }
   return warnings;
 }
@@ -278,7 +293,7 @@ export function buildArgs({ image, limits, workdir, net = "none", cmd, runtime =
  * directory read-write instead (independent review). A value flag needs a
  * value that is not another flag; an unknown flag is refused.
  */
-export const VALUE_FLAGS = ["devcontainer", "net", "runtime", "image", "workdir"];
+export const VALUE_FLAGS = ["devcontainer", "net", "runtime", "image", "workdir", "max-memory", "max-cpus"];
 export const BOOL_FLAGS = ["allow-missing-limits"];
 export const RUNTIMES = ["podman", "docker"];
 export function parseFlags(args) {
@@ -374,7 +389,7 @@ if (isEntry) {
 
   if (cmd === "run") {
     if (!rest.length) {
-      console.error("usage: sandbox.mjs run [--devcontainer F] [--image I] [--workdir D] [--net none|NETWORK] [--runtime podman|docker] [--allow-missing-limits] -- <command...>");
+      console.error("usage: sandbox.mjs run [--devcontainer F] [--image I] [--workdir D] [--net none|NETWORK] [--runtime podman|docker] [--max-memory SIZE] [--max-cpus N] [--allow-missing-limits] -- <command...>");
       process.exit(2);
     }
     const runtime = flags.runtime ?? "podman";
@@ -383,8 +398,19 @@ if (isEntry) {
       console.error(`podman not available. install it:  ${installHint()}`);
       process.exit(1);
     }
-    const dev = readDevcontainer(flags.devcontainer ?? ".devcontainer/devcontainer.json");
-    const limits = toLimits(dev);
+    const devPath = flags.devcontainer ?? ".devcontainer/devcontainer.json";
+    const dev = readDevcontainer(devPath);
+    let limits;
+    try {
+      limits = toLimits(dev);
+      // E-1: the same cap the harness applies. The file can lower a ceiling,
+      // never raise one past --max-memory / --max-cpus, or past the host.
+      for (const w of capLimits(limits, { maxMemory: flags["max-memory"], maxCpus: flags["max-cpus"], source: devPath })) console.error(`[sandbox] WARNING: ${w}`);
+    } catch (e) {
+      // A ceiling that is not a size is refused by name, not a stack trace.
+      console.error(`[sandbox] REFUSING — ${e.message}`);
+      process.exit(2);
+    }
     const image = flags.image ?? limits.image;
     if (!image) {
       console.error(

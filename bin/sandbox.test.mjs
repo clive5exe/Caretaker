@@ -15,7 +15,7 @@
  * Run: node bin/sandbox.test.mjs
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -67,7 +67,8 @@ const has = (a, flag, value) => {
 {
   // Independent security re-review (E-1): a well-formed size above the machine
   // is no ceiling. "999999g" passed toLimits and ran under --memory 999999g.
-  const host = { totalMem: 8 * 1024 ** 3, cpuCount: 4, source: "<ws>/.devcontainer/devcontainer.json" };
+  // A roomy operator ceiling, so these cases exercise the HOST cap alone.
+  const host = { maxMemory: "1t", maxCpus: "64", totalMem: 8 * 1024 ** 3, cpuCount: 4, source: "<ws>/.devcontainer/devcontainer.json" };
   for (const [v, bytes] of [["512m", 512 * 1024 ** 2], ["2gb", 2 * 1024 ** 3], ["1.5G", 1.5 * 1024 ** 3], ["64MiB", 64 * 1024 ** 2], ["1024", 1024], [4096, 4096], ["1t", 1024 ** 4]]) {
     ok(`parseSize(${JSON.stringify(v)}) is ${bytes} bytes`, parseSize(v) === bytes, String(parseSize(v)));
   }
@@ -92,7 +93,59 @@ const has = (a, flag, value) => {
     const l = { memory: null, cpus: null };
     ok("null (dropped by preflight) passes through the cap untouched", capLimits(l, host).length === 0 && l.memory === null && l.cpus === null);
   }
-  ok("the defaults are the real host", capLimits({ memory: "1k", cpus: "0.5" }).length === 0);
+  ok("the defaults are the real host, under the operator's default ceiling", capLimits({ memory: "1k", cpus: "0.5" }).length === 0);
+  // Round 3: the host total is a ceiling nobody set. The OPERATOR's ceiling
+  // comes first; the file can lower a limit under it and never raise one over
+  // it, and the warning names the flag that raises the ceiling.
+  {
+    const op = { maxMemory: "4g", maxCpus: "3", totalMem: 64 * 1024 ** 3, cpuCount: 32, source: "<ws>/.devcontainer/devcontainer.json" };
+    const l = { memory: "60g", cpus: "16" };
+    const w = capLimits(l, op);
+    ok("a declared limit above the operator's ceiling is clamped to the operator's ceiling, not the host's", l.memory === String(4 * 1024 ** 3) && l.cpus === "3", JSON.stringify(l));
+    ok("…and the warning names the file and the flag that raises the ceiling", w.length === 2 && /--max-memory/.test(w[0]) && /--max-cpus/.test(w[1]) && w.every((x) => x.includes(op.source)), JSON.stringify(w));
+    const under = { memory: "1g", cpus: "1" };
+    ok("a declared limit under the operator's ceiling is kept: the file may lower", capLimits(under, op).length === 0 && under.memory === "1g" && under.cpus === "1");
+    const tight = { memory: "4g", cpus: "3" };
+    ok("a declared limit equal to the operator's ceiling is kept", capLimits(tight, op).length === 0 && tight.memory === "4g");
+  }
+  ok("with no operator flag the ceiling is the default of 2gb and 2 cpus: a file declaring 8gb gets 2gb", (() => {
+    const l = { memory: "8gb", cpus: "8" };
+    const w = capLimits(l, { totalMem: 64 * 1024 ** 3, cpuCount: 32 });
+    return l.memory === String(2 * 1024 ** 3) && l.cpus === "2" && w.length === 2 && /2gb/.test(w[0]);
+  })());
+  ok("the host still caps an operator ceiling above the machine", (() => {
+    const l = { memory: "100g", cpus: "100" };
+    const w = capLimits(l, { maxMemory: "1t", maxCpus: "999", totalMem: 8 * 1024 ** 3, cpuCount: 4 });
+    return l.memory === String(8 * 1024 ** 3) && l.cpus === "4" && /host/.test(w[0]);
+  })());
+  for (const bad of [["", "2"], ["x", "2"], ["2g", "0"], ["2g", "-1"], ["2g", "all"]]) {
+    ok(`an operator ceiling of ${JSON.stringify(bad)} is refused by name`, (() => {
+      try {
+        capLimits({ memory: "1g", cpus: "1" }, { maxMemory: bad[0], maxCpus: bad[1] });
+        return false;
+      } catch (e) {
+        return /refusing max(Memory|Cpus)/.test(e.message);
+      }
+    })());
+  }
+  // The CLI path applies the same cap (round 3: it did not).
+  {
+    const devDir = mkdtempSync(join(tmpdir(), "sandbox-cap-"));
+    const devFile = join(devDir, "devcontainer.json");
+    writeFileSync(devFile, JSON.stringify({ image: "img", hostRequirements: { memory: "999999g", cpus: "9999" } }));
+    const fake = join(devDir, "bin");
+    mkdirSync(fake);
+    writeFileSync(join(fake, "podman"), "#!/bin/sh\nif [ \"$1\" = info ]; then echo true; exit 0; fi\nif [ \"$1\" = --version ]; then echo 'podman version 5.0.0'; exit 0; fi\necho \"$@\"\n");
+    chmodSync(join(fake, "podman"), 0o755);
+    const r = spawnSync(process.execPath, [join(HERE, "sandbox.mjs"), "run", "--devcontainer", devFile, "--allow-missing-limits", "--max-memory", "3g", "--", "true"], { encoding: "utf8", env: { ...process.env, PATH: `${fake}:${process.env.PATH}` } });
+    const out = `${r.stdout}\n${r.stderr}`;
+    ok("sandbox.mjs run clamps a devcontainer above the operator's ceiling and warns", /WARNING: .*999999g.*--max-memory/.test(out) && !/--memory 999999g/.test(out), out.slice(0, 400));
+    ok("…to the operator's value", new RegExp(`--memory ${3 * 1024 ** 3}\\b`).test(out) || /not limiting memory/.test(out), out.slice(0, 400));
+    writeFileSync(devFile, JSON.stringify({ image: "img", hostRequirements: { memory: "" } }));
+    const bad = spawnSync(process.execPath, [join(HERE, "sandbox.mjs"), "run", "--devcontainer", devFile, "--", "true"], { encoding: "utf8", env: { ...process.env, PATH: `${fake}:${process.env.PATH}` } });
+    ok("sandbox.mjs run refuses a ceiling that is not a size by name, exit 2, no stack trace", bad.status === 2 && /REFUSING — refusing hostRequirements\.memory/.test(bad.stderr) && !/at .*\.mjs:\d+/.test(bad.stderr), `${bad.status} ${bad.stderr.slice(0, 300)}`);
+    rmSync(devDir, { recursive: true, force: true });
+  }
 }
 
 {

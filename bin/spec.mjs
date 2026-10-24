@@ -146,7 +146,10 @@ export const MEMORY_SIZE = /^\d+(\.\d+)?\s*[kmgt]?i?b?$/i;
 
 function memoryLimit(v) {
   if (v === undefined) return "2gb";
-  if (typeof v === "number" && Number.isInteger(v) && v > 0) return String(v);
+  // A JSON number is bytes. Above MAX_SAFE_INTEGER, String() prints an
+  // exponent ("1e+21"), which podman cannot read (independent security review,
+  // round 3), so the bound is where the number stays exact.
+  if (typeof v === "number" && Number.isInteger(v) && v > 0 && v <= Number.MAX_SAFE_INTEGER) return String(v);
   if (typeof v === "string" && MEMORY_SIZE.test(v.trim()) && parseFloat(v) > 0) return v.trim();
   throw new Error(`refusing hostRequirements.memory ${JSON.stringify(v)}: a memory ceiling is a size such as "512m" or "2gb", and it is not optional`);
 }
@@ -154,7 +157,9 @@ function memoryLimit(v) {
 function cpuLimit(v) {
   if (v === undefined) return "2";
   const n = typeof v === "number" ? v : typeof v === "string" && /^\d+(\.\d+)?$/.test(v.trim()) ? Number(v) : NaN;
-  if (Number.isFinite(n) && n > 0) return String(n);
+  // The same exponent problem: a cpu count that String() would print as
+  // "1e+21" is not a count. No machine has a million cpus.
+  if (Number.isFinite(n) && n > 0 && n <= 1_000_000) return String(n);
   throw new Error(`refusing hostRequirements.cpus ${JSON.stringify(v)}: a cpu ceiling is a positive number, and it is not optional`);
 }
 
