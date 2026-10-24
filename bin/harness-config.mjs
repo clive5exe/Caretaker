@@ -230,8 +230,9 @@ export function policyFlags(flags) {
     // E-1: the operator's ceilings on what devcontainer.json may declare.
     maxMemory: flags["max-memory"],
     maxCpus: flags["max-cpus"],
-    // E-5: one accepted build per run on the command line; runstore merges it
-    // with the accepted list it keeps in the state dir.
+    // E-5: one accepted build per run on the command line; runstore records it
+    // in the operator's config dir (environment.mjs acceptedBuildsPath) and
+    // gives the run the whole list.
     acceptBuilds: flags["accept-build"] === undefined ? undefined : [flags["accept-build"]],
   };
   return Object.fromEntries(Object.entries(out).filter(([, v]) => v !== undefined));

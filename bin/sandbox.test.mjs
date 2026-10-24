@@ -80,6 +80,27 @@ const has = (a, flag, value) => {
       return /refusing pull policy "always"/.test(e.message);
     }
   })());
+  // Round 6: this runner's own CLI pulled with podman's default. An image the
+  // devcontainer names is never pulled; one --image names keeps the default.
+  {
+    const devDir = mkdtempSync(join(tmpdir(), "sandbox-pull-"));
+    const devFile = join(devDir, "devcontainer.json");
+    writeFileSync(devFile, JSON.stringify({ image: "evil.example/leak:data" }));
+    const fake = join(devDir, "bin");
+    mkdirSync(fake);
+    const podman = (exists) => writeFileSync(join(fake, "podman"), `#!/bin/sh\nif [ "$1" = info ]; then echo true; exit 0; fi\nif [ "$1" = --version ]; then echo 'podman version 5.0.0'; exit 0; fi\nif [ "$1" = image ] && [ "$2" = exists ]; then exit ${exists ? 0 : 1}; fi\necho "$@"\n`);
+    const runCli = (...a) => spawnSync(process.execPath, [join(HERE, "sandbox.mjs"), "run", "--devcontainer", devFile, "--allow-missing-limits", ...a, "--", "true"], { encoding: "utf8", env: { ...process.env, PATH: `${fake}:${process.env.PATH}` } });
+    podman(true);
+    chmodSync(join(fake, "podman"), 0o755);
+    const named = runCli();
+    ok("sandbox.mjs run never pulls an image the devcontainer named: --pull=never is on the argv", /--pull=never/.test(named.stdout) && /evil\.example\/leak:data/.test(named.stdout), named.stdout + named.stderr.slice(0, 200));
+    const given = runCli("--image", "docker.io/library/alpine:3");
+    ok("…while an image given by --image keeps podman's default pull", !/--pull=never/.test(given.stdout) && /alpine:3/.test(given.stdout), given.stdout);
+    podman(false);
+    const absent = runCli();
+    ok("…and a named image that is not local is refused by name, with the pull for the operator to make", absent.status === 2 && /REFUSING — devcontainer\.json names image evil\.example\/leak:data/.test(absent.stderr) && /podman pull evil\.example\/leak:data/.test(absent.stderr) && !/^run /m.test(absent.stdout), absent.stderr.slice(0, 300));
+    rmSync(devDir, { recursive: true, force: true });
+  }
 }
 
 {

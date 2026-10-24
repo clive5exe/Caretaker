@@ -431,6 +431,19 @@ if (isEntry) {
       process.exit(2);
     }
     const workdir = resolve(flags.workdir ?? process.cwd());
+    // E-5: an image named by the devcontainer, not by --image, is the file's,
+    // and the file is in the workdir the agent writes. This CLI applies the
+    // rule a run has (environment.mjs resolveImage): never pull it; if it is
+    // not local, refuse and print the pull for the operator to read and make.
+    // (round 6: this runner pulled with podman's default.)
+    let pull = "missing";
+    if (!flags.image && runtime === "podman") {
+      pull = "never";
+      if (spawnSync(runtime, ["image", "exists", image], { stdio: "ignore" }).status !== 0) {
+        console.error(`[sandbox] REFUSING — devcontainer.json names image ${image}, which is not present locally, and this runner never pulls an image the file named: a pull is a host fetch from whatever registry the name says. Read the name, then \`${runtime} pull ${image}\` yourself.`);
+        process.exit(2);
+      }
+    }
     const net = flags.net ?? "none";
     for (const w of isolationWarnings({ runtime, rootless: found?.rootless ?? null, net })) console.error(`[sandbox] WARNING: ${w}`);
     // PREFLIGHT. Refuse rather than pass a limit the kernel will ignore or choke on.
@@ -462,7 +475,7 @@ if (isEntry) {
         if (m.limit === "pids") limits.pids = null;
       }
     }
-    const args = buildArgs({ image, limits, workdir, net, cmd: rest, runtime });
+    const args = buildArgs({ image, limits, workdir, net, cmd: rest, runtime, pull });
     const r = spawnSync(runtime, args, { stdio: "inherit" });
     process.exit(r.status ?? 1);
   }

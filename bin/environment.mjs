@@ -37,7 +37,7 @@ import { spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { within } from "./paths.mjs";
 import { buildArgs, checkLimits, delegatedControllers } from "./sandbox.mjs";
@@ -99,7 +99,10 @@ export function buildTag(devcontainerPath) {
 export function buildArgv(dev, devcontainerPath, { network = "none", workspace = null, stdin = false } = {}) {
   const base = dirname(resolve(devcontainerPath));
   const ownProject = basename(base) === ".devcontainer" ? dirname(base) : base;
-  const bound = workspace && within(base, workspace) ? resolve(workspace) : ownProject;
+  // The agent's file is bound to the workspace, by real path; so a workspace
+  // `.devcontainer` symlinked elsewhere resolves its Dockerfile and context
+  // outside the bound and is refused, rather than read as the operator's.
+  const bound = agentEditable(devcontainerPath, workspace) ? resolve(workspace) : ownProject;
   const b = dev.build ?? {};
   const dockerfile = resolve(base, b.dockerfile);
   const context = resolve(base, b.context ?? ".");
@@ -286,8 +289,31 @@ export function buildDigest(dev, devcontainerPath) {
 /** Control bytes shown as escapes, so a message to a terminal cannot be made to hide a line. */
 const plain = (s) => String(s).replace(/[\x00-\x08\x0b-\x1f\x7f]/g, (c) => `\\x${c.charCodeAt(0).toString(16).padStart(2, "0")}`);
 
-/** Is this devcontainer file one the agent could have edited: inside the workspace? */
-export const agentEditable = (devcontainerPath, workspace) => Boolean(workspace) && within(dirname(resolve(devcontainerPath)), workspace);
+/** `p` is `root` or under it by PATH TEXT alone, symlinks not followed. */
+const lexicallyUnder = (p, root) => {
+  const rel = relative(resolve(root), resolve(p));
+  return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
+};
+
+/**
+ * Is this devcontainer file one the agent could have edited? Yes if it is
+ * inside the workspace by path text OR by where it really lands. Either
+ * alone is not enough: judged by real path only, an agent-made symlink
+ * `.devcontainer -> ../sibling-workspace/.devcontainer` landed outside and
+ * read as the operator's file, so its `image` key was pulled with podman's
+ * default (independent security review, E-5, round 6). A path the agent can
+ * write to, by name, is the agent's, wherever it points.
+ */
+export const agentEditable = (devcontainerPath, workspace) =>
+  Boolean(workspace) && (lexicallyUnder(dirname(resolve(devcontainerPath)), workspace) || within(dirname(resolve(devcontainerPath)), workspace));
+
+/**
+ * An image reference, by the distribution grammar: lower-case path components
+ * with `.`, `_`, `-` and `/`, an optional `:tag`, an optional `@sha256:` digest,
+ * an optional `host[:port]/` prefix. Anything else from an agent-editable file
+ * is refused, so a name is a name and never a flag, a space or a control byte.
+ */
+export const IMAGE_REF = /^(?:[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?(?::\d{1,5})?\/)?[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*(?:\/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9._-]{0,127})?(?:@sha256:[0-9a-f]{64})?$/;
 
 /** The project a devcontainer file belongs to by convention: the parent of its `.devcontainer/`, else its own directory. */
 export const projectOf = (devcontainerPath) => {
@@ -351,16 +377,22 @@ export function resolveImage({ image = null, dev, devcontainerPath, runtime = "p
   const editable = agentEditable(devcontainerPath, workspace);
   if (dev?.image) {
     if (!editable) return { image: dev.image, built: false, pull: "missing", warnings };
-    // Named by a file the agent could edit: the run never pulls it. If it is
-    // not local, the operator pulls it by hand, having read the name.
+    // Named by a file the agent could edit. First a name is a name: anything
+    // outside the reference grammar is refused, shown with control bytes as
+    // escapes, so it is never a flag and never hides from the terminal.
+    if (typeof dev.image !== "string" || !IMAGE_REF.test(dev.image)) {
+      throw new EnvironmentError("IMAGE_NAME", `${plain(devcontainerPath)} names image ${JSON.stringify(plain(String(dev.image)))}, which is not an image reference (host[:port]/path[:tag][@sha256:…], lower case)`);
+    }
+    // The run never pulls it. If it is not local, the operator pulls it by
+    // hand, having read the name.
     const run = exec ?? defaultExec(runtime);
     if (run(["image", "exists", dev.image]).status !== 0) {
       throw new EnvironmentError(
         "IMAGE_NOT_LOCAL",
-        `${devcontainerPath} names image ${dev.image}, and it is not present locally. The file is inside the workspace, which the last run's agent could have edited, so the run will not pull it: a pull is a host fetch from whatever registry the name says. Read the name, then \`${runtime} pull ${dev.image}\` yourself.`,
+        `${plain(devcontainerPath)} names image ${dev.image}, and it is not present locally. The file is the workspace's, which the last run's agent could have edited, so the run will not pull it: a pull is a host fetch from whatever registry the name says. Read the name, then \`${runtime} pull ${dev.image}\` yourself.`,
       );
     }
-    warnings.push(`image ${dev.image} named by the workspace devcontainer: run with --pull=never, the operator pulled it`);
+    warnings.push(`image ${dev.image} named by the workspace devcontainer: present locally, run with --pull=never`);
     return { image: dev.image, built: false, pull: "never", warnings };
   }
   if (dev?.build?.dockerfile) {
@@ -414,8 +446,8 @@ export function resolveImage({ image = null, dev, devcontainerPath, runtime = "p
       const found = advice();
       throw new EnvironmentError(
         "BUILD_NOT_ACCEPTED",
-        `${devcontainerPath} builds an image from a Dockerfile inside the workspace, which the last run's agent could have edited, and this version has not been accepted. ` +
-          `Read ${dockerfilePath} (with \`cat -v\`: control bytes could hide a line from a plain cat), then accept it once with --accept-build ${digest}. ` +
+        `${plain(devcontainerPath)} builds an image from a Dockerfile inside the workspace, which the last run's agent could have edited, and this version has not been accepted. ` +
+          `Read ${plain(dockerfilePath)} (with \`cat -v\`: control bytes could hide a line from a plain cat), then accept it once with --accept-build ${digest}. ` +
           (found.length ? `What it would fetch on the host: ${found.join("; ")}.` : "The reader found no host fetch in it, which is advice, not proof."),
       );
     }
@@ -781,7 +813,12 @@ if (isEntry) {
     }
     f[key] = key === "egress" || key === "json" ? true : argv[++i];
   }
-  const devcontainerPath = f.devcontainer ?? ".devcontainer/devcontainer.json";
+  // With --workspace, the devcontainer is the WORKSPACE's file: read against
+  // the current directory it was this checkout's file judged against another
+  // workspace (independent security review, E-5, round 6), the same slip the
+  // harness had in round 5. Without --workspace, the file is where it says
+  // and the workspace is its project.
+  const devcontainerPath = f.workspace ? resolve(f.workspace, f.devcontainer ?? ".devcontainer/devcontainer.json") : resolve(f.devcontainer ?? ".devcontainer/devcontainer.json");
   try {
     // The same gate a run gets (round 5: this command built an unaccepted
     // workspace Dockerfile with no refusal, and sandbox.mjs pointed at it as
@@ -815,7 +852,8 @@ if (isEntry) {
     console.error("usage: environment.mjs image|check [--devcontainer F] [--workspace DIR] [--accept-build DIGEST] [--specs D] [--image I] [--sandbox podman|none] [--egress] [--json]");
     process.exit(2);
   } catch (e) {
-    console.error(`[environment] ${e.name}: ${e.message}`);
+    // The code is the name a reader greps for and a test asserts on.
+    console.error(`[environment] ${e.name}${e.code ? ` ${e.code}` : ""}: ${e.message}`);
     process.exit(2);
   }
 }
