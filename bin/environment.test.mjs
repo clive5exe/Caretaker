@@ -45,6 +45,9 @@ mkdirSync(DEVDIR, { recursive: true });
 const DEV = join(DEVDIR, "devcontainer.json");
 {
   const built = { build: { dockerfile: "Dockerfile", context: "..", args: { V: "1" }, target: "dev" } };
+  // A real file: an absent Dockerfile is refused by name now (round 7), not
+  // handed to podman to discover.
+  writeFileSync(join(DEVDIR, "Dockerfile"), "FROM docker.io/library/node:22-alpine\n");
   const argv = buildArgv(built, DEV);
   ok("a Dockerfile is built with paths taken from the devcontainer's own directory",
     JSON.stringify(argv) === JSON.stringify(["build", "--network", "none", "-t", buildTag(DEV), "-f", join(DEVDIR, "Dockerfile"), "--build-arg", "V=1", "--target", "dev", join(TMP, "proj")]), JSON.stringify(argv));
@@ -201,10 +204,10 @@ const DEV = join(DEVDIR, "devcontainer.json");
       const build = calls.find((c) => c.a[0] === "build");
       const f = build?.a[build.a.indexOf("-f") + 1];
       ok("the build reads a private copy of the hashed bytes, not the workspace file: same bytes, our file, 0600, gone afterwards", build && f && f !== DF && /caretaker-dockerfile-/.test(f) && build.bytes && readFileSync(DF).equals(build.bytes) && build.mode === 0o600 && !existsSync(f), JSON.stringify({ f, mode: build?.mode, gone: f && !existsSync(f) }));
-      ok("a Dockerfile that does not exist is handed to podman by path, which reports it; nothing to accept", (() => {
+      ok("a Dockerfile that does not exist is refused by name, never handed to podman by path (round 7)", (() => {
         const c2 = [];
-        resolveImage({ dev: { build: { dockerfile: "Nowhere" } }, devcontainerPath: DEV, workspace: PROJ, exec: (a) => (c2.push(a), { status: 0 }) });
-        return c2[0]?.[c2[0].indexOf("-f") + 1]?.endsWith("Nowhere");
+        const c = code(() => resolveImage({ dev: { build: { dockerfile: "Nowhere" } }, devcontainerPath: DEV, workspace: PROJ, exec: (a) => (c2.push(a), { status: 0 }) }));
+        return c === "NO_DOCKERFILE" && c2.length === 0;
       })());
     }
     // Round 5: the sibling key. `image` in a workspace devcontainer must not
@@ -257,7 +260,8 @@ const DEV = join(DEVDIR, "devcontainer.json");
       }
     }
     ok("projectOf follows the devcontainer convention", projectOf(DEV) === PROJ && projectOf(join(TMP, "flat", "devcontainer.json")) === join(TMP, "flat"));
-    rmSync(DF);
+    // Later blocks build from DEV too: leave a clean Dockerfile, not none.
+    writeFileSync(DF, `FROM ${N}\nCOPY stamp.txt /stamp.txt\n`);
   }
   {
     // Round 6: a name is a name. An image reference from the agent's file is
@@ -314,6 +318,55 @@ const DEV = join(DEVDIR, "devcontainer.json");
     const digest = /--accept-build ([0-9a-f]{64})/.exec(inA.stderr)?.[1];
     const accepted = spawnSync(process.execPath, [join(HERE, "environment.mjs"), "image", "--accept-build", digest ?? "x"], { cwd: A, encoding: "utf8", env });
     ok("…and with --accept-build it builds, from a private copy of the hashed bytes, and records the acceptance in the operator's config dir", accepted.status === 0 && existsSync(log) && /^build .* -f \S*caretaker-dockerfile-\S* /m.test(readFileSync(log, "utf8")) && existsSync(join(TMP, "xdg-cli", "caretaker", "accepted-builds.json")), `${accepted.status} ${accepted.stderr.slice(0, 200)} ${existsSync(log) ? readFileSync(log, "utf8").slice(0, 200) : ""}`);
+  }
+  {
+    // Round 7: the bound check comes before any read, and only a regular file
+    // is read. A FIFO at the Dockerfile's path hung every later run before
+    // the refusal it was owed; a FIFO outside the bound hung before the
+    // BUILD_OUTSIDE_WORKSPACE it was owed.
+    const F = join(TMP, "fifo-ws");
+    mkdirSync(join(F, ".devcontainer"), { recursive: true });
+    const FDEV = join(F, ".devcontainer", "devcontainer.json");
+    const fifoIn = join(F, ".devcontainer", "Dockerfile");
+    const mk = spawnSync("mkfifo", [fifoIn]);
+    if (mk.status !== 0) skip("a FIFO at the Dockerfile path is refused, not read", "mkfifo not available");
+    else {
+      const exec = () => ({ status: 0 });
+      const t0 = Date.now();
+      const c = code(() => resolveImage({ dev: { build: { dockerfile: "Dockerfile" } }, devcontainerPath: FDEV, workspace: F, exec }));
+      ok("a FIFO at the Dockerfile path is refused by name (NO_DOCKERFILE), not read, in no time", c === "NO_DOCKERFILE" && Date.now() - t0 < 2000, `${c} ${Date.now() - t0}ms`);
+      const outside = join(TMP, "fifo-outside");
+      mkdirSync(outside, { recursive: true });
+      spawnSync("mkfifo", [join(outside, "Dockerfile")]);
+      const t1 = Date.now();
+      const c2 = code(() => resolveImage({ dev: { build: { dockerfile: "../../fifo-outside/Dockerfile" } }, devcontainerPath: FDEV, workspace: F, exec }));
+      ok("a Dockerfile outside the bound is refused before it is read, even when reading it would hang", c2 === "BUILD_OUTSIDE_WORKSPACE" && Date.now() - t1 < 2000, `${c2} ${Date.now() - t1}ms`);
+      ok("…and the BUILD_OUTSIDE_WORKSPACE message escapes control bytes in the path it repeats", (() => {
+        try {
+          resolveImage({ dev: { build: { dockerfile: "../../x\x1b[2K/Dockerfile" } }, devcontainerPath: FDEV, workspace: F, exec });
+          return false;
+        } catch (e) {
+          return e.code === "BUILD_OUTSIDE_WORKSPACE" && !/\x1b/.test(e.message) && /\\x1b/.test(e.message);
+        }
+      })());
+    }
+    // Round 7: another project's accepted build is local, and its tag is
+    // guessable. A devcontainer declares its own build; it does not name one.
+    const present = () => ({ status: 0 });
+    ok("a caretaker build tag named as an image is refused: declare the build instead", (() => {
+      try {
+        resolveImage({ dev: { image: "localhost/caretaker-env-0123456789ab" }, devcontainerPath: DEV, workspace: PROJ, exec: present });
+        return false;
+      } catch (e) {
+        return e.code === "IMAGE_NAME" && /build tag/.test(e.message);
+      }
+    })());
+    ok("…while the operator's own --image may be one", resolveImage({ image: "localhost/caretaker-env-0123456789ab", dev: {}, devcontainerPath: DEV, workspace: PROJ, exec: present }).pull === "missing");
+    ok("under docker the local check is `image inspect`, since docker has no `image exists`", (() => {
+      const calls = [];
+      resolveImage({ dev: { image: "docker.io/library/alpine:3" }, devcontainerPath: DEV, workspace: PROJ, runtime: "docker", exec: (a) => (calls.push(a), { status: 0 }) });
+      return calls.some((a) => a[0] === "image" && a[1] === "inspect");
+    })());
   }
 
   const calls = [];

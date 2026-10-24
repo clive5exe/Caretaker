@@ -128,9 +128,12 @@ whatever the name carries. So such an image runs with `--pull=never`; if it is
 not local the run is refused (`IMAGE_NOT_LOCAL`) with the pull for the
 operator to read and make. The name is first held to the image-reference
 grammar (`IMAGE_NAME` otherwise), with control bytes shown as escapes in any
-message that repeats it. An `--image` the operator gave, or a devcontainer
-outside the workspace, keeps podman's default. `sandbox.mjs run` applies the
-same rule to an image its devcontainer names.
+message that repeats an agent's string. A caretaker build tag
+(`localhost/caretaker-env-…`) is refused as a name: another project's accepted
+build is local, and its tag is guessable; a devcontainer declares its own
+`build`. An `--image` the operator gave, or a devcontainer outside the
+workspace, keeps podman's default. `sandbox.mjs run` applies the same rule to
+an image its devcontainer names, under podman and under docker alike.
 
 **"The workspace's devcontainer" is judged by name as well as by where it
 lands.** A `.devcontainer` the agent symlinks to a sibling checkout resolves

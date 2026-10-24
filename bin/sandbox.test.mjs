@@ -99,8 +99,32 @@ const has = (a, flag, value) => {
     podman(false);
     const absent = runCli();
     ok("…and a named image that is not local is refused by name, with the pull for the operator to make", absent.status === 2 && /REFUSING — devcontainer\.json names image evil\.example\/leak:data/.test(absent.stderr) && /podman pull evil\.example\/leak:data/.test(absent.stderr) && !/^run /m.test(absent.stdout), absent.stderr.slice(0, 300));
+    // Round 7: the rule was gated on podman, and docker pulled. docker has
+    // `image inspect`, not `image exists`.
+    writeFileSync(join(fake, "docker"), "#!/bin/sh\nif [ \"$1\" = image ] && [ \"$2\" = inspect ]; then exit 0; fi\necho \"$@\"\n");
+    chmodSync(join(fake, "docker"), 0o755);
+    const dockerRun = runCli("--runtime", "docker");
+    ok("under --runtime docker the devcontainer-named image is never pulled either", /--pull=never/.test(dockerRun.stdout) && /evil\.example\/leak:data/.test(dockerRun.stdout), dockerRun.stdout + dockerRun.stderr.slice(0, 200));
+    writeFileSync(join(fake, "docker"), "#!/bin/sh\nif [ \"$1\" = image ] && [ \"$2\" = inspect ]; then exit 1; fi\necho \"$@\"\n");
+    const dockerAbsent = runCli("--runtime", "docker");
+    ok("…and one that is not local is refused under docker too, naming `docker pull`", dockerAbsent.status === 2 && /docker pull evil\.example\/leak:data/.test(dockerAbsent.stderr), dockerAbsent.stderr.slice(0, 300));
+    writeFileSync(devFile, JSON.stringify({ image: "evil.example/leak\x1b[2K:data" }));
+    const esc = runCli();
+    ok("a devcontainer image name outside the grammar is refused by this CLI too, control bytes escaped", esc.status === 2 && /not an image reference/.test(esc.stderr) && !/\x1b/.test(esc.stderr), esc.stderr.slice(0, 200));
     rmSync(devDir, { recursive: true, force: true });
   }
+  // Round 7: the grammar lives here, where every run's argv is built.
+  for (const bad of ["--privileged", "img name", "Node:22", "a\x1b[2Kb", "x:" + "t".repeat(129), "img@sha256:short", ""]) {
+    ok(`buildArgs refuses image name ${JSON.stringify(bad).slice(0, 24)} by the reference grammar, escaped`, (() => {
+      try {
+        buildArgs({ image: bad, limits: LIMITS, workdir: "/w", cmd: ["true"] });
+        return false;
+      } catch (e) {
+        return /not an image reference/.test(e.message) && !/\x1b/.test(e.message);
+      }
+    })());
+  }
+  for (const good of ["img", "docker.io/library/node:22-alpine", "localhost:5000/x", "ghcr.io/a/b@sha256:" + "0".repeat(64), "localhost/caretaker-env-0123456789ab"]) ok(`buildArgs accepts ${good}`, buildArgs({ image: good, limits: LIMITS, workdir: "/w", cmd: ["true"] }).includes(good));
 }
 
 {
