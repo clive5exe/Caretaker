@@ -122,6 +122,13 @@ const has = (a, flag, value) => {
     }
     const opShort = runCli("--image", "7b26");
     ok("…while --image 7b26 from the operator runs: it is the operator's", /^run /m.test(opShort.stdout) && / 7b26 /.test(` ${opShort.stdout} `), opShort.stdout.slice(0, 200));
+    // Round 9: localhost/ (no port) is every locally built image's namespace.
+    writeFileSync(devFile, JSON.stringify({ image: "localhost/my-app:latest" }));
+    const local = runCli();
+    ok("sandbox.mjs run refuses a devcontainer image under localhost/", local.status === 2 && /under localhost\//.test(local.stderr) && !/^run /m.test(local.stdout), local.stderr.slice(0, 200));
+    writeFileSync(devFile, "{ not json");
+    const unread = runCli("--image", "docker.io/library/alpine:3");
+    ok("a devcontainer that did not parse is refused, not run at the defaults with --image", unread.status === 2 && /REFUSING — .*not readable/.test(unread.stderr) && !/^run /m.test(unread.stdout), unread.stderr.slice(0, 200));
     rmSync(devDir, { recursive: true, force: true });
   }
   // Round 7: the grammar lives here, where every run's argv is built.

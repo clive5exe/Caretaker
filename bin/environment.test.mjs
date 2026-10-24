@@ -388,6 +388,40 @@ const DEV = join(DEVDIR, "devcontainer.json");
       const r = resolveImage({ image: "x:1", dev: { image: "y", features: { "ghcr.io/a/b\x1b[2K:1": {} } }, devcontainerPath: DEV, workspace: PROJ, exec: present });
       return r.warnings.every((w) => !/\x1b/.test(w)) && r.warnings.some((w) => /\\x1b/.test(w));
     })());
+    // Round 9: localhost/ (no port) is podman's namespace for every image built
+    // or tagged on this host; the tag rule had covered its least guessable
+    // spelling. Newlines forge lines, so they are escaped too. A devcontainer
+    // that did not parse is a refusal, not a run at the defaults.
+    for (const local of ["localhost/x", "localhost/library/caretaker-env-7b2653b4c90b", "localhost/my-app:latest"]) {
+      ok(`a devcontainer image under localhost/ is refused: ${local}`, (() => {
+        try {
+          resolveImage({ dev: { image: local }, devcontainerPath: DEV, workspace: PROJ, exec: present });
+          return false;
+        } catch (e) {
+          return e.code === "IMAGE_NAME" && /under localhost\//.test(e.message);
+        }
+      })());
+    }
+    ok("…while localhost:<port>/x is a registry reference and is kept", resolveImage({ dev: { image: "localhost:5000/x" }, devcontainerPath: DEV, workspace: PROJ, exec: present }).pull === "never");
+    ok("a newline or a tab in a feature key is escaped: it cannot forge an operator line", (() => {
+      const r = resolveImage({ image: "x:1", dev: { image: "y", features: { "a\n[sandbox] all good\tb": {} } }, devcontainerPath: DEV, workspace: PROJ, exec: present });
+      return r.warnings.every((w) => !/[\n\t]/.test(w)) && r.warnings.some((w) => /\\x0a.*\\x09/.test(w));
+    })());
+    ok("a devcontainer that did not parse is refused by name on the image path, even with --image", code(() => resolveImage({ image: "docker.io/library/alpine:3", dev: { __error: "Unexpected token \x1b" }, devcontainerPath: DEV, workspace: PROJ, exec: present })) === "BAD_DEVCONTAINER");
+    {
+      // The compose read stats before it reads (round 8 fix, round 9 asked for its test).
+      const C = join(TMP, "compose-fifo");
+      mkdirSync(C, { recursive: true });
+      const CDEV = join(C, "devcontainer.json");
+      const fifo = join(C, "docker-compose.yml");
+      if (spawnSync("mkfifo", [fifo]).status !== 0) skip("a FIFO compose file is an error, not a hang", "mkfifo not available");
+      else {
+        const t0 = Date.now();
+        const d = declared({ dev: { dockerComposeFile: "docker-compose.yml", runServices: ["db"], image: "docker.io/library/alpine:3" }, specs: [], devcontainerPath: CDEV });
+        const why = d.services.find((s) => s.name === "db")?.why ?? "";
+        ok("a FIFO compose file is an error on the service, not a hang", /ENOTREGULAR|not a regular file/.test(why) && Date.now() - t0 < 2000, `${why} ${Date.now() - t0}ms`);
+      }
+    }
   }
 
   const calls = [];

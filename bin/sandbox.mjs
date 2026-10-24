@@ -210,8 +210,13 @@ export const delegationFix = (uid = process.getuid?.() ?? 1000) =>
  */
 export const IMAGE_REF = /^(?:[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?(?::\d{1,5})?\/)?[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*(?:\/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9._-]{0,127})?(?:@sha256:[0-9a-f]{64})?$/;
 
-/** Control bytes shown as escapes, so a message that repeats an agent's string cannot hide a line from a terminal. */
-export const plain = (s) => String(s).replace(/[\x00-\x08\x0b-\x1f\x7f]/g, (c) => `\\x${c.charCodeAt(0).toString(16).padStart(2, "0")}`);
+/**
+ * Control bytes shown as escapes, so a message that repeats an agent's string
+ * cannot hide a line from a terminal or forge one: C0 including newline and
+ * tab (round 9: a feature key holding a newline forged an operator line),
+ * DEL, and the C1 range.
+ */
+export const plain = (s) => String(s).replace(/[\x00-\x1f\x7f-\x9f]/g, (c) => `\\x${c.charCodeAt(0).toString(16).padStart(2, "0")}`);
 
 /**
  * Why an image NAMED BY THE AGENT'S FILE may not be used, or null. THE ONE
@@ -222,17 +227,22 @@ export const plain = (s) => String(s).replace(/[\x00-\x08\x0b-\x1f\x7f]/g, (c) =
  *     podman against localhost/ and every local image, so it names whatever
  *     is local, another project's accepted build included (independent
  *     security review, E-5, round 8);
- *   - it is not a caretaker build tag (`localhost/caretaker-env-…`): another
- *     project's accepted build is local and its tag is guessable; a
- *     devcontainer declares its own `build` (round 7).
+ *   - it is not under `localhost/` (no port): that is podman's namespace for
+ *     every image built, tagged, committed or loaded on this host without a
+ *     registry, a caretaker build tag (`localhost/caretaker-env-…`) and the
+ *     operator's own `podman build -t x` alike. Round 7 refused the tag;
+ *     round 9 showed the same class under any other local name. A
+ *     devcontainer declares its own `build`; it does not name the host's.
+ *     `localhost:<port>/…` is a registry reference and is kept.
  * An --image the operator typed is the operator's and is not held to this.
  */
 export function namedImageProblem(name) {
   if (typeof name !== "string" || !IMAGE_REF.test(name)) return "not an image reference (host[:port]/path[:tag][@sha256:…], lower case)";
   if (/^localhost\/caretaker-env-/.test(name)) return 'a caretaker build tag; a devcontainer declares its own build with "build", which is accepted by digest, and does not run another project\'s accepted image by name';
   const first = name.split("/")[0];
-  const qualified = name.includes("/") && (first.includes(".") || first.includes(":") || first === "localhost");
-  if (!qualified) return `not fully qualified: a short name or an image-ID prefix names whatever is local; write registry/path:tag (for example docker.io/library/${name.split("/").pop()})`;
+  if (first === "localhost") return "under localhost/, podman's namespace for images built or tagged on this host without a registry: an image the workspace names comes from a registry, or the workspace declares its own build";
+  const qualified = name.includes("/") && (first.includes(".") || first.includes(":"));
+  if (!qualified) return `not fully qualified: a short name or an image-ID prefix names whatever is local; write registry/path[:tag] (for example docker.io/library/${name.split("/").pop()})`;
   return null;
 }
 
@@ -446,6 +456,12 @@ if (isEntry) {
     }
     const devPath = flags.devcontainer ?? ".devcontainer/devcontainer.json";
     const dev = readDevcontainer(devPath);
+    // A devcontainer that could not be read is a refusal, not a run at the
+    // defaults with --image (round 9).
+    if (dev?.__error) {
+      console.error(`[sandbox] REFUSING — ${plain(devPath)} is not readable: ${plain(dev.__error)}`);
+      process.exit(2);
+    }
     let limits;
     try {
       limits = toLimits(dev);
