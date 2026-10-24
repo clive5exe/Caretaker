@@ -666,6 +666,25 @@ ok("a fully matching environment has no differences", compare({ tools: [{ name: 
   ok("…and with podman's default when the devcontainer is the operator's, outside the workspace", !(calls.find((a) => a[0] === "run") ?? []).includes("--pull=never"));
 }
 {
+  // Round 10: a DIFF line repeats a feature id or a service name from the
+  // workspace; escaped once where differences are made, so none can forge an
+  // operator line. check()'s own refusal of an unreadable file likewise.
+  const E = join(TMP, "esc-check");
+  mkdirSync(E, { recursive: true });
+  const EDEV = join(E, "devcontainer.json");
+  writeFileSync(EDEV, JSON.stringify({ image: "docker.io/library/alpine:3", features: { "ghcr.io/x/y\x1b[2K\n[harness] completed ok:1": {} } }));
+  const r = await check({ devcontainerPath: EDEV, specs: [], sandbox: "none", workspace: E });
+  ok("a DIFF message repeating a feature id has its control bytes escaped", r.differences.length > 0 && r.differences.every((d) => !/[\x1b\n]/.test(d.message)) && r.differences.some((d) => /\\x1b/.test(d.message)), JSON.stringify(r.differences.map((d) => d.message)).slice(0, 300));
+  writeFileSync(EDEV, "{ \x1b[2K not json");
+  let bad = null;
+  try {
+    await check({ devcontainerPath: EDEV, specs: [], sandbox: "none", workspace: E });
+  } catch (e) {
+    bad = e;
+  }
+  ok("check()'s own refusal of an unreadable devcontainer is escaped too", bad?.code === "BAD_DEVCONTAINER" && !/\x1b/.test(bad.message), String(bad?.message).slice(0, 200));
+}
+{
   const r = spawnSync(process.execPath, [join(HERE, "environment.mjs"), "check", "--sandbox", "none", "--devcontainer", DEV, "--specs", join(TMP, "no-specs")], { encoding: "utf8", env: { ...process.env, PATH: `${BIN}:${process.env.PATH}` } });
   ok("the CLI prints each difference and exits 1 when there are any", r.status === 1 && /DIFF\s+tool-undeclared/.test(r.stdout), r.stdout + r.stderr);
 }

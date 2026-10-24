@@ -708,7 +708,10 @@ export function versionMatches(want, got) {
  */
 export function compare(decl, obs, { net = "none", canary, running = null } = {}) {
   const diffs = [];
-  const add = (kind, message) => diffs.push({ kind, message });
+  // Every difference repeats something from the workspace (a feature id, a
+  // service name, a compose file name): escaped once, here, so no DIFF line
+  // can forge an operator line (independent security review, round 10).
+  const add = (kind, message) => diffs.push({ kind, message: plain(message) });
   for (const t of decl.tools) {
     const got = obs.tools[t.name];
     if (/^none$/i.test(t.version)) {
@@ -773,7 +776,7 @@ export function runningServices(services, run, projects = null) {
 
 export async function check({ devcontainerPath, specs, image = null, sandbox = "podman", egress = null, exec, netns, runtime = "podman", controllers = null, workspace = null, acceptBuilds = [] }) {
   const dev = readDevcontainer(devcontainerPath);
-  if (dev?.__error) throw new EnvironmentError("BAD_DEVCONTAINER", `${devcontainerPath} is not readable JSON: ${dev.__error}`);
+  if (dev?.__error) throw new EnvironmentError("BAD_DEVCONTAINER", `${plain(devcontainerPath)} is not readable JSON: ${plain(dev.__error)}`);
   const decl = declared({ dev, specs, devcontainerPath });
   const canary = canaryFor(decl.hosts);
   const script = probeScript({ hosts: decl.hosts, canary });
@@ -857,7 +860,7 @@ if (isEntry) {
     const acceptBuilds = loadAcceptedBuilds();
     if (cmd === "image") {
       const r = resolveImage({ image: f.image ?? null, dev: readDevcontainer(devcontainerPath), devcontainerPath, buildNetwork: f["build-network"] ?? "none", workspace, acceptBuilds });
-      for (const w of r.warnings) console.error(`WARNING  ${w}`);
+      for (const w of r.warnings) console.error(`WARNING  ${plain(w)}`);
       console.log(`${r.image}${r.built ? "  (built now)" : ""}${r.pull === "never" ? "  (pull: never)" : ""}  id ${imageId(r.image) ?? "unknown"}`);
       process.exit(0);
     }
@@ -868,7 +871,7 @@ if (isEntry) {
       const r = await check({ devcontainerPath, specs, image: f.image ?? null, sandbox: f.sandbox ?? "podman", egress: f.egress ? { egressNetwork: f["egress-network"] } : null, workspace, acceptBuilds });
       if (f.json) console.log(JSON.stringify(r, null, 2));
       else {
-        for (const w of r.warnings ?? []) console.log(`WARNING  ${w}`);
+        for (const w of r.warnings ?? []) console.log(`WARNING  ${plain(w)}`);
         for (const d of r.differences) console.log(`DIFF  ${d.kind.padEnd(26)} ${d.message}`);
         console.log(`[environment] ${r.image ?? "this host"} on ${r.net}: ${r.differences.length} difference(s) from the declaration`);
       }
