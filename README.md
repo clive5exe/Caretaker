@@ -22,11 +22,12 @@ The plan, with who does what and the order, is **[docs/plan.md](docs/plan.md)**.
 | | from | status |
 |---|---|---|
 | Skills: triage, spec, implementation, review-pr, verify-behavior, improve-review-pr | **Warp** (MIT), copied unmodified into `vendor/` | done |
-| The five GitHub workflows | **Warp**; the Oz step patched to Caretaker (`vendor/patches/`) | done; not yet run on GitHub with a real login |
+| The five GitHub workflows | **Warp**; the Oz step patched to Caretaker (`vendor/patches/`) | done; not yet run on GitHub with a real login (waits on `claude setup-token`) |
 | The Oz replacement (`factory/caretaker-agent`) | **Caretaker** | done; proven with a fake model only so far |
-| Harness: runs Claude or ChatGPT behind one interface | **Caretaker** | works |
-| Sandbox, egress allowlist, secrets by name | **Caretaker** | works; needs podman |
-| Board, gates, dashboard, web UI | **Caretaker** | works |
+| Harness: runs Claude or ChatGPT behind one interface | **Caretaker** | works; ChatGPT proven on a real codex run (2026-10-24); a real Claude run waits on the token |
+| Sandbox, egress allowlist, secrets by name | **Caretaker** | works; needs podman; attacked live in CI and by independent security rounds |
+| What the agent's own devcontainer may declare: ceilings it can lower but never raise, images it never pulls, a Dockerfile built only after a human accepts its digest | **Caretaker** | works; ten independent security rounds, the last one passed |
+| Board, gates, dashboard, web UI | **Caretaker** | works; 27 of 63 tasks closed, every one on verdicts from someone other than its builder |
 | Drift gate (specs vs code) | **Caretaker** | works |
 
 Warp's code is copied, never rewritten. Any change to it is a small patch file,
@@ -153,8 +154,35 @@ node bin/serve.mjs ops/caretaker/config.json   # prints a local URL
 - **A spec that no longer matches the code blocks `done`** until someone
   updates the spec or explains why.
 
+## What holds the sandbox, in one screen
+
+The file the agent can edit is `.devcontainer/devcontainer.json`, so
+everything it declares is bounded by something the agent cannot reach:
+
+- **Ceilings go down, never up.** A declared memory or cpu limit above your
+  `--max-memory` / `--max-cpus` (default 2gb and 2) is clamped to it, and the
+  warning names the file and the flag.
+- **An image it names is never pulled by the run.** It must be fully
+  qualified, not under `localhost/`, and already local; you pull it, having
+  read the name.
+- **A Dockerfile it names is built only after you accept it,** once per
+  version, by digest: `--accept-build <digest>`. The refusal prints the digest
+  and what the file would fetch on the host. The text of the Dockerfile is
+  advice, not the control: four review rounds got past every parser.
+- **No route out but the allowlist proxy, no container socket, `.git`
+  read-only, secrets by name, everything archived redacted.**
+- **Every path is judged against the workspace,** never the current
+  directory, on every entry point.
+
+Each of these has a test that fails by name when its line is removed, and each
+was attacked by a reviewer who did not build it before it was called held. The
+whole account, step by step, is **[docs/how-it-works.md](docs/how-it-works.md)**.
+
 ## More
 
+- **[docs/how-it-works.md](docs/how-it-works.md):** how it is supposed to
+  work, end to end: a run step by step, accepting a build, the two vendors,
+  how work is reviewed, what is built and what is not
 - **[docs/plan.md](docs/plan.md):** what happens next, in order, with times
 - **[docs/reference.md](docs/reference.md):** the full manual for every
   command and file

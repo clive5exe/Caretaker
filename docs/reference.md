@@ -15,8 +15,12 @@ Today it is two things:
   sits over it, along with a run log and an unattended loop. This part is built,
   and `install.sh` puts it into any repo.
 - **The layers underneath it:** a sandbox, an egress allowlist, secrets
-  handling, a drift gate and the harness seam. These live in `bin/`, are tested
-  on their own, and are not wired together end to end yet.
+  handling, a drift gate and the harness seam. These live in `bin/`, are
+  tested on their own and attacked live in CI, and one command runs them
+  together: `runstore.mjs run` builds or checks the environment, places the
+  run behind its own egress proxy, hands secrets in by name, archives the
+  result redacted, and runs the drift gate after it. The end-to-end account
+  is [how-it-works.md](how-it-works.md).
 
 > **About the name.** The project was called caretaker, and the code still is.
 > Installed files live in `ops/caretaker/`, the config variable is
@@ -623,7 +627,58 @@ flowchart LR
   can read it. It also redacts anything that writes a log.
 
 The harness takes a `net` policy, so a run can be placed on the internal
-network. Starting the proxy and network for a run is still a manual step.
+network. `runstore.mjs run --egress host,host` starts a network and a proxy
+for that run and archives the proxy's log with it (C-5).
+
+### What the agent's own file may declare, and what holds it
+
+`devcontainer.json` is in the workspace, so the last run's agent could have
+written it. Everything it declares is therefore bounded by something the
+agent cannot reach. These are the rules as of 2026-10-24, each with a test
+that fails by name when its line is removed, and each attacked by an
+independent reviewer before it was called held (the verdict notes on the
+board for E-1 and E-5 have the file and line of every finding):
+
+- **The file is the workspace's.** Its path is resolved against the run's
+  workspace, never the current directory, on every entry point: both harness
+  adapters, `environment.mjs image|check`, `sandbox.mjs run`. A file inside
+  the workspace by name or by real path is the agent's; a `.devcontainer`
+  symlinked to a sibling checkout is still the agent's.
+- **Only a regular file is read.** A FIFO, a device or a directory at the
+  path of `devcontainer.json`, a compose file or the Dockerfile is refused by
+  name, never opened. A file that does not parse is a refusal on every path,
+  never a run at the defaults.
+- **Limits can be lowered, never raised.** `hostRequirements.memory` and
+  `cpus` must be sizes (`""`, `0`, `"unlimited"` are refused); a value above
+  the operator's `--max-memory` / `--max-cpus` (default 2gb and 2) is clamped
+  to it, and above the host's total to that, with a warning naming the file
+  and the flag. The settings file refuses `maxMemory` and `maxCpus` like every
+  isolation key.
+- **An image it names is never pulled by the run.** It must be an image
+  reference, fully qualified (`registry/path[:tag]`), not under `localhost/`
+  (podman's namespace for every image built or tagged on the host), not a
+  caretaker build tag, and already local; the run adds `--pull=never`. If it
+  is not local the run is refused with the pull for you to read and make. An
+  `--image` you typed keeps podman's default. One function says all of this,
+  `namedImageProblem` in `sandbox.mjs`.
+- **A Dockerfile it names is built only after you accept it.** The digest of
+  the Dockerfile's bytes and the `build` section must be on
+  `${XDG_CONFIG_HOME:-~/.config}/caretaker/accepted-builds.json`, grown only
+  by `--accept-build <digest>`; the refusal prints the digest and what a reader
+  of the file found it would fetch. The build runs from a private 0600 copy of
+  the hashed bytes, with `--network none`, and both paths are bound to the
+  workspace by real path. A devcontainer you keep outside the workspace needs
+  no acceptance.
+- **Every message that repeats a string from the workspace escapes control
+  bytes,** newline and tab included, so a feature id or an image name cannot
+  hide or forge a terminal line. The exception is podman's own stderr,
+  repeated as it came in `BUILD_FAILED` and `PROBE_FAILED`.
+
+```
+node bin/runstore.mjs run ... [--max-memory SIZE] [--max-cpus N] [--accept-build DIGEST]
+node bin/environment.mjs image|check [--workspace DIR] [--accept-build DIGEST]
+node bin/sandbox.mjs run [--max-memory SIZE] [--max-cpus N] -- cmd...
+```
 
 ## Specs and the drift gate
 
