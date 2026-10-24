@@ -363,6 +363,11 @@ export function acceptBuild(digest, path = acceptedBuildsPath()) {
  * whatever the name carries (round 5: the sibling key to `build`).
  */
 export function resolveImage({ image = null, dev, devcontainerPath, runtime = "podman", exec, buildNetwork = "none", workspace = null, acceptBuilds = [] }) {
+  // A devcontainer that could not be read is a refusal, not a run at the
+  // defaults with --image (round 9: the harness and sandbox.mjs ignored
+  // __error; check() alone refused). The snippet is escaped like any string
+  // from the workspace.
+  if (dev?.__error) throw new EnvironmentError("BAD_DEVCONTAINER", `${plain(devcontainerPath)} is not readable: ${plain(dev.__error)}`);
   const warnings = [];
   const features = Object.keys(dev?.features ?? {});
   if (features.length) {
