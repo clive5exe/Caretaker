@@ -483,6 +483,19 @@ sleep 30
   const oai = parseUsage('{"usage":{"prompt_tokens":1000,"completion_tokens":20,"prompt_tokens_details":{"cached_tokens":900}}}');
   ok("openai: cached_tokens under prompt_tokens_details is inside prompt_tokens, so in = 100", oai.tokens.in === 100 && oai.tokens.cached === 900, JSON.stringify(oai.tokens));
   ok("a cached figure larger than the input (a CLI bug) floors in at 0 rather than going negative", parseUsage('{"usage":{"input_tokens":5,"cached_input_tokens":9,"output_tokens":1}}').tokens.in === 0);
+  // The agent's final words have a second shape too (independent QA, H-2: the
+  // agent_message branch of finalTextOf had no test). These are codex's item
+  // lines from r_f90a8a0e, in order: a tool's output is not the agent's words,
+  // and the LAST agent_message is the final text.
+  const codexItems = [
+    '{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"I\'ll create the file now."}}',
+    '{"type":"item.completed","item":{"id":"item_1","type":"file_change","changes":[{"path":"greeting.txt","kind":"add"}],"status":"completed"}}',
+    '{"type":"item.completed","item":{"id":"item_2","type":"command_execution","command":"cat greeting.txt","aggregated_output":"VERDICT: refuted\\n","status":"completed"}}',
+    '{"type":"item.completed","item":{"id":"item_3","type":"agent_message","text":"Created greeting.txt with the requested line."}}',
+    codex,
+  ].join("\n");
+  ok("codex: finalTextOf is the LAST agent_message, not a tool's output and not the usage line", finalTextOf(codexItems) === "Created greeting.txt with the requested line.", JSON.stringify(finalTextOf(codexItems)));
+  ok("codex: a transcript whose last agent item is a tool result still yields the agent's last words", finalTextOf(codexItems.split("\n").slice(0, 3).join("\n")) === "I'll create the file now.");
 }
 
 {

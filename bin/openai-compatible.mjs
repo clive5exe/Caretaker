@@ -175,18 +175,26 @@ export function hostExecutor(ws) {
     const rel = confine(ws, p);
     if (rel === null) return null;
     const abs = resolve(ws, rel);
-    // A WRITE never goes through a link. existsSync follows links, so a
-    // DANGLING one used to read as "not there yet", the check walked up to its
-    // (inside) parent, and writeFileSync then followed it out of the
-    // workspace (independent review, reproduced). A link that exists and
-    // points inside may still be READ.
-    let isLink = false;
-    try {
-      isLink = lstatSync(abs).isSymbolicLink();
-    } catch {
-      /* not there */
+    // A WRITE never goes through a link, at the path itself OR ANY PARENT
+    // under the workspace. existsSync follows links, so a DANGLING one used to
+    // read as "not there yet", the check walked up to its (inside) parent, and
+    // writeFileSync then followed it out of the workspace (independent review,
+    // reproduced). A dangling DIRECTORY link (`ddl -> ../outside`, then
+    // `write("ddl/child.txt")`) got past a check of the leaf alone and was
+    // stopped only by mkdirSync failing on the missing target: the control held
+    // by accident (independent re-review, H-2). So every component from the
+    // leaf up to the workspace is lstat'ed. A link that exists and points
+    // inside may still be READ.
+    if (write) {
+      const root = resolve(ws);
+      for (let p = abs; p !== root && p.startsWith(root + sep); p = dirname(p)) {
+        try {
+          if (lstatSync(p).isSymbolicLink()) return null;
+        } catch {
+          /* not there yet: a plain directory mkdir will create */
+        }
+      }
     }
-    if (write && isLink) return null;
     // Everything else is judged where it really lands, symlinks resolved
     // through the deepest part that exists (paths.mjs).
     if (!within(abs, ws)) return null;
