@@ -78,7 +78,7 @@ import { join, resolve } from "node:path";
 import { randomBytes } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { DEFAULT_DIR as DEFAULT_EVENTS_DIR, STAGES, append as appendEvents } from "./events.mjs";
-import { buildArgs, checkLimits, delegatedControllers } from "./sandbox.mjs";
+import { buildArgs, capLimits, checkLimits, delegatedControllers } from "./sandbox.mjs";
 import { readDevcontainer, toLimits } from "./spec.mjs";
 import { openaiCompatibleAdapter } from "./openai-compatible.mjs";
 import { EnvironmentError, imageId, resolveImage } from "./environment.mjs";
@@ -1013,6 +1013,8 @@ async function cliAdapter({ workspace, prompt, policy, paths, warnings }) {
   } else {
     const dev = readDevcontainer(policy.devcontainer);
     const limits = toLimits(dev);
+    // The file can raise a ceiling; it cannot raise it past the host (E-1).
+    warnings.push(...capLimits(limits, { source: policy.devcontainer }));
     const { image, imageId, built } = imageFor(policy, dev, warnings, { workspace });
     if (policy.net === "none") {
       warnings.push(

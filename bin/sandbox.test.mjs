@@ -19,7 +19,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildArgs, checkLimits, delegatedControllers, detect, installCommand, installHint, isolationWarnings, offerInstall, parseFlags } from "./sandbox.mjs";
+import { buildArgs, capLimits, checkLimits, delegatedControllers, detect, installCommand, installHint, isolationWarnings, offerInstall, parseFlags, parseSize } from "./sandbox.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 let failures = 0;
@@ -62,6 +62,37 @@ const has = (a, flag, value) => {
   }
   ok("null memory, set by preflight after a warning, is the one way to run without --memory", !has(args({ memory: null }), "--memory") && has(args({ memory: null }), "--cpus", "2"));
   ok("null cpus likewise", !has(args({ cpus: null }), "--cpus") && has(args({ cpus: null }), "--memory", "2gb"));
+}
+
+{
+  // Independent security re-review (E-1): a well-formed size above the machine
+  // is no ceiling. "999999g" passed toLimits and ran under --memory 999999g.
+  const host = { totalMem: 8 * 1024 ** 3, cpuCount: 4, source: "<ws>/.devcontainer/devcontainer.json" };
+  for (const [v, bytes] of [["512m", 512 * 1024 ** 2], ["2gb", 2 * 1024 ** 3], ["1.5G", 1.5 * 1024 ** 3], ["64MiB", 64 * 1024 ** 2], ["1024", 1024], [4096, 4096], ["1t", 1024 ** 4]]) {
+    ok(`parseSize(${JSON.stringify(v)}) is ${bytes} bytes`, parseSize(v) === bytes, String(parseSize(v)));
+  }
+  for (const v of ["", "x", "-1g", "0", 0, null, undefined, "1e3", "2gbx"]) ok(`parseSize(${JSON.stringify(v)}) is null, not a guess`, parseSize(v) === null);
+  {
+    const l = { memory: "999999g", cpus: "9999", pids: 512 };
+    const w = capLimits(l, host);
+    ok("memory above the host is clamped to the host's total", l.memory === String(host.totalMem), l.memory);
+    ok("cpus above the host are clamped to the host's count", l.cpus === "4", l.cpus);
+    ok("…and both are warned about, naming the file they came from", w.length === 2 && w.every((x) => x.includes(host.source)) && /999999g/.test(w[0]) && /9999/.test(w[1]), JSON.stringify(w));
+    ok("…and the argv carries the clamped values", has(args(l), "--memory", String(host.totalMem)) && has(args(l), "--cpus", "4"));
+  }
+  {
+    const l = { memory: "2gb", cpus: "2" };
+    ok("a ceiling under the host is kept as declared, with no warning", capLimits(l, host).length === 0 && l.memory === "2gb" && l.cpus === "2");
+  }
+  {
+    const l = { memory: String(host.totalMem), cpus: "4" };
+    ok("a ceiling equal to the host is not clamped", capLimits(l, host).length === 0 && l.memory === String(host.totalMem));
+  }
+  {
+    const l = { memory: null, cpus: null };
+    ok("null (dropped by preflight) passes through the cap untouched", capLimits(l, host).length === 0 && l.memory === null && l.cpus === null);
+  }
+  ok("the defaults are the real host", capLimits({ memory: "1k", cpus: "0.5" }).length === 0);
 }
 
 {

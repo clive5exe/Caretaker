@@ -23,6 +23,7 @@
  */
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
+import { cpus as hostCpus, totalmem } from "node:os";
 import { join, resolve } from "node:path";
 import { readDevcontainer, toLimits } from "./spec.mjs";
 
@@ -138,6 +139,40 @@ export function checkLimits(wanted, available) {
     }
   }
   return missing;
+}
+
+/** A podman size (`512m`, `2gb`, `1.5GiB`, bytes) in bytes, or null if it is not one. k, m, g, t are 1024-based, as podman reads them. */
+export function parseSize(v) {
+  if (typeof v === "number") return Number.isFinite(v) && v > 0 ? Math.floor(v) : null;
+  const m = /^(\d+(?:\.\d+)?)\s*([kmgt])?i?b?$/i.exec(String(v ?? "").trim());
+  if (!m) return null;
+  const n = parseFloat(m[1]) * 1024 ** ({ k: 1, m: 2, g: 3, t: 4 }[(m[2] ?? "").toLowerCase()] ?? 0);
+  return n > 0 ? Math.floor(n) : null;
+}
+
+/**
+ * THE MACHINE IS THE CEILING ON THE CEILING. A declared memory or cpu limit
+ * above what the host has is no limit: `memory: "999999g"` passed toLimits as
+ * a well-formed size and the container ran under `--memory 999999g` with no
+ * warning (independent security re-review, E-1). The file that declares the
+ * limits is in the workspace, so the agent can raise them; it can never raise
+ * them past the host. A value over the cap is clamped to the host total and
+ * the warning names the file it came from. Returns the warnings; `limits` is
+ * changed in place, like checkLimits' caller does for null.
+ */
+export function capLimits(limits, { totalMem = totalmem(), cpuCount = hostCpus().length, source = "devcontainer.json" } = {}) {
+  const warnings = [];
+  const mem = typeof limits.memory === "string" ? parseSize(limits.memory) : null;
+  if (mem !== null && mem > totalMem) {
+    warnings.push(`${source} declares memory ${limits.memory}, more than this host has (${totalMem} bytes): a ceiling above the machine is no ceiling, so the run is held to the host's total`);
+    limits.memory = String(totalMem);
+  }
+  const cpu = typeof limits.cpus === "string" ? Number(limits.cpus) : null;
+  if (cpu !== null && Number.isFinite(cpu) && cpu > cpuCount) {
+    warnings.push(`${source} declares cpus ${limits.cpus}, more than this host has (${cpuCount}): the run is held to the host's count`);
+    limits.cpus = String(cpuCount);
+  }
+  return warnings;
 }
 
 export const delegationFix = (uid = process.getuid?.() ?? 1000) =>

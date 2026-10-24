@@ -46,7 +46,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { within } from "./paths.mjs";
-import { buildArgs, checkLimits, delegatedControllers } from "./sandbox.mjs";
+import { buildArgs, capLimits, checkLimits, delegatedControllers } from "./sandbox.mjs";
 import { readDevcontainer, toLimits } from "./spec.mjs";
 import { staged } from "./skills.mjs";
 import { forModel, menu, needsApproval, terminalApprover } from "./tools.mjs";
@@ -374,6 +374,8 @@ export async function openaiCompatibleAdapter({ workspace, prompt, policy, paths
   } else {
     const dev = readDevcontainer(policy.devcontainer);
     const limits = toLimits(dev);
+    // The file can raise a ceiling; it cannot raise it past the host (E-1).
+    warnings.push(...capLimits(limits, { source: policy.devcontainer }));
     const { image, imageId, built } = imageFor(policy, dev, warnings, { workspace });
     for (const m of checkLimits(["memory", "cpus", "pids"], delegatedControllers().controllers)) {
       limits[m.limit] = null;
