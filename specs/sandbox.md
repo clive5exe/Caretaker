@@ -128,10 +128,13 @@ whatever the name carries. So such an image runs with `--pull=never`; if it is
 not local the run is refused (`IMAGE_NOT_LOCAL`) with the pull for the
 operator to read and make. The name is first held to the image-reference
 grammar (`IMAGE_NAME` otherwise), with control bytes shown as escapes in any
-message that repeats an agent's string. A caretaker build tag
-(`localhost/caretaker-env-…`) is refused as a name: another project's accepted
-build is local, and its tag is guessable; a devcontainer declares its own
-`build`. An `--image` the operator gave, or a devcontainer outside the
+message that repeats an agent's string. The name must be fully qualified,
+`registry/path:tag`: a short name or an image-ID prefix is resolved by podman
+against `localhost/` and every local image, so it names whatever is local. A
+caretaker build tag (`localhost/caretaker-env-…`) is refused as a name:
+another project's accepted build is local, and its tag is guessable; a
+devcontainer declares its own `build`. One function says all three
+(`namedImageProblem`), and both the harness and `sandbox.mjs run` ask it. An `--image` the operator gave, or a devcontainer outside the
 workspace, keeps podman's default. `sandbox.mjs run` applies the same rule to
 an image its devcontainer names, under podman and under docker alike.
 

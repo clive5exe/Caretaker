@@ -214,6 +214,29 @@ export const IMAGE_REF = /^(?:[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?(?::\d{1,5})?\/)?[
 export const plain = (s) => String(s).replace(/[\x00-\x08\x0b-\x1f\x7f]/g, (c) => `\\x${c.charCodeAt(0).toString(16).padStart(2, "0")}`);
 
 /**
+ * Why an image NAMED BY THE AGENT'S FILE may not be used, or null. THE ONE
+ * RULE for environment.mjs resolveImage and `sandbox.mjs run` alike:
+ *   - it must be an image reference (IMAGE_REF);
+ *   - it must be FULLY QUALIFIED, `registry/path`: a short name (`node:22`,
+ *     `caretaker-env-7b26…`) or an image-ID prefix (`7b26`) is resolved by
+ *     podman against localhost/ and every local image, so it names whatever
+ *     is local, another project's accepted build included (independent
+ *     security review, E-5, round 8);
+ *   - it is not a caretaker build tag (`localhost/caretaker-env-…`): another
+ *     project's accepted build is local and its tag is guessable; a
+ *     devcontainer declares its own `build` (round 7).
+ * An --image the operator typed is the operator's and is not held to this.
+ */
+export function namedImageProblem(name) {
+  if (typeof name !== "string" || !IMAGE_REF.test(name)) return "not an image reference (host[:port]/path[:tag][@sha256:…], lower case)";
+  if (/^localhost\/caretaker-env-/.test(name)) return 'a caretaker build tag; a devcontainer declares its own build with "build", which is accepted by digest, and does not run another project\'s accepted image by name';
+  const first = name.split("/")[0];
+  const qualified = name.includes("/") && (first.includes(".") || first.includes(":") || first === "localhost");
+  if (!qualified) return `not fully qualified: a short name or an image-ID prefix names whatever is local; write registry/path:tag (for example docker.io/library/${name.split("/").pop()})`;
+  return null;
+}
+
+/**
  * Build the argv. Separated from execution so a test can assert the flags
  * without starting a container — the limits are the security property, and a
  * test that only checks "it ran" proves nothing about them.
@@ -453,8 +476,9 @@ if (isEntry) {
     if (!flags.image) {
       // Whatever the runtime (round 7: gated on podman, docker pulled). The
       // name is held to the grammar first, so the refusal can repeat it.
-      if (!IMAGE_REF.test(image)) {
-        console.error(`[sandbox] REFUSING — devcontainer.json names image ${JSON.stringify(plain(image))}, which is not an image reference`);
+      const why = namedImageProblem(image);
+      if (why) {
+        console.error(`[sandbox] REFUSING — devcontainer.json names image ${JSON.stringify(plain(image))}, which is ${why}`);
         process.exit(2);
       }
       pull = "never";

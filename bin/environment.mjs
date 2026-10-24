@@ -40,7 +40,7 @@ import { homedir, tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { within } from "./paths.mjs";
-import { IMAGE_REF, buildArgs, checkLimits, delegatedControllers, plain } from "./sandbox.mjs";
+import { IMAGE_REF, buildArgs, checkLimits, delegatedControllers, namedImageProblem, plain } from "./sandbox.mjs";
 
 export { IMAGE_REF };
 import { HOST, readDevcontainer, toEgress, toLimits } from "./spec.mjs";
@@ -367,7 +367,7 @@ export function resolveImage({ image = null, dev, devcontainerPath, runtime = "p
   const features = Object.keys(dev?.features ?? {});
   if (features.length) {
     warnings.push(
-      `devcontainer features are declared but NOT installed by this runner, which runs the image as built: ${features.join(", ")}. ` +
+      `devcontainer features are declared but NOT installed by this runner, which runs the image as built: ${features.map(plain).join(", ")}. ` +
         "Bake them into the Dockerfile; `environment.mjs check` names any toolchain they promised that the image lacks.",
     );
   }
@@ -375,18 +375,11 @@ export function resolveImage({ image = null, dev, devcontainerPath, runtime = "p
   const editable = agentEditable(devcontainerPath, workspace);
   if (dev?.image) {
     if (!editable) return { image: dev.image, built: false, pull: "missing", warnings };
-    // Named by a file the agent could edit. First a name is a name: anything
-    // outside the reference grammar is refused, shown with control bytes as
-    // escapes, so it is never a flag and never hides from the terminal.
-    if (typeof dev.image !== "string" || !IMAGE_REF.test(dev.image)) {
-      throw new EnvironmentError("IMAGE_NAME", `${plain(devcontainerPath)} names image ${JSON.stringify(plain(String(dev.image)))}, which is not an image reference (host[:port]/path[:tag][@sha256:…], lower case)`);
-    }
-    // A caretaker build tag is not a name for this file to use: another
-    // project's accepted build is local, and its tag is a hash of a host path
-    // the agent can read from /proc/self/mountinfo and guess for siblings
-    // (round 7). A build is declared with `build`, and accepted as such.
-    if (/^localhost\/caretaker-env-/.test(dev.image)) {
-      throw new EnvironmentError("IMAGE_NAME", `${plain(devcontainerPath)} names image ${dev.image}, a caretaker build tag. A devcontainer declares its own build with "build", which is accepted by digest; it does not run another project's accepted image by name.`);
+    // Named by a file the agent could edit: one rule, shared with sandbox.mjs
+    // run (namedImageProblem says it). Control bytes are shown as escapes.
+    const why = namedImageProblem(dev.image);
+    if (why) {
+      throw new EnvironmentError("IMAGE_NAME", `${plain(devcontainerPath)} names image ${JSON.stringify(plain(String(dev.image)))}, which is ${why}`);
     }
     // The run never pulls it. If it is not local, the operator pulls it by
     // hand, having read the name. (`image exists` is podman's; docker has
@@ -617,6 +610,9 @@ export function declared({ dev, specs = [], devcontainerPath = null }) {
     for (const f of files) {
       try {
         const file = resolve(dirname(devcontainerPath), f);
+        // Only a regular file is read: a FIFO or a device named here hung the
+        // check before any refusal (independent security review, round 8).
+        if (!statSync(file).isFile()) throw Object.assign(new Error("not a regular file"), { code: "ENOTREGULAR" });
         const text = readFileSync(file, "utf8");
         projects ??= composeProjects(text, file, resolve(dirname(devcontainerPath), ".."));
         const got = composeServices(text);
