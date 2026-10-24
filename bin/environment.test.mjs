@@ -11,7 +11,7 @@
  * Run: node bin/environment.test.mjs
  */
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -184,15 +184,23 @@ const DEV = join(DEVDIR, "devcontainer.json");
       const r = imageFor({ image: null, devcontainer: DEV, sandbox: "podman", acceptBuilds: [d] }, dev, w, { exec, workspace: PROJ });
       return r.built === true && code(() => imageFor({ image: null, devcontainer: DEV, sandbox: "podman", acceptBuilds: [] }, dev, [], { exec, workspace: PROJ })) !== null;
     })());
-    // Round 5: the bytes hashed are the bytes built. podman reads the
-    // Dockerfile on stdin, so the three reads became one.
+    // Round 5: the bytes hashed are the bytes built. podman is handed a
+    // private copy of them, outside the workspace, so the three reads of the
+    // workspace file became one. (Not stdin: node's child pipes are socket
+    // pairs, and podman opening /dev/stdin as a file got ENXIO in CI.)
     {
       const calls = [];
-      const spy = (a, opts) => (calls.push({ a, opts }), { status: 0 });
+      const spy = (a) => {
+        // Read the private copy while it exists: it is removed after the build.
+        const f = a[0] === "build" ? a[a.indexOf("-f") + 1] : null;
+        calls.push({ a, bytes: f && existsSync(f) ? readFileSync(f) : null, mode: f && existsSync(f) ? statSync(f).mode & 0o777 : null });
+        return { status: 0 };
+      };
       const d = buildDigest(dev, DEV);
       resolveImage({ dev, devcontainerPath: DEV, workspace: PROJ, exec: spy, acceptBuilds: [d] });
       const build = calls.find((c) => c.a[0] === "build");
-      ok("the build reads its Dockerfile from stdin (-f -), and the bytes given are the bytes the digest was taken from", build && build.a.includes("-f") && build.a[build.a.indexOf("-f") + 1] === "-" && Buffer.isBuffer(build.opts?.input) && readFileSync(DF).equals(build.opts.input), JSON.stringify(build?.a));
+      const f = build?.a[build.a.indexOf("-f") + 1];
+      ok("the build reads a private copy of the hashed bytes, not the workspace file: same bytes, our file, 0600, gone afterwards", build && f && f !== DF && /caretaker-dockerfile-/.test(f) && build.bytes && readFileSync(DF).equals(build.bytes) && build.mode === 0o600 && !existsSync(f), JSON.stringify({ f, mode: build?.mode, gone: f && !existsSync(f) }));
       ok("a Dockerfile that does not exist is handed to podman by path, which reports it; nothing to accept", (() => {
         const c2 = [];
         resolveImage({ dev: { build: { dockerfile: "Nowhere" } }, devcontainerPath: DEV, workspace: PROJ, exec: (a) => (c2.push(a), { status: 0 }) });
@@ -305,7 +313,7 @@ const DEV = join(DEVDIR, "devcontainer.json");
     ok("environment.mjs image in a workspace with an unaccepted Dockerfile is refused with the digest", /BUILD_NOT_ACCEPTED/.test(inA.stderr) && /--accept-build [0-9a-f]{64}/.test(inA.stderr) && (!existsSync(log) || !/^build/m.test(readFileSync(log, "utf8"))), inA.stderr.slice(0, 300));
     const digest = /--accept-build ([0-9a-f]{64})/.exec(inA.stderr)?.[1];
     const accepted = spawnSync(process.execPath, [join(HERE, "environment.mjs"), "image", "--accept-build", digest ?? "x"], { cwd: A, encoding: "utf8", env });
-    ok("…and with --accept-build it builds, from stdin, and records the acceptance in the operator's config dir", accepted.status === 0 && existsSync(log) && /^build .* -f - /m.test(readFileSync(log, "utf8")) && existsSync(join(TMP, "xdg-cli", "caretaker", "accepted-builds.json")), `${accepted.status} ${accepted.stderr.slice(0, 200)} ${existsSync(log) ? readFileSync(log, "utf8").slice(0, 200) : ""}`);
+    ok("…and with --accept-build it builds, from a private copy of the hashed bytes, and records the acceptance in the operator's config dir", accepted.status === 0 && existsSync(log) && /^build .* -f \S*caretaker-dockerfile-\S* /m.test(readFileSync(log, "utf8")) && existsSync(join(TMP, "xdg-cli", "caretaker", "accepted-builds.json")), `${accepted.status} ${accepted.stderr.slice(0, 200)} ${existsSync(log) ? readFileSync(log, "utf8").slice(0, 200) : ""}`);
   }
 
   const calls = [];

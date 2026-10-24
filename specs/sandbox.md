@@ -107,8 +107,9 @@ list, which lives in the operator's config dir
 (`${XDG_CONFIG_HOME:-~/.config}/caretaker/accepted-builds.json`, never the
 state dir, whose location the workspace's own config names) and grows only by
 the operator's `--accept-build <digest>`, once per version, checked to be a
-digest before it is written. The bytes hashed are the bytes built: podman reads
-the Dockerfile on stdin, so there is one read, not three. The refusal
+digest before it is written. The bytes hashed are the bytes built: podman is
+handed a private copy of them, outside the workspace, so the workspace file is
+read once, not three times. The refusal
 (`BUILD_NOT_ACCEPTED`) prints the digest and what a reader of the file found
 it would fetch, as advice with control bytes shown as escapes, so the human
 accepts knowing; the same reading is recorded in the run's warnings

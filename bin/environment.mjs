@@ -35,7 +35,7 @@
  */
 import { spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -96,7 +96,7 @@ export function buildTag(devcontainerPath) {
  * otherwise). checkDockerfile reads the file for what it would fetch, as
  * advice printed with the refusal, so the human accepts knowing.
  */
-export function buildArgv(dev, devcontainerPath, { network = "none", workspace = null, stdin = false } = {}) {
+export function buildArgv(dev, devcontainerPath, { network = "none", workspace = null, dockerfileOverride = null } = {}) {
   const base = dirname(resolve(devcontainerPath));
   const ownProject = basename(base) === ".devcontainer" ? dirname(base) : base;
   // The agent's file is bound to the workspace, by real path; so a workspace
@@ -114,10 +114,14 @@ export function buildArgv(dev, devcontainerPath, { network = "none", workspace =
       );
     }
   }
-  // `-f -`: resolveImage hands podman the very bytes it hashed, on stdin, so
-  // the file cannot change between the digest and the build (round 5: three
-  // reads of the Dockerfile were three chances for it to differ).
-  const args = ["build", "--network", network, "-t", buildTag(devcontainerPath), "-f", stdin ? "-" : dockerfile];
+  // `dockerfileOverride`: resolveImage hands podman the very bytes it hashed,
+  // from a private file of its own, so the workspace file cannot change
+  // between the digest and the build (round 5: three reads of the Dockerfile
+  // were three chances for it to differ). Not stdin: node gives a child a
+  // socket pair for its pipes, and podman opens /dev/stdin as a file, which a
+  // socket refuses (ENXIO, seen in CI). The bound check above still judges
+  // the workspace's own path.
+  const args = ["build", "--network", network, "-t", buildTag(devcontainerPath), "-f", dockerfileOverride ?? dockerfile];
   for (const [k, v] of Object.entries(b.args ?? {})) args.push("--build-arg", `${k}=${v}`);
   if (b.target) args.push("--target", String(b.target));
   args.push(context);
@@ -404,7 +408,10 @@ export function resolveImage({ image = null, dev, devcontainerPath, runtime = "p
     // path and reports the absence itself, as it always did; there is nothing
     // to accept and nothing that fetches.
     const bytes = existsSync(dockerfilePath) ? readFileSync(dockerfilePath) : null;
-    const args = buildArgv(dev, devcontainerPath, { network: buildNetwork, workspace, stdin: bytes !== null });
+    // The bound check runs now, on the workspace's own paths, whatever is
+    // built later; the argv itself is made at the build.
+    const argsFor = (override) => buildArgv(dev, devcontainerPath, { network: buildNetwork, workspace, dockerfileOverride: override });
+    argsFor(null);
     if (buildNetwork !== "none") {
       warnings.push(`the image was built with network "${buildNetwork}": its Dockerfile is in the workspace, where an agent can edit it, and its RUN steps were not held to the egress allowlist`);
     }
@@ -425,7 +432,7 @@ export function resolveImage({ image = null, dev, devcontainerPath, runtime = "p
      * no acceptance. The residual is a human accepting without reading.
      */
     if (bytes === null) {
-      const r = run(args);
+      const r = run(argsFor(null));
       if (r.status !== 0) {
         throw new EnvironmentError("BUILD_FAILED", `building the image from ${devcontainerPath} failed (exit ${r.status}): ${String(r.stderr ?? "").trim().split("\n").slice(-5).join(" | ")}`);
       }
@@ -455,7 +462,17 @@ export function resolveImage({ image = null, dev, devcontainerPath, runtime = "p
       const found = advice();
       warnings.push(`image built from an accepted workspace Dockerfile, digest ${digest.slice(0, 12)}…${found.length ? `; the reader notes it would fetch on the host: ${found.join("; ")}` : ""}`);
     }
-    const r = run(args, { input: bytes });
+    // The hashed bytes go to a private file of ours (0600, outside the
+    // workspace) and podman builds THAT; the workspace file is not read again.
+    const own = mkdtempSync(join(tmpdir(), "caretaker-dockerfile-"));
+    let r;
+    try {
+      const ownFile = join(own, "Dockerfile");
+      writeFileSync(ownFile, bytes, { mode: 0o600 });
+      r = run(argsFor(ownFile));
+    } finally {
+      rmSync(own, { recursive: true, force: true });
+    }
     if (r.status !== 0) {
       throw new EnvironmentError("BUILD_FAILED", `building the image from ${devcontainerPath} failed (exit ${r.status}): ${String(r.stderr ?? "").trim().split("\n").slice(-5).join(" | ")}`);
     }
