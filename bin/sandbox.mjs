@@ -240,7 +240,7 @@ export function namedImageProblem(name) {
   if (typeof name !== "string" || !IMAGE_REF.test(name)) return "not an image reference (host[:port]/path[:tag][@sha256:…], lower case)";
   if (/^localhost\/caretaker-env-/.test(name)) return 'a caretaker build tag; a devcontainer declares its own build with "build", which is accepted by digest, and does not run another project\'s accepted image by name';
   const first = name.split("/")[0];
-  if (first === "localhost") return "under localhost/, podman's namespace for images built or tagged on this host without a registry: an image the workspace names comes from a registry, or the workspace declares its own build";
+  if (first === "localhost") return "under localhost/, podman's namespace for images built or tagged on this host without a registry: an image the workspace names is named for a registry (and the operator pulled or tagged it, knowing), or the workspace declares its own build";
   const qualified = name.includes("/") && (first.includes(".") || first.includes(":"));
   if (!qualified) return `not fully qualified: a short name or an image-ID prefix names whatever is local; write registry/path[:tag] (for example docker.io/library/${name.split("/").pop()})`;
   return null;

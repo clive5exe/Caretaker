@@ -128,7 +128,9 @@ whatever the name carries. So such an image runs with `--pull=never`; if it is
 not local the run is refused (`IMAGE_NOT_LOCAL`) with the pull for the
 operator to read and make. The name is first held to the image-reference
 grammar (`IMAGE_NAME` otherwise), with control bytes shown as escapes in any
-message that repeats an agent's string, newlines and tabs included. The name
+message that repeats a string from the workspace, newlines and tabs included,
+a `DIFF` line and a refusal alike; the one exception is podman's own stderr,
+repeated as it came in `BUILD_FAILED` and `PROBE_FAILED`. The name
 must be fully qualified, `registry/path[:tag]`: a short name or an image-ID
 prefix is resolved by podman against `localhost/` and every local image, so
 it names whatever is local. Nothing under `localhost/` (no port) is accepted
