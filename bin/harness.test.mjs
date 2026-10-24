@@ -464,6 +464,28 @@ sleep 30
 }
 
 {
+  // H-2, independent QA: the second vendor's input figure INCLUDES its cached
+  // part. This is the usage line codex exec --json wrote on the first real
+  // codex run through the seam (r_f90a8a0e, 2026-10-24), verbatim. The first
+  // vendor's meaning of `in` (fresh only) had been baked into the parser, so
+  // cached was counted twice: in 31052, total 57523.
+  const codex = '{"type":"turn.completed","usage":{"input_tokens":31052,"cached_input_tokens":26368,"cache_write_input_tokens":0,"output_tokens":103,"reasoning_output_tokens":16}}';
+  const u = parseUsage(codex);
+  ok("codex: `in` is the fresh input, input_tokens minus cached_input_tokens (31052 - 26368 = 4684)", u.tokens.in === 4684, JSON.stringify(u.tokens));
+  ok("codex: cached and write are read by codex's names", u.tokens.cached === 26368 && u.tokens.write === 0, JSON.stringify(u.tokens));
+  ok("codex: the total is the sum of the parts, each counted once (4684 + 26368 + 0 + 103)", u.tokens.total === 31155, String(u.tokens.total));
+  // The first vendor's semantics are unchanged by the fix: claude's input_tokens
+  // is already fresh, and its cached key is cache_read_input_tokens.
+  const claude = parseUsage('{"type":"result","usage":{"input_tokens":8,"cache_read_input_tokens":100,"cache_creation_input_tokens":0,"output_tokens":10}}');
+  ok("claude: `in` stays as reported (fresh already), nothing is subtracted", claude.tokens.in === 8 && claude.tokens.cached === 100 && claude.tokens.total === 118, JSON.stringify(claude.tokens));
+  // OpenAI's chat-completions shape, as the openai-compatible adapter's server
+  // would print it if it ever reached this parser: cached inside prompt_tokens.
+  const oai = parseUsage('{"usage":{"prompt_tokens":1000,"completion_tokens":20,"prompt_tokens_details":{"cached_tokens":900}}}');
+  ok("openai: cached_tokens under prompt_tokens_details is inside prompt_tokens, so in = 100", oai.tokens.in === 100 && oai.tokens.cached === 900, JSON.stringify(oai.tokens));
+  ok("a cached figure larger than the input (a CLI bug) floors in at 0 rather than going negative", parseUsage('{"usage":{"input_tokens":5,"cached_input_tokens":9,"output_tokens":1}}').tokens.in === 0);
+}
+
+{
   // The shape claude --print --output-format json printed on 2026-09-29 when
   // its Edit was refused: exit 0, "completed", and the work not done.
   const doc = '{"type":"result","is_error":false,"permission_denials":[{"tool_name":"Edit","tool_use_id":"t1","tool_input":{}},{"tool_name":"Edit","tool_use_id":"t2","tool_input":{}},{"tool_name":"Bash","tool_use_id":"t3","tool_input":{}}]}';
