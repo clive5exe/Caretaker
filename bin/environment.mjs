@@ -35,12 +35,14 @@
  */
 import { spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { within } from "./paths.mjs";
-import { buildArgs, checkLimits, delegatedControllers } from "./sandbox.mjs";
+import { IMAGE_REF, buildArgs, checkLimits, delegatedControllers, plain } from "./sandbox.mjs";
+
+export { IMAGE_REF };
 import { HOST, readDevcontainer, toEgress, toLimits } from "./spec.mjs";
 
 export class EnvironmentError extends Error {
@@ -110,7 +112,7 @@ export function buildArgv(dev, devcontainerPath, { network = "none", workspace =
     if (!within(p, bound)) {
       throw new EnvironmentError(
         "BUILD_OUTSIDE_WORKSPACE",
-        `${devcontainerPath}: build.${what} resolves to ${p}, outside the workspace ${bound}. The build runs on the host with that path as its input; only a path inside the workspace is built.`,
+        `${plain(devcontainerPath)}: build.${what} resolves to ${plain(p)}, outside the workspace ${plain(bound)}. The build runs on the host with that path as its input; only a path inside the workspace is built.`,
       );
     }
   }
@@ -290,9 +292,6 @@ export function buildDigest(dev, devcontainerPath) {
   return buildDigestFrom(readFileSync(df), b);
 }
 
-/** Control bytes shown as escapes, so a message to a terminal cannot be made to hide a line. */
-const plain = (s) => String(s).replace(/[\x00-\x08\x0b-\x1f\x7f]/g, (c) => `\\x${c.charCodeAt(0).toString(16).padStart(2, "0")}`);
-
 /** `p` is `root` or under it by PATH TEXT alone, symlinks not followed. */
 const lexicallyUnder = (p, root) => {
   const rel = relative(resolve(root), resolve(p));
@@ -311,13 +310,8 @@ const lexicallyUnder = (p, root) => {
 export const agentEditable = (devcontainerPath, workspace) =>
   Boolean(workspace) && (lexicallyUnder(dirname(resolve(devcontainerPath)), workspace) || within(dirname(resolve(devcontainerPath)), workspace));
 
-/**
- * An image reference, by the distribution grammar: lower-case path components
- * with `.`, `_`, `-` and `/`, an optional `:tag`, an optional `@sha256:` digest,
- * an optional `host[:port]/` prefix. Anything else from an agent-editable file
- * is refused, so a name is a name and never a flag, a space or a control byte.
- */
-export const IMAGE_REF = /^(?:[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?(?::\d{1,5})?\/)?[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*(?:\/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9._-]{0,127})?(?:@sha256:[0-9a-f]{64})?$/;
+// IMAGE_REF and plain come from sandbox.mjs, where every run's argv is built:
+// one grammar for a name, one escaping for a message, used by both.
 
 /** The project a devcontainer file belongs to by convention: the parent of its `.devcontainer/`, else its own directory. */
 export const projectOf = (devcontainerPath) => {
@@ -387,10 +381,19 @@ export function resolveImage({ image = null, dev, devcontainerPath, runtime = "p
     if (typeof dev.image !== "string" || !IMAGE_REF.test(dev.image)) {
       throw new EnvironmentError("IMAGE_NAME", `${plain(devcontainerPath)} names image ${JSON.stringify(plain(String(dev.image)))}, which is not an image reference (host[:port]/path[:tag][@sha256:…], lower case)`);
     }
+    // A caretaker build tag is not a name for this file to use: another
+    // project's accepted build is local, and its tag is a hash of a host path
+    // the agent can read from /proc/self/mountinfo and guess for siblings
+    // (round 7). A build is declared with `build`, and accepted as such.
+    if (/^localhost\/caretaker-env-/.test(dev.image)) {
+      throw new EnvironmentError("IMAGE_NAME", `${plain(devcontainerPath)} names image ${dev.image}, a caretaker build tag. A devcontainer declares its own build with "build", which is accepted by digest; it does not run another project's accepted image by name.`);
+    }
     // The run never pulls it. If it is not local, the operator pulls it by
-    // hand, having read the name.
+    // hand, having read the name. (`image exists` is podman's; docker has
+    // only `image inspect`.)
     const run = exec ?? defaultExec(runtime);
-    if (run(["image", "exists", dev.image]).status !== 0) {
+    const local = runtime === "docker" ? run(["image", "inspect", dev.image]) : run(["image", "exists", dev.image]);
+    if (local.status !== 0) {
       throw new EnvironmentError(
         "IMAGE_NOT_LOCAL",
         `${plain(devcontainerPath)} names image ${dev.image}, and it is not present locally. The file is the workspace's, which the last run's agent could have edited, so the run will not pull it: a pull is a host fetch from whatever registry the name says. Read the name, then \`${runtime} pull ${dev.image}\` yourself.`,
@@ -402,16 +405,27 @@ export function resolveImage({ image = null, dev, devcontainerPath, runtime = "p
   if (dev?.build?.dockerfile) {
     const run = exec ?? defaultExec(runtime);
     const dockerfilePath = resolve(dirname(resolve(devcontainerPath)), dev.build.dockerfile);
-    // READ ONCE. The bytes hashed are the bytes podman builds (on stdin) and
-    // the bytes the reader advises on; a file that changes after this line
-    // changes nothing about this run. No file at all: podman is handed the
-    // path and reports the absence itself, as it always did; there is nothing
-    // to accept and nothing that fetches.
-    const bytes = existsSync(dockerfilePath) ? readFileSync(dockerfilePath) : null;
-    // The bound check runs now, on the workspace's own paths, whatever is
-    // built later; the argv itself is made at the build.
+    // THE BOUND CHECK COMES BEFORE ANY READ. Reading first, a FIFO or a link
+    // to /dev/urandom at the Dockerfile's path hung every later run before the
+    // refusal it was owed (independent security review, round 7). The argv
+    // itself is made at the build.
     const argsFor = (override) => buildArgv(dev, devcontainerPath, { network: buildNetwork, workspace, dockerfileOverride: override });
     argsFor(null);
+    // READ ONCE, and only a regular file. The bytes hashed are the bytes
+    // podman builds (from a private copy) and the bytes the reader advises on;
+    // a file that changes after this line changes nothing about this run.
+    // Absent, a FIFO, a device: refused by name, never handed to podman by
+    // path (which would read it again, unaccepted).
+    let st = null;
+    try {
+      st = statSync(dockerfilePath);
+    } catch {
+      /* absent */
+    }
+    if (!st?.isFile()) {
+      throw new EnvironmentError("NO_DOCKERFILE", `${plain(devcontainerPath)} builds from ${plain(dockerfilePath)}, which is ${st === null ? "not there" : "not a regular file"}`);
+    }
+    const bytes = readFileSync(dockerfilePath);
     if (buildNetwork !== "none") {
       warnings.push(`the image was built with network "${buildNetwork}": its Dockerfile is in the workspace, where an agent can edit it, and its RUN steps were not held to the egress allowlist`);
     }
@@ -431,13 +445,6 @@ export function resolveImage({ image = null, dev, devcontainerPath, runtime = "p
      * operator keeps outside the workspace was never the agent's, and needs
      * no acceptance. The residual is a human accepting without reading.
      */
-    if (bytes === null) {
-      const r = run(argsFor(null));
-      if (r.status !== 0) {
-        throw new EnvironmentError("BUILD_FAILED", `building the image from ${devcontainerPath} failed (exit ${r.status}): ${String(r.stderr ?? "").trim().split("\n").slice(-5).join(" | ")}`);
-      }
-      return { image: buildTag(devcontainerPath), built: true, pull: "missing", warnings };
-    }
     const digest = buildDigestFrom(bytes, dev.build);
     // The reader's advice, from the same bytes. ESC and other control bytes
     // are shown as escapes, so a Dockerfile cannot hide a line from a

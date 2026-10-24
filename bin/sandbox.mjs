@@ -202,6 +202,18 @@ export const delegationFix = (uid = process.getuid?.() ?? 1000) =>
 /* ------------------------------------------------------------------ the run */
 
 /**
+ * An image reference, by the distribution grammar: lower-case path components
+ * with `.`, `_`, `-` and `/`, an optional `:tag`, an optional `@sha256:` digest,
+ * an optional `host[:port]/` prefix. THE ONE DEFINITION: environment.mjs
+ * imports it. A name from an agent-editable file that is not one of these is
+ * refused, so a name is a name and never a flag, a space or a control byte.
+ */
+export const IMAGE_REF = /^(?:[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?(?::\d{1,5})?\/)?[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*(?:\/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9._-]{0,127})?(?:@sha256:[0-9a-f]{64})?$/;
+
+/** Control bytes shown as escapes, so a message that repeats an agent's string cannot hide a line from a terminal. */
+export const plain = (s) => String(s).replace(/[\x00-\x08\x0b-\x1f\x7f]/g, (c) => `\\x${c.charCodeAt(0).toString(16).padStart(2, "0")}`);
+
+/**
  * Build the argv. Separated from execution so a test can assert the flags
  * without starting a container — the limits are the security property, and a
  * test that only checks "it ran" proves nothing about them.
@@ -209,10 +221,11 @@ export const delegationFix = (uid = process.getuid?.() ?? 1000) =>
 export function buildArgs({ image, limits, workdir, net = "none", cmd, runtime = "podman", pull = "missing" }) {
   // The image name can come from devcontainer.json, which the agent can edit.
   // One starting with "-" would be read by podman as a flag, not a name
-  // (independent re-review), so it is refused here, where every run's
-  // arguments are built.
-  if (typeof image !== "string" || !image || image.startsWith("-") || /\s/.test(image)) {
-    throw new Error(`refusing image name ${JSON.stringify(image)}: an image name never starts with "-" or holds whitespace`);
+  // (independent re-review), so the name is held to the reference grammar
+  // here, where every run's arguments are built (round 7: this runner's own
+  // CLI had no grammar check of its own).
+  if (typeof image !== "string" || !IMAGE_REF.test(image)) {
+    throw new Error(`refusing image name ${JSON.stringify(plain(String(image)))}: not an image reference (host[:port]/path[:tag][@sha256:…], lower case)`);
   }
   if (pull !== "missing" && pull !== "never") throw new Error(`refusing pull policy ${JSON.stringify(pull)}: "missing" (podman's default) or "never"`);
   const args = [
@@ -437,9 +450,16 @@ if (isEntry) {
     // not local, refuse and print the pull for the operator to read and make.
     // (round 6: this runner pulled with podman's default.)
     let pull = "missing";
-    if (!flags.image && runtime === "podman") {
+    if (!flags.image) {
+      // Whatever the runtime (round 7: gated on podman, docker pulled). The
+      // name is held to the grammar first, so the refusal can repeat it.
+      if (!IMAGE_REF.test(image)) {
+        console.error(`[sandbox] REFUSING — devcontainer.json names image ${JSON.stringify(plain(image))}, which is not an image reference`);
+        process.exit(2);
+      }
       pull = "never";
-      if (spawnSync(runtime, ["image", "exists", image], { stdio: "ignore" }).status !== 0) {
+      const local = runtime === "docker" ? spawnSync(runtime, ["image", "inspect", image], { stdio: "ignore" }) : spawnSync(runtime, ["image", "exists", image], { stdio: "ignore" });
+      if (local.status !== 0) {
         console.error(`[sandbox] REFUSING — devcontainer.json names image ${image}, which is not present locally, and this runner never pulls an image the file named: a pull is a host fetch from whatever registry the name says. Read the name, then \`${runtime} pull ${image}\` yourself.`);
         process.exit(2);
       }
