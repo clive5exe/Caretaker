@@ -173,6 +173,26 @@ const policy = (model, over = {}) => ({ adapter: "openai-compatible", endpoint: 
   ok("a write through a DANGLING symlink is refused, and nothing lands outside", /refused: path is outside/.test(replies[0] ?? "") && !existsSync(target), JSON.stringify(replies));
   ok("…while a link that points inside can still be read", replies[1] === "inside\n", JSON.stringify(replies[1]));
 }
+{
+  // H-2, independent re-review: the dangling-link fix applied the parent check
+  // to every path, and the workspace root's parent is outside, so list_files
+  // with its documented default (no path, or ".") was refused as "outside the
+  // repository". A list of the root must list the root; a write to the root's
+  // parent must still be refused.
+  const ws = workspace();
+  writeFileSync(join(ws, "seen.txt"), "x");
+  mkdirSync(join(ws, "sub"));
+  scripts.listroot = [
+    say([call("list_files", {}), call("list_files", { path: "." }), call("list_files", { path: "sub" }), call("write_file", { path: "../above.txt", content: "x" })]),
+    say(null, null, "listed"),
+  ];
+  await run(ws, "x", policy("listroot"));
+  const replies = lastToolReply("listroot");
+  ok("list_files with no path lists the workspace root", /seen\.txt/.test(replies[0] ?? "") && /sub\//.test(replies[0] ?? ""), JSON.stringify(replies[0]));
+  ok("list_files with path \".\" lists the workspace root", /seen\.txt/.test(replies[1] ?? ""), JSON.stringify(replies[1]));
+  ok("list_files on a subdirectory still works", replies[2] === "", JSON.stringify(replies[2]));
+  ok("a write to the root's parent is still refused", /refused: path is outside/.test(replies[3] ?? "") && !existsSync(join(ws, "..", "above.txt")), JSON.stringify(replies[3]));
+}
 
 {
   // The key goes only over https, or to this machine.

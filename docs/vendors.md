@@ -96,12 +96,48 @@ rather than leaving it to be inferred from a model name.
 
 ## What the second vendor showed
 
-`bin/openai-compatible.mjs` is the second adapter behind
-`run(workspace, prompt, policy)`. Nothing above the harness changed for it:
-`runstore.mjs`, `verify.mjs`, `reconcile.mjs` and the read model run it
-unmodified, and its tests archive and read back a run made through it. What
-did have to move is recorded here, because each item is a place where the
-first vendor's shape had been taken for the general one.
+The owner's decision of 2026-09-29 made the second vendor **ChatGPT/OpenAI**,
+in two forms: `codex` as a second CLI preset behind the `cli` adapter, and
+`bin/openai-compatible.mjs` as a second adapter behind
+`run(workspace, prompt, policy)`. Nothing above the harness changed for
+either: `runstore.mjs`, `verify.mjs` and the read model run them unmodified,
+and their tests archive and read back a run made through them. One function
+below the seam did change for the API adapter: `reconcile.parseProposal`
+learned to find `DIRECTION:` inside a JSON transcript line, because the API
+adapter's transcript is JSON lines where the CLI's was prose. What had to
+move is recorded here, because each item is a place where the first vendor's
+shape had been taken for the general one.
+
+### The first real codex run
+
+`r_f90a8a0e`, 2026-10-24: `codex exec --json --sandbox workspace-write`
+(codex-cli 0.149.1) through `runstore.mjs run --cli codex --sandbox none`, on
+a ChatGPT-plan login, against a scratch repo made by `install.sh`. Verdict
+`completed`, a shadow-git diff of exactly the one file asked for, final text
+from codex's `agent_message`, the drift gate run after it. It ran **on the
+host**, which the archive's warning says: a ChatGPT-plan login is not carried
+into the container, so the containerised path still waits on an API key by
+name (`--secret OPENAI_API_KEY`).
+
+What codex forced in `bin/harness.mjs`, each pinned by a test:
+
+- **Fresh input is not what codex's `input_tokens` means.** Claude's
+  `input_tokens` excludes the cache read beside it; codex's and OpenAI's
+  *include* it (`cached_input_tokens`, `prompt_tokens_details.cached_tokens`).
+  `parseUsage` added the two, so this run first recorded in 31052 / total
+  57523 where fresh input was 4684 (independent QA). The parser now reads
+  which cached key matched and subtracts for the vendors that count the cache
+  inside the input. The API adapter had split this itself; the CLI path had
+  the first vendor's meaning baked in.
+- **The agent's own words have a second shape.** claude's `result` and
+  `assistant` events against codex's `agent_message` items: `finalTextOf`,
+  `agentTexts` and the decision harvest read both, and skip what a tool
+  returned in either.
+- **The preset needs `--sandbox workspace-write`**, because `codex exec`
+  defaults to read-only and exits 0 having edited nothing, the same shape of
+  silent failure as claude without `--permission-mode auto`.
+- **`cache_write_input_tokens`** is codex's name for what claude calls
+  `cache_creation_input_tokens`; both are read as `write`.
 
 - **The cost vocabulary was Anthropic's.** `cost.tokens` is
   `in + cached + write + out`, with `in` meaning fresh input only. OpenAI's
@@ -127,8 +163,10 @@ first vendor's shape had been taken for the general one.
   and it now visibly holds two adapters' settings. That is tolerable at two
   adapters, and worth splitting before a third.
 
-**Not yet proven on a real local model.** Every check here ran against a
-scripted fake server, and the box these were built on has no GPU. The claim
-the task makes — that a local model stresses the seam harder — needs one run
-through `node bin/tool-fixture.mjs --endpoint … --model …` against a real
-server. Until then the adapter is proven to the API, not to a model.
+**The codex CLI has run for real; the API adapter has not.** Every check of
+`openai-compatible.mjs` ran against a scripted fake server, and the box these
+were built on has no GPU. The claim the task makes — that a local model
+stresses the seam harder — needs one run through
+`node bin/tool-fixture.mjs --endpoint … --model …` against a real server.
+Until then the API adapter is proven to the API, not to a model, and the
+second vendor is proven through its CLI.

@@ -135,6 +135,34 @@ ok("a missing devcontainer.json is null, not a throw", readDevcontainer(join(wor
   ok("the container socket is never mounted", l.containerSocket === false);
 }
 
+{
+  // Independent security review (E-1), reproduced: a memory of "", 0 or false
+  // passed `??` and the ceiling vanished with no warning. The file is the
+  // agent's to edit, so a present value must be a size or it is refused.
+  const refuses = (hostRequirements) => {
+    try {
+      toLimits({ hostRequirements });
+      return false;
+    } catch (e) {
+      return /refusing hostRequirements\.(memory|cpus)/.test(e.message);
+    }
+  };
+  for (const v of ["", 0, false, null, "none", "unlimited", "-1", -5, "0", "0g", "1 2", {}, []]) {
+    ok(`a memory ceiling of ${JSON.stringify(v)} is REFUSED BY NAME, not dropped`, refuses({ memory: v }));
+  }
+  for (const v of ["", 0, false, null, "all", "-2", -1, "0", {}, NaN, Infinity]) {
+    ok(`a cpu ceiling of ${JSON.stringify(v)} is REFUSED BY NAME, not dropped`, refuses({ cpus: v }));
+  }
+  for (const [v, want] of [["512m", "512m"], ["2gb", "2gb"], ["1.5G", "1.5G"], ["64MiB", "64MiB"], [" 8g ", "8g"], [1073741824, "1073741824"]]) {
+    const got = toLimits({ hostRequirements: { memory: v } }).memory;
+    ok(`a memory ceiling of ${JSON.stringify(v)} is accepted as ${want}`, got === want, got);
+  }
+  for (const [v, want] of [[4, "4"], ["4", "4"], [0.5, "0.5"], ["1.5", "1.5"]]) {
+    const got = toLimits({ hostRequirements: { cpus: v } }).cpus;
+    ok(`a cpu ceiling of ${JSON.stringify(v)} is accepted as ${want}`, got === want, got);
+  }
+}
+
 /* ------------------------------------------------------------------ egress */
 
 {

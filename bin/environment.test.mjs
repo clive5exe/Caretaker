@@ -56,6 +56,52 @@ const DEV = join(DEVDIR, "devcontainer.json");
   ok("the build tag is stable for one devcontainer and distinct for another", buildTag(DEV) === buildTag(DEV) && buildTag(DEV) !== buildTag(join(TMP, "other.json")));
   ok("a build-only devcontainer no longer passes its Dockerfile path off as an image name", toLimits(built).image === null);
 
+  // Independent security review (E-5), reproduced: build.context and
+  // build.dockerfile come from the agent-editable file, and the build runs on
+  // the host as the operator. Any readable directory as the context, COPY'd
+  // into the image, is the next run's to read from inside the sandbox.
+  const PROJ = join(TMP, "proj");
+  for (const [what, b] of [
+    ["context /", { dockerfile: "Dockerfile", context: "/" }],
+    ["context ../../../../../../..", { dockerfile: "Dockerfile", context: "../../../../../../.." }],
+    ["context ../.. (the parent of the project)", { dockerfile: "Dockerfile", context: "../.." }],
+    ["dockerfile outside the project", { dockerfile: "../../Dockerfile" }],
+    ["dockerfile at an absolute path outside", { dockerfile: "/etc/passwd" }],
+  ]) {
+    ok(`a build whose ${what} is outside the workspace is REFUSED BY NAME, not built`,
+      code(() => buildArgv({ build: b }, DEV, { workspace: PROJ })) === "BUILD_OUTSIDE_WORKSPACE",
+      String(code(() => buildArgv({ build: b }, DEV, { workspace: PROJ }))));
+  }
+  ok("…and the refusal reaches resolveImage before anything runs", (() => {
+    let ran = false;
+    const c = code(() => resolveImage({ dev: { build: { dockerfile: "Dockerfile", context: "/" } }, devcontainerPath: DEV, workspace: PROJ, exec: () => { ran = true; return { status: 0 }; } }));
+    return c === "BUILD_OUTSIDE_WORKSPACE" && !ran;
+  })());
+  ok("…and through the harness, with the workspace it was given", code(() => imageFor({ image: null, devcontainer: DEV, sandbox: "podman" }, { build: { dockerfile: "Dockerfile", context: "/" } }, [], { exec: () => ({ status: 0 }), workspace: PROJ })) !== null);
+  ok("the project root itself is inside the workspace (context .. from .devcontainer/)", buildArgv(built, DEV, { workspace: PROJ }).at(-1) === PROJ);
+  ok("without a workspace the bound is the project by the devcontainer convention, so .. is allowed and ../.. is not",
+    buildArgv(built, DEV).at(-1) === PROJ && code(() => buildArgv({ build: { dockerfile: "Dockerfile", context: "../.." } }, DEV)) === "BUILD_OUTSIDE_WORKSPACE");
+  {
+    // An operator-owned devcontainer OUTSIDE the workspace (--devcontainer, and
+    // the live tests): the agent never had that file, so its own project is the
+    // bound, not the workspace it is being used for. It still cannot reach past
+    // its own project.
+    const OTHER = join(TMP, "operator-env");
+    mkdirSync(join(OTHER, ".devcontainer"), { recursive: true });
+    const ODEV = join(OTHER, ".devcontainer", "devcontainer.json");
+    const WS = join(TMP, "some-other-workspace");
+    mkdirSync(WS, { recursive: true });
+    ok("a devcontainer outside the workspace builds from its own project", buildArgv(built, ODEV, { workspace: WS }).at(-1) === OTHER);
+    ok("…and is still refused past its own project", code(() => buildArgv({ build: { dockerfile: "Dockerfile", context: "../.." } }, ODEV, { workspace: WS })) === "BUILD_OUTSIDE_WORKSPACE");
+    ok("…and cannot name the workspace it is used for as its context either", code(() => buildArgv({ build: { dockerfile: "Dockerfile", context: WS } }, ODEV, { workspace: WS })) === "BUILD_OUTSIDE_WORKSPACE");
+  }
+  {
+    // A symlink inside the project pointing out of it is judged by where it lands.
+    const LINK = join(PROJ, "escape");
+    if (!existsSync(LINK)) symlinkSync(TMP, LINK);
+    ok("a context that is a symlink out of the workspace is refused", code(() => buildArgv({ build: { dockerfile: "Dockerfile", context: "../escape" } }, DEV, { workspace: PROJ })) === "BUILD_OUTSIDE_WORKSPACE");
+  }
+
   const calls = [];
   const exec = (args) => {
     calls.push(args);

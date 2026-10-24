@@ -27,6 +27,14 @@ reading the flags back: `memory.max` is the declared ceiling, a write to `/`
 is refused, and a file written as root inside is owned by the unprivileged host
 user outside.
 
+**A declared ceiling is a size or the run is refused.** The ceilings are read
+from `hostRequirements` in `devcontainer.json`, which the last run's agent
+could edit. A missing field gets the default; a present field that is not a
+size (`""`, `0`, `false`, `"unlimited"`) is refused by name, in `spec.mjs` and
+again where the container argv is built. The only way a run starts without a
+`--memory` or `--cpus` flag is preflight finding the kernel cannot enforce it
+here, which sets exactly `null` and warns.
+
 **The repo's `.git` is read-only inside,** because it is the part of the
 workspace that runs code on the host: a hook, or `core.fsmonitor` in its config,
 runs at the next `git status` anyone types there, this harness's own drift and
@@ -75,12 +83,22 @@ also sees a change to a file the Dockerfile copies. A build-only devcontainer is
 never handed to podman as if its Dockerfile path were an image name. Each run
 records the image id it ran in, because a tag moves.
 
-**The build has no network.** Its Dockerfile and context are in the workspace,
-which the last run's agent could edit, and a build's `RUN` steps would otherwise
-reach the internet with the repo as their context, around the egress proxy the
-run itself is held to. The base image still pulls; a build that downloads
-packages is given a network per run on the command line (`--build-network`),
-never in a settings file, and the run says so.
+**The build's Dockerfile and context must be inside the workspace, and a build
+is refused otherwise** (`BUILD_OUTSIDE_WORKSPACE`). Both paths come from
+`devcontainer.json`, which the last run's agent could edit, and the build runs
+on the host as the operator: a `context` of `/` or enough `..` would make any
+directory the operator can read the build's input, `COPY` brings it into the
+image without a network, and the next run reads it from inside the sandbox.
+The bound is the project the devcontainer file belongs to: the workspace when
+the file is in it, which is the agent-editable case; its own project (the
+parent of its `.devcontainer/`) when the operator points a run at a file
+outside the workspace. A symlink is judged by where it lands.
+
+**The build has no network.** A build's `RUN` steps would otherwise reach the
+internet with the repo as their context, around the egress proxy the run
+itself is held to. The base image still pulls; a build that downloads packages
+is given a network per run on the command line (`--build-network`), never in a
+settings file, and the run says so.
 
 Devcontainer `features` are not installed by this runner; that is the
 devcontainer CLI's job. They are named in a warning rather than skipped.
