@@ -252,6 +252,31 @@ ok("archive with a malformed parent is refused", throwsCode(() => archive(out, {
   ok("run.mjs refuses a malformed --parent by name", badParent.status === 2 && /--parent must be a run id/.test(badParent.stderr));
 }
 
+/* ---------------------------------------------------- E-5: accepted builds */
+{
+  // --accept-build is remembered in the STATE DIR, outside the workspace, so
+  // the operator accepts a Dockerfile version once, not on every run. The run
+  // here cannot reach a model (an endpoint nothing answers), which is fine:
+  // the list is read and written before the run, and the archived policy
+  // shows what the run was given.
+  const ws = join(TMP, "accept-ws");
+  const state = join(TMP, "accept-state");
+  mkdirSync(ws, { recursive: true });
+  const D = "b".repeat(64);
+  const runOnce = (...extra) =>
+    spawnSync(process.execPath, [join(HERE, "runstore.mjs"), "run", "--workspace", ws, "--prompt", "x", "--state-dir", state, "--sandbox", "none", "--adapter", "openai-compatible", "--endpoint", "http://127.0.0.1:1/v1", "--model", "m", "--timeout", "5000", ...extra], { encoding: "utf8" });
+  const first = runOnce("--accept-build", D);
+  const file = join(state, "accepted-builds.json");
+  ok("--accept-build records the digest in <state dir>/accepted-builds.json and says so", existsSync(file) && JSON.parse(readFileSync(file, "utf8")).includes(D) && /accepted build b{12}… recorded/.test(first.stderr), first.stderr.slice(0, 300));
+  const second = runOnce();
+  const runs = readdirSync(join(state, "runs")).sort();
+  const last = JSON.parse(readFileSync(join(state, "runs", runs.at(-1), "run.json"), "utf8"));
+  ok("a later run without the flag is still given the accepted list", Array.isArray(last.policy?.acceptBuilds) && last.policy.acceptBuilds.includes(D), JSON.stringify(last.policy?.acceptBuilds));
+  ok("…and the list is not in the workspace, where the agent could grow it", !existsSync(join(ws, "accepted-builds.json")) && readdirSync(ws).every((f) => !/accept/.test(f)), String(second.status));
+  const badDigest = runOnce("--accept-build", "not-a-digest");
+  ok("a malformed digest is refused by name before any run", badDigest.status !== 0 && /acceptBuilds must be a list of sha256 hex digests/.test(badDigest.stderr), badDigest.stderr.slice(0, 200));
+}
+
 rmSync(TMP, { recursive: true, force: true });
 console.log(failures ? `\n[runstore] ${failures} FAILED` : "\n[runstore] all checks passed");
 process.exit(failures ? 1 : 0);

@@ -134,6 +134,11 @@ const DEFAULTS = {
   // file the agent can edit. The host's own total is a further cap.
   maxMemory: "2gb",
   maxCpus: "2",
+  // E-5: digests (sha256 hex) of workspace Dockerfiles a human has accepted
+  // for building (environment.mjs resolveImage says why). Per run from
+  // `--accept-build`, kept by runstore in the state dir, never in the
+  // workspace or a settings file.
+  acceptBuilds: [],
   logDir: null,
   billing: null,
   env: {},
@@ -186,6 +191,8 @@ export function imageFor(policy, dev, warnings, { exec, workspace = null } = {})
       buildNetwork: policy.buildNetwork ?? "none",
       // The bound on build.dockerfile and build.context (environment.mjs buildArgv says why).
       workspace,
+      // A workspace Dockerfile is built only once a human accepted its digest (E-5).
+      acceptBuilds: policy.acceptBuilds ?? [],
     });
     warnings.push(...r.warnings);
     return { image: r.image, built: r.built, imageId: imageId(r.image, { runtime: policy.sandbox, exec }) };
@@ -230,6 +237,11 @@ export function normalisePolicy(policy = {}) {
   }
   p.maxMemory = String(p.maxMemory).trim();
   p.maxCpus = String(p.maxCpus).trim();
+  // E-5: an accepted build is a sha256 hex digest, nothing looser. A list
+  // that could hold "*" would be a list that accepts everything.
+  if (!Array.isArray(p.acceptBuilds) || !p.acceptBuilds.every((d) => typeof d === "string" && /^[0-9a-f]{64}$/.test(d))) {
+    throw new HarnessError(`acceptBuilds must be a list of sha256 hex digests (from a BUILD_NOT_ACCEPTED refusal), got ${JSON.stringify(p.acceptBuilds)}`);
+  }
   if (p.tools !== null) {
     try {
       checkTools("tools", p.tools);
@@ -1432,6 +1444,11 @@ if (isEntry) {
       ...(flags.endpoint ? { endpoint: flags.endpoint } : {}),
       ...(flags["api-key-env"] ? { apiKeyEnv: flags["api-key-env"] } : {}),
       ...(flags["max-turns"] ? { maxTurns: Number(flags["max-turns"]) } : {}),
+      // E-1 / E-5: the operator's ceilings and acceptances reach this CLI too
+      // (independent security review, round 4: this path dropped them).
+      ...(flags["max-memory"] ? { maxMemory: flags["max-memory"] } : {}),
+      ...(flags["max-cpus"] ? { maxCpus: flags["max-cpus"] } : {}),
+      ...(flags["accept-build"] ? { acceptBuilds: [flags["accept-build"]] } : {}),
     };
     try {
       const out = await run(workspace, prompt, policy);

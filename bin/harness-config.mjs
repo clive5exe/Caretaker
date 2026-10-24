@@ -68,7 +68,7 @@ export class HarnessConfigError extends Error {
 export const ROLES = ["builder", "refuter", "reconciler"];
 /** What a profile may set: which AI, which model, how long. Nothing about isolation. */
 export const PROFILE_KEYS = ["adapter", "cli", "model", "endpoint", "apiKeyEnv", "maxTurns", "timeoutMs", "image", "tools"];
-const ISOLATION = new Set(["sandbox", "net", "buildNetwork", "extraRunFlags", "extraCliArgs", "env", "allowLogDirInWorkspace", "logDir", "devcontainer", "graceMs", "events", "maxMemory", "maxCpus"]);
+const ISOLATION = new Set(["sandbox", "net", "buildNetwork", "extraRunFlags", "extraCliArgs", "env", "allowLogDirInWorkspace", "logDir", "devcontainer", "graceMs", "events", "maxMemory", "maxCpus", "acceptBuilds"]);
 const CLI_KEYS = ["argv", "modelFlag", "env", "skillsPath"];
 const SECRET_NAME = /KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL/i;
 const ADAPTERS = ["cli", "openai-compatible"];
@@ -230,6 +230,9 @@ export function policyFlags(flags) {
     // E-1: the operator's ceilings on what devcontainer.json may declare.
     maxMemory: flags["max-memory"],
     maxCpus: flags["max-cpus"],
+    // E-5: one accepted build per run on the command line; runstore merges it
+    // with the accepted list it keeps in the state dir.
+    acceptBuilds: flags["accept-build"] === undefined ? undefined : [flags["accept-build"]],
   };
   return Object.fromEntries(Object.entries(out).filter(([, v]) => v !== undefined));
 }

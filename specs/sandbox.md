@@ -94,22 +94,24 @@ the file is in it, which is the agent-editable case; its own project (the
 parent of its `.devcontainer/`) when the operator points a run at a file
 outside the workspace. A symlink is judged by where it lands.
 
-**The build's `RUN` steps have no network, and the two fetches podman makes
-on the host regardless are held.** A `RUN` with the host's network would reach
-the internet with the repo as its context, around the egress proxy the run
-itself is held to, so the build runs with `--network none`. That flag covers
-`RUN` only (podman-build(1)): `ADD <url>` and every image pull (`FROM`,
-`COPY --from=`, `RUN --mount=…,from=`) happen on the host, from a Dockerfile
-the agent can edit. So the Dockerfile is read before the build, by its own
-line rules (comments, continuations, the escape directive, heredocs, the JSON
-form): `ADD` with a URL is refused (`BUILD_FETCHES`), and every pulled image
-must be written out in full to docker.io or localhost. An unqualified name
-goes wherever the host's `registries.conf` points, so it is refused rather
-than guessed, as is a name a variable leaves unresolved. A build that
-downloads packages is given a network per run on the command line
-(`--build-network`), never in a settings file; that lifts both checks and the
-run says so. The residual is the base-image name itself, which still reaches
-docker.io.
+**A Dockerfile inside the workspace is built only after a human accepts it.**
+The build runs on the host, as the operator, and `podman build --network none`
+covers `RUN` only (podman-build(1)): `ADD <url>` and every image pull (`FROM`,
+`COPY --from=`, `RUN --mount=…,from=`) happen on the host regardless, from a
+file the last run's agent could have written. Four rounds of independent
+review got past every check that read the file's text (context escapes, `ADD`
+URLs, `COPY --from`, heredocs, shell quoting, `ONBUILD`, `ENV` shadowing
+`ARG`), so the text is not the control. The control is the digest: sha256 of
+the Dockerfile and the devcontainer's `build` section must be on the accepted
+list, which lives in the state dir outside the workspace and grows only by the
+operator's `--accept-build <digest>`, once per version. The refusal
+(`BUILD_NOT_ACCEPTED`) prints the digest and what a reader of the file found
+it would fetch, as advice, so the human accepts knowing; the same reading is
+recorded in the run's warnings afterwards. A devcontainer the operator keeps
+outside the workspace was never the agent's and needs no acceptance. A build
+that downloads packages in `RUN` is given a network per run on the command
+line (`--build-network`), never in a settings file, and the run says so. The
+residual is a human accepting a Dockerfile without reading it.
 
 Devcontainer `features` are not installed by this runner; that is the
 devcontainer CLI's job. They are named in a warning rather than skipped.

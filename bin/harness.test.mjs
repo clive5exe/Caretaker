@@ -213,6 +213,12 @@ ok("there is always a timeout, even when nobody asked for one", normalisePolicy(
   };
   for (const v of ["", "x", "0", 0, null, "-1g", "unlimited"]) ok(`maxMemory ${JSON.stringify(v)} is refused by name before any run`, /maxMemory must be a size/.test(refused({ maxMemory: v }) ?? ""));
   for (const v of ["", "x", "0", 0, null, -1, "1e2", "all"]) ok(`maxCpus ${JSON.stringify(v)} is refused by name before any run`, /maxCpus must be a positive number/.test(refused({ maxCpus: v }) ?? ""));
+  // E-5: accepted builds are exact sha256 digests, nothing looser.
+  const D = "a".repeat(64);
+  ok("acceptBuilds defaults to none, and a list of sha256 hex digests is accepted", p.acceptBuilds.length === 0 && normalisePolicy({ acceptBuilds: [D] }).acceptBuilds[0] === D);
+  for (const v of ["*", D, [D.slice(0, 63)], [D.toUpperCase()], ["*"], [""], [null], "any", true]) {
+    ok(`acceptBuilds ${JSON.stringify(v)} is refused by name: a list that could hold "*" accepts everything`, /acceptBuilds must be a list of sha256 hex digests/.test(refused({ acceptBuilds: v }) ?? ""), String(refused({ acceptBuilds: v })));
+  }
 }
 
 /* ============================================================= adapters */
