@@ -197,6 +197,23 @@ ok("cli is the default adapter", normalisePolicy({}).adapter === "cli",
   "the SDKs are API-key only; defaulting to one bills API rates over a subscription");
 ok("the network is closed by default", normalisePolicy({}).net === "none");
 ok("there is always a timeout, even when nobody asked for one", normalisePolicy({}).timeoutMs > 0);
+{
+  // E-1: the operator's ceilings on what devcontainer.json may declare are
+  // policy, per run, with defaults equal to toLimits' defaults.
+  const p = normalisePolicy({});
+  ok("the operator's default ceilings are 2gb and 2 cpus", p.maxMemory === "2gb" && p.maxCpus === "2", JSON.stringify([p.maxMemory, p.maxCpus]));
+  ok("a run may raise them, and they are kept as strings", normalisePolicy({ maxMemory: "8g", maxCpus: 4 }).maxCpus === "4" && normalisePolicy({ maxMemory: " 8g " }).maxMemory === "8g");
+  const refused = (pol) => {
+    try {
+      normalisePolicy(pol);
+      return null;
+    } catch (e) {
+      return e instanceof HarnessError ? e.message : `other: ${e.message}`;
+    }
+  };
+  for (const v of ["", "x", "0", 0, null, "-1g", "unlimited"]) ok(`maxMemory ${JSON.stringify(v)} is refused by name before any run`, /maxMemory must be a size/.test(refused({ maxMemory: v }) ?? ""));
+  for (const v of ["", "x", "0", 0, null, -1, "1e2", "all"]) ok(`maxCpus ${JSON.stringify(v)} is refused by name before any run`, /maxCpus must be a positive number/.test(refused({ maxCpus: v }) ?? ""));
+}
 
 /* ============================================================= adapters */
 

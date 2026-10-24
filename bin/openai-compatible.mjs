@@ -358,8 +358,14 @@ export async function openaiCompatibleAdapter({ workspace, prompt, policy, paths
     if (u.protocol !== "https:" && !local) {
       throw new HarnessError(`refusing to send the ${policy.apiKeyEnv} key to ${u.origin} over plain http; use https, or a model server on this machine`);
     }
-    const key = process.env[policy.apiKeyEnv];
-    if (!key) throw new HarnessError(`policy.apiKeyEnv names ${policy.apiKeyEnv}, which is not set in the harness's environment`);
+    // The run's own environment first: `--secret NAME` puts the key in
+    // policy.env by name, which is also what the archive's redactor was built
+    // from. Reading only process.env meant a key given by name was refused,
+    // so the one working path was `export OPENAI_API_KEY`, where nothing told
+    // the redactor its value and a key outside the known shapes landed in the
+    // archive (independent security review, H-2).
+    const key = policy.env?.[policy.apiKeyEnv] ?? process.env[policy.apiKeyEnv];
+    if (!key) throw new HarnessError(`policy.apiKeyEnv names ${policy.apiKeyEnv}, which is set neither by --secret ${policy.apiKeyEnv} nor in the harness's environment`);
     headers.authorization = `Bearer ${key}`;
   }
 
@@ -374,8 +380,8 @@ export async function openaiCompatibleAdapter({ workspace, prompt, policy, paths
   } else {
     const dev = readDevcontainer(policy.devcontainer);
     const limits = toLimits(dev);
-    // The file can raise a ceiling; it cannot raise it past the host (E-1).
-    warnings.push(...capLimits(limits, { source: policy.devcontainer }));
+    // The file can lower a ceiling; it cannot raise it past the operator's, or the host (E-1).
+    warnings.push(...capLimits(limits, { maxMemory: policy.maxMemory, maxCpus: policy.maxCpus, source: policy.devcontainer }));
     const { image, imageId, built } = imageFor(policy, dev, warnings, { workspace });
     for (const m of checkLimits(["memory", "cpus", "pids"], delegatedControllers().controllers)) {
       limits[m.limit] = null;

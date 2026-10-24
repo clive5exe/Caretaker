@@ -271,6 +271,12 @@ try {
       "every KEY_SHAPES entry is a global regexp, or .replace would loop or miss",
       KEY_SHAPES.every((s) => s.re.global),
     );
+    // Independent security review (H-2): OpenAI project keys carry `_` and `-`
+    // in their body, and the shape of [A-Za-z0-9] alone let one through whole.
+    for (const k of ["sk-proj-ab_cd-EF_gh-IJ_kl-MN_op-QR_st-UV_wx-YZ01", "sk-svcacct-A1_b2-C3_d4-E5_f6-G7_h8-I9_j0", "sk-Abcdefghijklmnopqrstuvwxyz0123"]) {
+      ok(`an OpenAI-shaped key with _ and - is caught by net two: ${k.slice(0, 14)}…`, !stranger(`token ${k} here`).includes(k), stranger(`token ${k} here`));
+    }
+    ok("…and a short sk- prefix on an ordinary word still is not", stranger("sk-test and sk-proj-short").includes("sk-proj-short"));
   }
 
   /* -------------------------------------------- redaction of a whole event */

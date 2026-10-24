@@ -360,7 +360,10 @@ export const fingerprint = (value) =>
  */
 export const KEY_SHAPES = [
   { name: "anthropic", re: /sk-ant-[A-Za-z0-9_-]{16,}/g },
-  { name: "openai", re: /sk-(?:proj-)?[A-Za-z0-9]{20,}/g },
+  // OpenAI project and service-account keys carry `_` and `-` in their body;
+  // a shape of [A-Za-z0-9] alone let one through whole (independent security
+  // review, H-2, reproduced in an archive).
+  { name: "openai", re: /sk-(?:proj-|svcacct-|admin-)?[A-Za-z0-9_-]{20,}/g },
   { name: "github", re: /gh[pousr]_[A-Za-z0-9]{30,}/g },
   { name: "aws-access-key-id", re: /AKIA[0-9A-Z]{16}/g },
   { name: "google-api", re: /AIza[0-9A-Za-z_-]{35}/g },

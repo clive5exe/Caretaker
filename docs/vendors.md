@@ -107,7 +107,10 @@ are the first vendor's prose shape having been taken for the general one:
 transcript line, and `verify.mjs` (e60736d) had `parseVerdict` rewritten
 because an API refuter's transcript is JSON lines and every refutation read
 as inconclusive, and its same-builder check now compares adapter and endpoint
-rather than CLI name, since two runs on the same API are the same builder.
+as well as CLI name, since two runs on the same API are the same builder.
+A codex transcript carries one `turn.completed` usage line per turn and no
+`result`, so a multi-turn codex run records its first turn's usage only; a
+residual, not yet fixed.
 What else had to move is recorded here.
 
 ### The first real codex run

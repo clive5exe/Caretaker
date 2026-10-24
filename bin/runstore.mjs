@@ -34,6 +34,8 @@
  *        [--config ops/.../config.json | --state-dir DIR] [--events-dir DIR] [--task T-1] [--parent r_…]
  *        [--secret NAME ...] [--adapter cli] [--cli claude] [--model M]
  *        [--sandbox podman|none] [--net NET] [--timeout MS]
+ *        [--max-memory SIZE] [--max-cpus N]             the most devcontainer.json may declare (E-1);
+ *                                                       default 2gb and 2, the file can only lower them
  *        [--egress host,host [--egress-network NET]]   per-run proxy, log in the archive (C-5)
  *        [--skills yes]                                 stage the config's skills for the run (S-1)
  *        [--steer web]                                  answer its questions and message it from the
@@ -264,7 +266,13 @@ export async function runArchived(workspace, prompt, policy = {}, { stateDir, ta
     // so a per-run proxy would record nothing and imply it had been watched.
     throw new RunStoreError("EGRESS_NEEDS_SANDBOX", "egress attribution needs the agent in a container; sandbox:none runs on the host network");
   }
-  const redact = redactorFor(secrets);
+  // The redactor knows every secret given by name, AND the API key the policy
+  // names in the harness's own environment: a key that reached the adapter
+  // through `export OPENAI_API_KEY` rather than --secret was redacted only if
+  // it matched a known shape, and one with `_` or `-` in it did not
+  // (independent security review, H-2). A value named is a value redacted.
+  const named = policy.apiKeyEnv && !(policy.apiKeyEnv in secrets) && process.env[policy.apiKeyEnv] ? { [policy.apiKeyEnv]: process.env[policy.apiKeyEnv] } : {};
+  const redact = redactorFor({ ...secrets, ...named });
   const logDir = policy.logDir ?? join(tmpdir(), "caretaker-runs", runId);
   const dir = join(stateDir, "runs", runId);
   const mirror = startMirror({ from: join(logDir, "transcript.log"), to: join(dir, "transcript.live.log"), redact, onLine: liveRecorder(dir) });
@@ -343,7 +351,7 @@ if (isEntry) {
     "workspace", "prompt-file", "prompt", "config", "state-dir", "task", "parent", "secret",
     "adapter", "cli", "model", "sandbox", "net", "timeout", "image", "egress", "egress-network",
     "endpoint", "api-key-env", "max-turns", "skills", "harness-config", "build-network", "steer",
-    "events-dir",
+    "events-dir", "max-memory", "max-cpus",
   ]);
   const flags = { secret: [] };
   for (let i = 0; i < argv.length; i++) {

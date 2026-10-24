@@ -512,11 +512,14 @@ What the defaults are, and why:
 | `sandbox` | `podman` | `none` runs on the host with no isolation, is never the default, and always warns. |
 | `net` | `none` | No route off the host. A real CLI then cannot reach its model, and the run says so in `verdict.warnings` rather than opening the network for you. |
 | `timeoutMs` | 15 minutes | A run past it is killed, and the container is removed explicitly. |
+| `maxMemory`, `maxCpus` | `2gb`, `2` | The most `devcontainer.json` may declare. That file is in the workspace, so the last run's agent could raise its `hostRequirements`; a declared limit above these is clamped to them and warned about, naming the file. The file can lower a ceiling, never raise one. The host's own total caps them again. Per run (`--max-memory`, `--max-cpus`), never in a settings file. |
 
 Limits the kernel cannot enforce, such as CPU without a delegated cgroup
 controller, are dropped and recorded in `verdict.warnings`. A ceiling you believe
-in and do not have is worse than none. `cost` reports `null` when the CLI printed
-no usage, because null means unknown, not zero.
+in and do not have is worse than none. A declared limit that is not a size
+(`""`, `0`, `"unlimited"`) is refused by name rather than dropped. `cost`
+reports `null` when the CLI printed no usage, because null means unknown, not
+zero.
 
 ```
 node bin/harness.mjs adapters
@@ -555,6 +558,10 @@ line, and is redacted from everything the run leaves behind:
   `--secret ANTHROPIC_API_KEY` with an API key.)
 - `codex`: `--secret OPENAI_API_KEY` with its API host allowed. A ChatGPT-plan login
   is not carried into the container.
+- the `openai-compatible` adapter: `apiKeyEnv` names the variable, and
+  `--secret <that name>` carries the value, which never leaves the harness. An
+  exported variable of that name also works, and either way the archive's
+  redactor is told the value, so a key outside the known shapes is redacted too.
 
 `runstore.mjs run` says before the run when a containerised `claude` has no
 credential or no route to the API. With `--sandbox none` the CLI runs on your

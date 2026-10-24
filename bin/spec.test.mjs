@@ -147,10 +147,11 @@ ok("a missing devcontainer.json is null, not a throw", readDevcontainer(join(wor
       return /refusing hostRequirements\.(memory|cpus)/.test(e.message);
     }
   };
-  for (const v of ["", 0, false, null, "none", "unlimited", "-1", -5, "0", "0g", "1 2", {}, []]) {
+  for (const v of ["", 0, false, null, "none", "unlimited", "-1", -5, "0", "0g", "1 2", {}, [], 1e21, Number.MAX_SAFE_INTEGER + 2]) {
     ok(`a memory ceiling of ${JSON.stringify(v)} is REFUSED BY NAME, not dropped`, refuses({ memory: v }));
   }
-  for (const v of ["", 0, false, null, "all", "-2", -1, "0", {}, NaN, Infinity]) {
+  ok("a JSON byte count up to MAX_SAFE_INTEGER is accepted as written, never as an exponent", toLimits({ hostRequirements: { memory: Number.MAX_SAFE_INTEGER } }).memory === "9007199254740991");
+  for (const v of ["", 0, false, null, "all", "-2", -1, "0", {}, NaN, Infinity, 1e21, 1_000_001]) {
     ok(`a cpu ceiling of ${JSON.stringify(v)} is REFUSED BY NAME, not dropped`, refuses({ cpus: v }));
   }
   for (const [v, want] of [["512m", "512m"], ["2gb", "2gb"], ["1.5G", "1.5G"], ["64MiB", "64MiB"], [" 8g ", "8g"], [1073741824, "1073741824"]]) {

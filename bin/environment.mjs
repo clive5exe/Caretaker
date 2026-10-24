@@ -93,10 +93,11 @@ export function buildTag(devcontainerPath) {
  * security re-review, E-5, reproduced to the argv):
  *   - `ADD <url>` is refused: it would send whatever the URL carries to
  *     whoever answers it, with no proxy in the way.
- *   - `FROM` is held to docker.io and localhost: the base-image pull is the
- *     one host fetch a build needs, and the registry it goes to is bounded.
- *     A FROM that cannot be resolved (a variable no ARG or build arg sets)
- *     is refused rather than guessed.
+ *   - every image the build pulls (`FROM`, `COPY --from=`, `RUN --mount
+ *     from=`) must be written out in full to docker.io or localhost: the
+ *     base-image pull is the one host fetch a build needs, and the registry
+ *     it goes to is bounded. An unqualified name, or one a variable leaves
+ *     unresolved, is refused rather than guessed (checkDockerfile).
  * A named build network lifts both, because the operator has opened the
  * build's network on the command line and the run already says so. The
  * residual is the base-image name itself, which still reaches docker.io.
@@ -137,48 +138,125 @@ export const BASE_IMAGE_REGISTRIES = new Set(["docker.io", "localhost"]);
 
 /**
  * The fetches a Dockerfile would make ON THE HOST, as a list of findings
- * (empty when there are none): `ADD` with a URL source, and `FROM` an image
- * outside BASE_IMAGE_REGISTRIES. `args` are the build args the devcontainer
- * declares; an `ARG NAME=default` above a FROM also resolves. A stage alias
- * (`FROM x AS build`, then `FROM build`) is not a pull. Comments and line
- * continuations are handled; a heredoc is not parsed, and an ADD inside one
- * is not an instruction podman would run either.
+ * (empty when there are none). podman-build(1) names four places an image or
+ * URL is fetched outside the RUN network: `FROM`, `COPY --from=<image>`,
+ * `RUN --mount=...,from=<image>` and `ADD <url>` (including its JSON form).
+ * Every image so named must be written out in full to a registry in
+ * BASE_IMAGE_REGISTRIES: an unqualified name (`node:22`) goes wherever the
+ * host's registries.conf points, which on an enterprise host is not docker.io
+ * (independent security review, round 3), so it is refused rather than
+ * guessed at. A stage, by alias or index, is not a pull. `args` are the build
+ * args the devcontainer declares; `ARG NAME=default` above a FROM and the
+ * `${X:-default}` forms resolve; a variable nothing sets is refused.
  */
 export function checkDockerfile(text, { args = {} } = {}) {
   const findings = [];
   const vars = { ...Object.fromEntries(Object.entries(args).map(([k, v]) => [k, String(v)])) };
   const stages = new Set();
-  const lines = String(text ?? "")
-    .replace(/\\\r?\n/g, " ")
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter((l) => l && !l.startsWith("#"));
-  const expand = (s) => s.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)(?::[-+][^}]*)?\}|\$([A-Za-z_][A-Za-z0-9_]*)/g, (m, a, b) => vars[a ?? b] ?? m);
-  for (const line of lines) {
-    const [instr, ...rest] = line.split(/\s+/);
-    const op = instr.toUpperCase();
-    if (op === "ARG") {
-      const m = /^([A-Za-z_][A-Za-z0-9_]*)(?:=(.*))?$/.exec(rest.join(" "));
-      if (m && m[2] !== undefined && !(m[1] in vars)) vars[m[1]] = m[2].replace(/^"(.*)"$/, "$1");
-    } else if (op === "FROM") {
-      const words = rest.filter((w) => !w.startsWith("--"));
-      const image = expand(words[0] ?? "");
-      const asIdx = words.findIndex((w) => w.toUpperCase() === "AS");
-      if (asIdx !== -1 && words[asIdx + 1]) stages.add(words[asIdx + 1].toLowerCase());
-      if (!image) findings.push("FROM names no image");
-      else if (/\$/.test(image)) findings.push(`FROM ${words[0]} cannot be resolved: no ARG or build arg sets it`);
-      else if (stages.has(image.toLowerCase()) || image.toLowerCase() === "scratch") continue;
-      else {
-        const first = image.split("/")[0];
-        const registry = image.includes("/") && (first.includes(".") || first.includes(":") || first === "localhost") ? first.replace(/:\d+$/, "") : "docker.io";
-        if (!BASE_IMAGE_REGISTRIES.has(registry)) findings.push(`FROM ${image} pulls from ${registry}`);
+
+  // The Dockerfile's own line rules (containerfile(5)): an `# escape=` directive
+  // on the first lines may change the continuation character; comment lines
+  // are dropped BEFORE continuations are joined, so a comment inside a
+  // continued instruction does not end it; a heredoc body (`<<EOF` … `EOF`)
+  // is data for the instruction that opened it, not instructions.
+  const raw = String(text ?? "").split(/\r?\n/);
+  let esc = "\\";
+  for (const l of raw) {
+    const d = /^#\s*escape\s*=\s*(\S)\s*$/i.exec(l);
+    if (d) esc = d[1];
+    else if (l.trim() && !l.trim().startsWith("#")) break;
+  }
+  const noComments = raw.filter((l) => !/^\s*#/.test(l));
+  const joined = [];
+  let acc = null;
+  for (const l of noComments) {
+    const cont = l.trimEnd().endsWith(esc);
+    const body = cont ? l.trimEnd().slice(0, -1) : l;
+    acc = acc === null ? body : `${acc} ${body.trimStart()}`;
+    if (!cont) {
+      joined.push(acc.trim());
+      acc = null;
+    }
+  }
+  if (acc !== null) joined.push(acc.trim());
+
+  // `${X:-d}` and `${X-d}` take d when X is unset; `${X:+a}` and `${X+a}` take a
+  // when it is set. A variable nothing sets stays as written, and the caller
+  // refuses what it cannot resolve rather than guessing.
+  const expand = (s) =>
+    s.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)(?:(:?[-+])([^}]*))?\}|\$([A-Za-z_][A-Za-z0-9_]*)/g, (m, name, mod, word, bare) => {
+      const v = vars[name ?? bare];
+      if (mod === undefined) return v ?? m;
+      const set = mod.startsWith(":") ? v !== undefined && v !== "" : v !== undefined;
+      if (mod.endsWith("-")) return set ? v : word;
+      return set ? word : "";
+    });
+  const words = (s) => {
+    const t = s.trim();
+    if (t.startsWith("[")) {
+      try {
+        const arr = JSON.parse(t);
+        if (Array.isArray(arr) && arr.every((x) => typeof x === "string")) return arr;
+      } catch {
+        /* not the JSON form: fall through to whitespace */
       }
-    } else if (op === "ADD") {
-      const words = rest.filter((w) => !w.startsWith("--"));
-      const srcs = words.length > 1 ? words.slice(0, -1) : words;
-      for (const s of srcs) {
-        const v = expand(s);
-        if (/^[a-z][a-z0-9+.-]*:\/\//i.test(v) || /^git@/i.test(v)) findings.push(`ADD ${s} fetches a URL`);
+    }
+    return t.split(/\s+/).filter(Boolean);
+  };
+  // An image named as a pull source: a stage (by alias or index) is not one;
+  // anything else is judged by its registry, which must be written out.
+  const judgeImage = (where, written) => {
+    const image = expand(written);
+    if (!image) return findings.push(`${where} names no image`);
+    if (/\$/.test(image)) return findings.push(`${where} ${written} cannot be resolved: no ARG or build arg sets it`);
+    const low = image.toLowerCase();
+    if (stages.has(low) || low === "scratch" || /^\d+$/.test(low)) return;
+    const first = image.split("/")[0];
+    const qualified = image.includes("/") && (first.includes(".") || first.includes(":") || first === "localhost");
+    if (!qualified) return findings.push(`${where} ${image} is not fully qualified: an unqualified name goes wherever this host's registries.conf points (write docker.io/library/${image.split("/").pop()})`);
+    const registry = first.replace(/:\d+$/, "");
+    if (!BASE_IMAGE_REGISTRIES.has(registry)) findings.push(`${where} ${image} pulls from ${registry}`);
+  };
+  const mountFrom = (flag) => (flag.slice(8).split(",").map((kv) => kv.split("=")).find(([k]) => k === "from") ?? [])[1];
+
+  let heredoc = null;
+  for (const line of joined) {
+    if (heredoc !== null) {
+      if (line === heredoc) heredoc = null;
+      continue;
+    }
+    if (!line) continue;
+    const [instr, ...restWords] = line.split(/\s+/);
+    const rest = line.slice(instr.length).trim();
+    const op = instr.toUpperCase();
+    const hd = /<<-?\s*["']?([A-Za-z_][A-Za-z0-9_]*)["']?/.exec(rest);
+    if (hd && ["RUN", "COPY", "ADD"].includes(op)) heredoc = hd[1];
+    if (op === "ARG") {
+      const m = /^([A-Za-z_][A-Za-z0-9_]*)(?:=(.*))?$/.exec(rest);
+      if (m && m[2] !== undefined && !(m[1] in vars)) vars[m[1]] = expand(m[2].replace(/^"(.*)"$/, "$1"));
+    } else if (op === "FROM") {
+      const w = restWords.filter((x) => !x.startsWith("--"));
+      const asIdx = w.findIndex((x) => x.toUpperCase() === "AS");
+      judgeImage("FROM", w[0] ?? "");
+      if (asIdx !== -1 && w[asIdx + 1]) stages.add(w[asIdx + 1].toLowerCase());
+    } else if (op === "ADD" || op === "COPY") {
+      const flags = restWords.filter((x) => x.startsWith("--"));
+      for (const f of flags) {
+        if (f.startsWith("--from=")) judgeImage(`${op} --from=`, f.slice(7));
+      }
+      if (op === "ADD" && !hd) {
+        const w = words(restWords.filter((x) => !x.startsWith("--")).join(" "));
+        const srcs = w.length > 1 ? w.slice(0, -1) : w;
+        for (const s of srcs) {
+          const v = expand(s);
+          if (/^[a-z][a-z0-9+.-]*:\/\//i.test(v) || /^git@/i.test(v)) findings.push(`ADD ${s} fetches a URL`);
+          else if (/\$/.test(v)) findings.push(`ADD ${s} cannot be resolved: no ARG or build arg sets it`);
+        }
+      }
+    } else if (op === "RUN") {
+      for (const f of restWords.filter((x) => x.startsWith("--mount="))) {
+        const from = mountFrom(f);
+        if (from !== undefined) judgeImage("RUN --mount from=", from);
       }
     }
   }
