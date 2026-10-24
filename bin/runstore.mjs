@@ -218,7 +218,13 @@ export function archive(result, { stateDir, workspace = null, task = null, paren
   const transcript = read(result.transcript?.path);
   const stderr = read(result.transcript?.stderrPath);
 
-  writeAtomic(join(dir, "diff.patch"), patch ?? "");
+  // The diff gets the same pass as the transcript. An agent that read a key
+  // (the host shell's printenv) and wrote it into a file put it in the patch,
+  // which was archived raw, served to the browser and pasted into the next
+  // run's prompt by verify.mjs and reconcile.mjs (independent security
+  // review, H-2, round 2). A redacted hunk may no longer apply with `git
+  // apply`; a key in a diff is not a diff anyone should apply.
+  writeAtomic(join(dir, "diff.patch"), redactLines(patch ?? "", redact));
   // The proxy writes egress.jsonl straight into this directory (C-5), unredacted:
   // it has no secrets to redact with. A hostname can carry data — a key smuggled
   // out as a subdomain is still a refused CONNECT with the key in `host` — so it
@@ -270,8 +276,18 @@ export async function runArchived(workspace, prompt, policy = {}, { stateDir, ta
   // names in the harness's own environment: a key that reached the adapter
   // through `export OPENAI_API_KEY` rather than --secret was redacted only if
   // it matched a known shape, and one with `_` or `-` in it did not
-  // (independent security review, H-2). A value named is a value redacted.
-  const named = policy.apiKeyEnv && !(policy.apiKeyEnv in secrets) && process.env[policy.apiKeyEnv] ? { [policy.apiKeyEnv]: process.env[policy.apiKeyEnv] } : {};
+  // (independent security review, H-2). A value named is a value redacted:
+  // EVERY value that variable holds on the way in. A library caller can give
+  // policy.env[NAME] one value while process.env[NAME] holds another; the
+  // adapter sends the first and the host shell's printenv prints the second,
+  // so both go to the redactor, under distinct keys (round 2, reproduced).
+  const named = {};
+  if (policy.apiKeyEnv) {
+    const n = policy.apiKeyEnv;
+    for (const [k, v] of [[n, secrets[n]], [`${n}(policy.env)`, policy.env?.[n]], [`${n}(env)`, process.env[n]]]) {
+      if (typeof v === "string" && v && !Object.values({ ...secrets, ...named }).includes(v)) named[k] = v;
+    }
+  }
   const redact = redactorFor({ ...secrets, ...named });
   const logDir = policy.logDir ?? join(tmpdir(), "caretaker-runs", runId);
   const dir = join(stateDir, "runs", runId);
