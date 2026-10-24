@@ -261,20 +261,25 @@ ok("archive with a malformed parent is refused", throwsCode(() => archive(out, {
   // shows what the run was given.
   const ws = join(TMP, "accept-ws");
   const state = join(TMP, "accept-state");
+  const xdg = join(TMP, "accept-xdg");
   mkdirSync(ws, { recursive: true });
   const D = "b".repeat(64);
+  // The list is the OPERATOR's, in the config dir, not the project's state
+  // dir: the state dir is named by a file in the workspace (round 5).
   const runOnce = (...extra) =>
-    spawnSync(process.execPath, [join(HERE, "runstore.mjs"), "run", "--workspace", ws, "--prompt", "x", "--state-dir", state, "--sandbox", "none", "--adapter", "openai-compatible", "--endpoint", "http://127.0.0.1:1/v1", "--model", "m", "--timeout", "5000", ...extra], { encoding: "utf8" });
+    spawnSync(process.execPath, [join(HERE, "runstore.mjs"), "run", "--workspace", ws, "--prompt", "x", "--state-dir", state, "--sandbox", "none", "--adapter", "openai-compatible", "--endpoint", "http://127.0.0.1:1/v1", "--model", "m", "--timeout", "5000", ...extra], { encoding: "utf8", env: { ...process.env, XDG_CONFIG_HOME: xdg } });
   const first = runOnce("--accept-build", D);
-  const file = join(state, "accepted-builds.json");
-  ok("--accept-build records the digest in <state dir>/accepted-builds.json and says so", existsSync(file) && JSON.parse(readFileSync(file, "utf8")).includes(D) && /accepted build b{12}… recorded/.test(first.stderr), first.stderr.slice(0, 300));
+  const file = join(xdg, "caretaker", "accepted-builds.json");
+  ok("--accept-build records the digest in the operator's config dir and says so", existsSync(file) && JSON.parse(readFileSync(file, "utf8")).includes(D) && /accepted build b{12}… recorded/.test(first.stderr), first.stderr.slice(0, 300));
   const second = runOnce();
   const runs = readdirSync(join(state, "runs")).sort();
   const last = JSON.parse(readFileSync(join(state, "runs", runs.at(-1), "run.json"), "utf8"));
   ok("a later run without the flag is still given the accepted list", Array.isArray(last.policy?.acceptBuilds) && last.policy.acceptBuilds.includes(D), JSON.stringify(last.policy?.acceptBuilds));
-  ok("…and the list is not in the workspace, where the agent could grow it", !existsSync(join(ws, "accepted-builds.json")) && readdirSync(ws).every((f) => !/accept/.test(f)), String(second.status));
+  ok("…and the list is in neither the workspace nor the state dir, both of which the workspace's config can point at", !existsSync(join(ws, "accepted-builds.json")) && !existsSync(join(state, "accepted-builds.json")), String(second.status));
   const badDigest = runOnce("--accept-build", "not-a-digest");
-  ok("a malformed digest is refused by name before any run", badDigest.status !== 0 && /acceptBuilds must be a list of sha256 hex digests/.test(badDigest.stderr), badDigest.stderr.slice(0, 200));
+  ok("a malformed digest is refused by name before any run, and nothing is written", badDigest.status !== 0 && /--accept-build takes the sha256 hex digest/.test(badDigest.stderr) && !JSON.parse(readFileSync(file, "utf8")).includes("not-a-digest"), badDigest.stderr.slice(0, 200));
+  const empty = runOnce("--accept-build=");
+  ok("an empty --accept-build= is refused too, not persisted (round 5)", empty.status !== 0 && JSON.parse(readFileSync(file, "utf8")).every((d) => d.length === 64), empty.stderr.slice(0, 200));
 }
 
 rmSync(TMP, { recursive: true, force: true });

@@ -65,6 +65,24 @@ const has = (a, flag, value) => {
 }
 
 {
+  // E-5, round 5: an image named by the agent-editable devcontainer is never
+  // pulled by the run; `podman run` would fetch it on the host from whatever
+  // registry the name says. The default stays podman's for everything else.
+  const never = buildArgs({ image: "img", limits: LIMITS, workdir: "/w", cmd: ["true"], pull: "never" });
+  ok("pull: never puts --pull=never on the run", never.includes("--pull=never"));
+  ok("…before the image, where podman reads flags", never.indexOf("--pull=never") < never.indexOf("img"));
+  ok("the default is podman's: no --pull flag at all", !args().some((a) => a.startsWith("--pull")));
+  ok("an unknown pull policy is refused by name, not passed through", (() => {
+    try {
+      buildArgs({ image: "img", limits: LIMITS, workdir: "/w", cmd: ["true"], pull: "always" });
+      return false;
+    } catch (e) {
+      return /refusing pull policy "always"/.test(e.message);
+    }
+  })());
+}
+
+{
   // Independent security re-review (E-1): a well-formed size above the machine
   // is no ceiling. "999999g" passed toLimits and ran under --memory 999999g.
   // A roomy operator ceiling, so these cases exercise the HOST cap alone.

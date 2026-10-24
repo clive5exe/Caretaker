@@ -103,15 +103,30 @@ review got past every check that read the file's text (context escapes, `ADD`
 URLs, `COPY --from`, heredocs, shell quoting, `ONBUILD`, `ENV` shadowing
 `ARG`), so the text is not the control. The control is the digest: sha256 of
 the Dockerfile and the devcontainer's `build` section must be on the accepted
-list, which lives in the state dir outside the workspace and grows only by the
-operator's `--accept-build <digest>`, once per version. The refusal
+list, which lives in the operator's config dir
+(`${XDG_CONFIG_HOME:-~/.config}/caretaker/accepted-builds.json`, never the
+state dir, whose location the workspace's own config names) and grows only by
+the operator's `--accept-build <digest>`, once per version, checked to be a
+digest before it is written. The bytes hashed are the bytes built: podman reads
+the Dockerfile on stdin, so there is one read, not three. The refusal
 (`BUILD_NOT_ACCEPTED`) prints the digest and what a reader of the file found
-it would fetch, as advice, so the human accepts knowing; the same reading is
-recorded in the run's warnings afterwards. A devcontainer the operator keeps
-outside the workspace was never the agent's and needs no acceptance. A build
-that downloads packages in `RUN` is given a network per run on the command
-line (`--build-network`), never in a settings file, and the run says so. The
-residual is a human accepting a Dockerfile without reading it.
+it would fetch, as advice with control bytes shown as escapes, so the human
+accepts knowing; the same reading is recorded in the run's warnings
+afterwards. The devcontainer path is resolved against the run's workspace,
+never the current directory. A devcontainer the operator keeps outside the
+workspace was never the agent's and needs no acceptance. `environment.mjs
+image` and `check` are held to the same rule. A build that downloads packages
+in `RUN` is given a network per run on the command line (`--build-network`),
+never in a settings file, and the run says so. The residual is a human
+accepting a Dockerfile without reading it.
+
+**An image named by a workspace devcontainer is never pulled by the run.**
+`"image"` beside `"build"` in the same agent-editable file would make
+`podman run` fetch it on the host, from whatever registry the name says, with
+whatever the name carries. So such an image runs with `--pull=never`; if it is
+not local the run is refused (`IMAGE_NOT_LOCAL`) with the pull for the
+operator to read and make. An `--image` the operator gave, or a devcontainer
+outside the workspace, keeps podman's default.
 
 Devcontainer `features` are not installed by this runner; that is the
 devcontainer CLI's job. They are named in a warning rather than skipped.

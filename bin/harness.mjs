@@ -195,7 +195,7 @@ export function imageFor(policy, dev, warnings, { exec, workspace = null } = {})
       acceptBuilds: policy.acceptBuilds ?? [],
     });
     warnings.push(...r.warnings);
-    return { image: r.image, built: r.built, imageId: imageId(r.image, { runtime: policy.sandbox, exec }) };
+    return { image: r.image, built: r.built, pull: r.pull ?? "missing", imageId: imageId(r.image, { runtime: policy.sandbox, exec }) };
   } catch (e) {
     if (e instanceof EnvironmentError) throw new HarnessError(e.message, { code: e.code });
     throw e;
@@ -374,8 +374,10 @@ export function buildContainerArgv({
   cliArgv,
   env = {},
   extraRunFlags = [],
+  // "never" for an image named by a workspace devcontainer (sandbox.mjs buildArgs says why).
+  pull = "missing",
 }) {
-  const base = buildArgs({ image, limits, workdir: workspace, net, cmd: cliArgv, runtime });
+  const base = buildArgs({ image, limits, workdir: workspace, net, cmd: cliArgv, runtime, pull });
   const extra = [
     // Measured: without -i the container's stdin is empty. The prompt arrives
     // on stdin, so without this the agent is handed nothing and answers it.
@@ -1041,11 +1043,17 @@ async function cliAdapter({ workspace, prompt, policy, paths, warnings }) {
     file = cliArgv[0];
     args = cliArgv.slice(1);
   } else {
-    const dev = readDevcontainer(policy.devcontainer);
+    // THE DEVCONTAINER PATH IS THE WORKSPACE'S, not the current directory's.
+    // Read relative to cwd, a run of one checkout against another repo read
+    // THIS checkout's file while judging it against the other workspace, so
+    // an unaccepted workspace Dockerfile built (independent security review,
+    // E-5, round 5). Resolved here once; everything below sees the same path.
+    const devPath = resolve(workspace, policy.devcontainer);
+    const dev = readDevcontainer(devPath);
     const limits = toLimits(dev);
     // The file can lower a ceiling; it cannot raise it past the operator's, or the host (E-1).
-    warnings.push(...capLimits(limits, { maxMemory: policy.maxMemory, maxCpus: policy.maxCpus, source: policy.devcontainer }));
-    const { image, imageId, built } = imageFor(policy, dev, warnings, { workspace });
+    warnings.push(...capLimits(limits, { maxMemory: policy.maxMemory, maxCpus: policy.maxCpus, source: devPath }));
+    const { image, imageId, built, pull } = imageFor({ ...policy, devcontainer: devPath }, dev, warnings, { workspace });
     if (policy.net === "none") {
       warnings.push(
         "net:none — the container has no route off the host, so a real agent CLI cannot " +
@@ -1087,6 +1095,7 @@ async function cliAdapter({ workspace, prompt, policy, paths, warnings }) {
       cliArgv,
       env,
       extraRunFlags: [...policy.extraRunFlags, ...skillsMount(policy, preset, warnings)],
+      pull,
     });
     file = policy.sandbox;
     container = { runtime: policy.sandbox, name: containerName, image, imageId, built };

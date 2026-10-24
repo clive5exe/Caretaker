@@ -35,8 +35,8 @@
  */
 import { spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { within } from "./paths.mjs";
@@ -96,7 +96,7 @@ export function buildTag(devcontainerPath) {
  * otherwise). checkDockerfile reads the file for what it would fetch, as
  * advice printed with the refusal, so the human accepts knowing.
  */
-export function buildArgv(dev, devcontainerPath, { network = "none", workspace = null } = {}) {
+export function buildArgv(dev, devcontainerPath, { network = "none", workspace = null, stdin = false } = {}) {
   const base = dirname(resolve(devcontainerPath));
   const ownProject = basename(base) === ".devcontainer" ? dirname(base) : base;
   const bound = workspace && within(base, workspace) ? resolve(workspace) : ownProject;
@@ -111,7 +111,10 @@ export function buildArgv(dev, devcontainerPath, { network = "none", workspace =
       );
     }
   }
-  const args = ["build", "--network", network, "-t", buildTag(devcontainerPath), "-f", dockerfile];
+  // `-f -`: resolveImage hands podman the very bytes it hashed, on stdin, so
+  // the file cannot change between the digest and the build (round 5: three
+  // reads of the Dockerfile were three chances for it to differ).
+  const args = ["build", "--network", network, "-t", buildTag(devcontainerPath), "-f", stdin ? "-" : dockerfile];
   for (const [k, v] of Object.entries(b.args ?? {})) args.push("--build-arg", `${k}=${v}`);
   if (b.target) args.push("--target", String(b.target));
   args.push(context);
@@ -263,21 +266,78 @@ export function checkDockerfile(text, { args = {} } = {}) {
  * context and target choose what is built). sha256, hex. Null when there is
  * no Dockerfile to read yet, which the build itself will then report.
  */
-export function buildDigest(dev, devcontainerPath) {
-  const base = dirname(resolve(devcontainerPath));
-  const b = dev?.build ?? {};
-  const df = resolve(base, String(b.dockerfile ?? "Dockerfile"));
-  if (!existsSync(df)) return null;
+export function buildDigestFrom(bytes, build = {}) {
+  const b = build ?? {};
   const h = createHash("sha256");
-  h.update(readFileSync(df));
+  h.update(bytes);
   h.update("\0");
   h.update(JSON.stringify({ dockerfile: b.dockerfile ?? null, context: b.context ?? null, args: b.args ?? null, target: b.target ?? null }));
   return h.digest("hex");
 }
 
+export function buildDigest(dev, devcontainerPath) {
+  const base = dirname(resolve(devcontainerPath));
+  const b = dev?.build ?? {};
+  const df = resolve(base, String(b.dockerfile ?? "Dockerfile"));
+  if (!existsSync(df)) return null;
+  return buildDigestFrom(readFileSync(df), b);
+}
+
+/** Control bytes shown as escapes, so a message to a terminal cannot be made to hide a line. */
+const plain = (s) => String(s).replace(/[\x00-\x08\x0b-\x1f\x7f]/g, (c) => `\\x${c.charCodeAt(0).toString(16).padStart(2, "0")}`);
+
 /** Is this devcontainer file one the agent could have edited: inside the workspace? */
 export const agentEditable = (devcontainerPath, workspace) => Boolean(workspace) && within(dirname(resolve(devcontainerPath)), workspace);
 
+/** The project a devcontainer file belongs to by convention: the parent of its `.devcontainer/`, else its own directory. */
+export const projectOf = (devcontainerPath) => {
+  const base = dirname(resolve(devcontainerPath));
+  return basename(base) === ".devcontainer" ? dirname(base) : base;
+};
+
+/**
+ * THE ACCEPTED LIST LIVES IN THE OPERATOR'S CONFIG DIR, not in a project's
+ * state dir: the state dir is named by ops/caretaker/config.json, which is in
+ * the workspace, so an agent could point the next run at a directory holding
+ * a list it wrote (independent security review, E-5, round 5). Digests are
+ * global, so one list serves every project. `${XDG_CONFIG_HOME:-~/.config}/
+ * caretaker/accepted-builds.json`, the same place harness.json lives.
+ */
+export const acceptedBuildsPath = () => join(process.env.XDG_CONFIG_HOME || join(homedir(), ".config"), "caretaker", "accepted-builds.json");
+export const DIGEST = /^[0-9a-f]{64}$/;
+
+export function loadAcceptedBuilds(path = acceptedBuildsPath()) {
+  try {
+    const v = JSON.parse(readFileSync(path, "utf8"));
+    return Array.isArray(v) ? v.filter((d) => typeof d === "string" && DIGEST.test(d)) : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Record one digest as accepted. Refuses anything that is not a sha256 hex digest, so a typo never lands in the list. */
+export function acceptBuild(digest, path = acceptedBuildsPath()) {
+  if (typeof digest !== "string" || !DIGEST.test(digest)) {
+    throw new EnvironmentError("BAD_DIGEST", `--accept-build takes the sha256 hex digest a BUILD_NOT_ACCEPTED refusal printed, got ${JSON.stringify(digest)}`);
+  }
+  const list = loadAcceptedBuilds(path);
+  if (list.includes(digest)) return { list, added: false, path };
+  list.push(digest);
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, `${JSON.stringify(list, null, 2)}\n`);
+  return { list, added: true, path };
+}
+
+/**
+ * The image for a run. `policy.image` wins; then devcontainer `image`; then
+ * devcontainer `build`, built now. Returns { image, built, pull, warnings }.
+ * `pull` is what the run may do about an image that is not local: "missing"
+ * (podman's default) for an image the operator named or a devcontainer the
+ * operator keeps outside the workspace; "never" for an image named by a
+ * devcontainer inside the workspace, because `podman run` would otherwise
+ * fetch it on the host from whatever registry the name says, carrying
+ * whatever the name carries (round 5: the sibling key to `build`).
+ */
 export function resolveImage({ image = null, dev, devcontainerPath, runtime = "podman", exec, buildNetwork = "none", workspace = null, acceptBuilds = [] }) {
   const warnings = [];
   const features = Object.keys(dev?.features ?? {});
@@ -287,11 +347,35 @@ export function resolveImage({ image = null, dev, devcontainerPath, runtime = "p
         "Bake them into the Dockerfile; `environment.mjs check` names any toolchain they promised that the image lacks.",
     );
   }
-  if (image) return { image, built: false, warnings };
-  if (dev?.image) return { image: dev.image, built: false, warnings };
+  if (image) return { image, built: false, pull: "missing", warnings };
+  const editable = agentEditable(devcontainerPath, workspace);
+  if (dev?.image) {
+    if (!editable) return { image: dev.image, built: false, pull: "missing", warnings };
+    // Named by a file the agent could edit: the run never pulls it. If it is
+    // not local, the operator pulls it by hand, having read the name.
+    const run = exec ?? defaultExec(runtime);
+    if (run(["image", "exists", dev.image]).status !== 0) {
+      throw new EnvironmentError(
+        "IMAGE_NOT_LOCAL",
+        `${devcontainerPath} names image ${dev.image}, and it is not present locally. The file is inside the workspace, which the last run's agent could have edited, so the run will not pull it: a pull is a host fetch from whatever registry the name says. Read the name, then \`${runtime} pull ${dev.image}\` yourself.`,
+      );
+    }
+    warnings.push(`image ${dev.image} named by the workspace devcontainer: run with --pull=never, the operator pulled it`);
+    return { image: dev.image, built: false, pull: "never", warnings };
+  }
   if (dev?.build?.dockerfile) {
     const run = exec ?? defaultExec(runtime);
-    const args = buildArgv(dev, devcontainerPath, { network: buildNetwork, workspace });
+    const dockerfilePath = resolve(dirname(resolve(devcontainerPath)), dev.build.dockerfile);
+    // READ ONCE. The bytes hashed are the bytes podman builds (on stdin) and
+    // the bytes the reader advises on; a file that changes after this line
+    // changes nothing about this run. No file at all: podman is handed the
+    // path and reports the absence itself, as it always did; there is nothing
+    // to accept and nothing that fetches.
+    const bytes = existsSync(dockerfilePath) ? readFileSync(dockerfilePath) : null;
+    const args = buildArgv(dev, devcontainerPath, { network: buildNetwork, workspace, stdin: bytes !== null });
+    if (buildNetwork !== "none") {
+      warnings.push(`the image was built with network "${buildNetwork}": its Dockerfile is in the workspace, where an agent can edit it, and its RUN steps were not held to the egress allowlist`);
+    }
     /*
      * AN AGENT-EDITED DOCKERFILE IS NOT BUILT UNTIL A HUMAN ACCEPTS IT.
      *
@@ -308,38 +392,42 @@ export function resolveImage({ image = null, dev, devcontainerPath, runtime = "p
      * operator keeps outside the workspace was never the agent's, and needs
      * no acceptance. The residual is a human accepting without reading.
      */
-    const digest = buildDigest(dev, devcontainerPath);
-    if (agentEditable(devcontainerPath, workspace) && digest !== null && !acceptBuilds.includes(digest)) {
-      let found = [];
-      try {
-        found = checkDockerfile(readFileSync(resolve(dirname(resolve(devcontainerPath)), dev.build.dockerfile), "utf8"), { args: dev.build.args ?? {} });
-      } catch {
-        /* the reader is advice; the digest is the control */
+    if (bytes === null) {
+      const r = run(args);
+      if (r.status !== 0) {
+        throw new EnvironmentError("BUILD_FAILED", `building the image from ${devcontainerPath} failed (exit ${r.status}): ${String(r.stderr ?? "").trim().split("\n").slice(-5).join(" | ")}`);
       }
+      return { image: buildTag(devcontainerPath), built: true, pull: "missing", warnings };
+    }
+    const digest = buildDigestFrom(bytes, dev.build);
+    // The reader's advice, from the same bytes. ESC and other control bytes
+    // are shown as escapes, so a Dockerfile cannot hide a line from a
+    // terminal that prints this message (round 5).
+    const advice = () => {
+      try {
+        return checkDockerfile(bytes.toString("utf8"), { args: dev.build.args ?? {} }).map(plain);
+      } catch {
+        return [];
+      }
+    };
+    if (editable && !acceptBuilds.includes(digest)) {
+      const found = advice();
       throw new EnvironmentError(
         "BUILD_NOT_ACCEPTED",
         `${devcontainerPath} builds an image from a Dockerfile inside the workspace, which the last run's agent could have edited, and this version has not been accepted. ` +
-          `Read ${resolve(dirname(resolve(devcontainerPath)), dev.build.dockerfile)}, then accept it once with --accept-build ${digest}. ` +
+          `Read ${dockerfilePath} (with \`cat -v\`: control bytes could hide a line from a plain cat), then accept it once with --accept-build ${digest}. ` +
           (found.length ? `What it would fetch on the host: ${found.join("; ")}.` : "The reader found no host fetch in it, which is advice, not proof."),
       );
     }
-    if (buildNetwork !== "none") {
-      warnings.push(`the image was built with network "${buildNetwork}": its Dockerfile is in the workspace, where an agent can edit it, and its RUN steps were not held to the egress allowlist`);
-    }
-    if (digest !== null && agentEditable(devcontainerPath, workspace)) {
-      let found = [];
-      try {
-        found = checkDockerfile(readFileSync(resolve(dirname(resolve(devcontainerPath)), dev.build.dockerfile), "utf8"), { args: dev.build.args ?? {} });
-      } catch {
-        /* advice only */
-      }
+    if (editable) {
+      const found = advice();
       warnings.push(`image built from an accepted workspace Dockerfile, digest ${digest.slice(0, 12)}…${found.length ? `; the reader notes it would fetch on the host: ${found.join("; ")}` : ""}`);
     }
-    const r = run(args);
+    const r = run(args, { input: bytes });
     if (r.status !== 0) {
       throw new EnvironmentError("BUILD_FAILED", `building the image from ${devcontainerPath} failed (exit ${r.status}): ${String(r.stderr ?? "").trim().split("\n").slice(-5).join(" | ")}`);
     }
-    return { image: buildTag(devcontainerPath), built: true, warnings };
+    return { image: buildTag(devcontainerPath), built: true, pull: "missing", warnings };
   }
   throw new EnvironmentError("NO_IMAGE", `no image: set policy.image, or an "image" or "build.dockerfile" in ${devcontainerPath}`);
 }
@@ -626,7 +714,7 @@ export function runningServices(services, run, projects = null) {
   return out;
 }
 
-export async function check({ devcontainerPath, specs, image = null, sandbox = "podman", egress = null, exec, netns, runtime = "podman", controllers = null }) {
+export async function check({ devcontainerPath, specs, image = null, sandbox = "podman", egress = null, exec, netns, runtime = "podman", controllers = null, workspace = null, acceptBuilds = [] }) {
   const dev = readDevcontainer(devcontainerPath);
   if (dev?.__error) throw new EnvironmentError("BAD_DEVCONTAINER", `${devcontainerPath} is not readable JSON: ${dev.__error}`);
   const decl = declared({ dev, specs, devcontainerPath });
@@ -641,7 +729,9 @@ export async function check({ devcontainerPath, specs, image = null, sandbox = "
     const obs = parseProbe(r.stdout);
     return { declared: decl, observed: obs, image: null, net: "host", differences: compare(decl, obs, { net: "host", canary, running }) };
   }
-  const { image: img, warnings } = resolveImage({ image, dev, devcontainerPath, runtime, exec: run });
+  // The same acceptance and pull rules a run gets (round 5: the probe built
+  // and pulled with neither).
+  const { image: img, warnings, pull } = resolveImage({ image, dev, devcontainerPath, runtime, exec: run, workspace, acceptBuilds });
   const limits = toLimits(dev);
   // The same preflight a run gets (independent review: --cpus killed the
   // probe where the cpu controller is not delegated). A check is not an
@@ -653,7 +743,7 @@ export async function check({ devcontainerPath, specs, image = null, sandbox = "
     }
   }
   const probeIn = (net, extraRunFlags = [], env = {}) => {
-    const args = buildArgs({ image: img, limits, workdir: mkdtempSync(join(tmpdir(), "envcheck-")), net, cmd: ["sh", "-c", script], runtime });
+    const args = buildArgs({ image: img, limits, workdir: mkdtempSync(join(tmpdir(), "envcheck-")), net, cmd: ["sh", "-c", script], runtime, pull });
     const envFlags = Object.entries(env).flatMap(([k, v]) => ["-e", `${k}=${v}`]);
     const r = run([args[0], ...extraRunFlags, ...envFlags, ...args.slice(1)]);
     if (r.status !== 0 && !String(r.stdout).includes("tool ")) {
@@ -681,7 +771,7 @@ export async function check({ devcontainerPath, specs, image = null, sandbox = "
 const isEntry = process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href;
 if (isEntry) {
   const [cmd, ...argv] = process.argv.slice(2);
-  const KNOWN = new Set(["devcontainer", "specs", "image", "sandbox", "egress", "egress-network", "json", "build-network"]);
+  const KNOWN = new Set(["devcontainer", "specs", "image", "sandbox", "egress", "egress-network", "json", "build-network", "workspace", "accept-build"]);
   const f = {};
   for (let i = 0; i < argv.length; i++) {
     const key = argv[i].replace(/^--/, "");
@@ -693,17 +783,27 @@ if (isEntry) {
   }
   const devcontainerPath = f.devcontainer ?? ".devcontainer/devcontainer.json";
   try {
+    // The same gate a run gets (round 5: this command built an unaccepted
+    // workspace Dockerfile with no refusal, and sandbox.mjs pointed at it as
+    // the workaround). The workspace is the devcontainer's project unless
+    // given; --accept-build records the digest in the operator's config dir.
+    const workspace = resolve(f.workspace ?? projectOf(devcontainerPath));
+    if (f["accept-build"] !== undefined) {
+      const a = acceptBuild(f["accept-build"]);
+      console.error(a.added ? `accepted build ${f["accept-build"].slice(0, 12)}… recorded in ${a.path}` : `build ${f["accept-build"].slice(0, 12)}… was already accepted (${a.path})`);
+    }
+    const acceptBuilds = loadAcceptedBuilds();
     if (cmd === "image") {
-      const r = resolveImage({ image: f.image ?? null, dev: readDevcontainer(devcontainerPath), devcontainerPath, buildNetwork: f["build-network"] ?? "none" });
+      const r = resolveImage({ image: f.image ?? null, dev: readDevcontainer(devcontainerPath), devcontainerPath, buildNetwork: f["build-network"] ?? "none", workspace, acceptBuilds });
       for (const w of r.warnings) console.error(`WARNING  ${w}`);
-      console.log(`${r.image}${r.built ? "  (built now)" : ""}  id ${imageId(r.image) ?? "unknown"}`);
+      console.log(`${r.image}${r.built ? "  (built now)" : ""}${r.pull === "never" ? "  (pull: never)" : ""}  id ${imageId(r.image) ?? "unknown"}`);
       process.exit(0);
     }
     if (cmd === "check") {
       const { loadSpecs } = await import("./drift.mjs");
       const specsDir = f.specs ?? "specs";
       const specs = existsSync(specsDir) ? loadSpecs(specsDir).specs : [];
-      const r = await check({ devcontainerPath, specs, image: f.image ?? null, sandbox: f.sandbox ?? "podman", egress: f.egress ? { egressNetwork: f["egress-network"] } : null });
+      const r = await check({ devcontainerPath, specs, image: f.image ?? null, sandbox: f.sandbox ?? "podman", egress: f.egress ? { egressNetwork: f["egress-network"] } : null, workspace, acceptBuilds });
       if (f.json) console.log(JSON.stringify(r, null, 2));
       else {
         for (const w of r.warnings ?? []) console.log(`WARNING  ${w}`);
@@ -712,7 +812,7 @@ if (isEntry) {
       }
       process.exit(r.differences.length ? 1 : 0);
     }
-    console.error("usage: environment.mjs image|check [--devcontainer F] [--specs D] [--image I] [--sandbox podman|none] [--egress] [--json]");
+    console.error("usage: environment.mjs image|check [--devcontainer F] [--workspace DIR] [--accept-build DIGEST] [--specs D] [--image I] [--sandbox podman|none] [--egress] [--json]");
     process.exit(2);
   } catch (e) {
     console.error(`[environment] ${e.name}: ${e.message}`);
