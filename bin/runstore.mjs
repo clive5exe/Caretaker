@@ -55,6 +55,7 @@ import { randomBytes } from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { spawnSync } from "node:child_process";
 import { makeRedactor, requireSecrets } from "./secrets.mjs";
+import { acceptBuild, loadAcceptedBuilds } from "./environment.mjs";
 import { stateDirFor } from "./statedir.mjs";
 import { within } from "./paths.mjs";
 import { harvest, liveRecorder } from "./harvest.mjs";
@@ -423,28 +424,16 @@ if (isEntry) {
       const { load: loadHarnessSettings, policyFlags, policyFor } = await import("./harness-config.mjs");
       const { policy } = policyFor("builder", loadHarnessSettings({ path: flags["harness-config"], workspace }), policyFlags(flags));
       policy.events ??= eventsDirFromFlags();
-      // E-5: the accepted-builds list lives in the state dir, outside the
-      // workspace (checkStateDir), and grows only by --accept-build. The
-      // run gets the whole list; the refusal that asks for a digest prints it.
-      {
-        const file = join(stateDirFromFlags(), "accepted-builds.json");
-        let accepted = [];
-        try {
-          accepted = JSON.parse(readFileSync(file, "utf8"));
-          if (!Array.isArray(accepted)) accepted = [];
-        } catch {
-          /* none yet */
-        }
-        for (const d of policy.acceptBuilds ?? []) {
-          if (!accepted.includes(d)) {
-            accepted.push(d);
-            mkdirSync(dirname(file), { recursive: true });
-            writeFileSync(file, `${JSON.stringify(accepted, null, 2)}\n`);
-            console.error(`[runstore] accepted build ${d.slice(0, 12)}… recorded in ${file}`);
-          }
-        }
-        policy.acceptBuilds = accepted;
+      // E-5: the accepted-builds list lives in the OPERATOR'S config dir
+      // (environment.mjs acceptedBuildsPath says why not the state dir), and
+      // grows only by --accept-build, which is checked to be a digest before
+      // anything is written. The run gets the whole list; the refusal that
+      // asks for a digest prints it.
+      for (const d of policy.acceptBuilds ?? []) {
+        const a = acceptBuild(d);
+        if (a.added) console.error(`[runstore] accepted build ${d.slice(0, 12)}… recorded in ${a.path}`);
       }
+      policy.acceptBuilds = loadAcceptedBuilds();
       // --skills yes: stage the project's configured skills (S-1) into a fresh
       // directory OUTSIDE the workspace, for this run only.
       if (flags.skills === "yes") {

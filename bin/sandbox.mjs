@@ -206,7 +206,7 @@ export const delegationFix = (uid = process.getuid?.() ?? 1000) =>
  * without starting a container — the limits are the security property, and a
  * test that only checks "it ran" proves nothing about them.
  */
-export function buildArgs({ image, limits, workdir, net = "none", cmd, runtime = "podman" }) {
+export function buildArgs({ image, limits, workdir, net = "none", cmd, runtime = "podman", pull = "missing" }) {
   // The image name can come from devcontainer.json, which the agent can edit.
   // One starting with "-" would be read by podman as a flag, not a name
   // (independent re-review), so it is refused here, where every run's
@@ -214,6 +214,7 @@ export function buildArgs({ image, limits, workdir, net = "none", cmd, runtime =
   if (typeof image !== "string" || !image || image.startsWith("-") || /\s/.test(image)) {
     throw new Error(`refusing image name ${JSON.stringify(image)}: an image name never starts with "-" or holds whitespace`);
   }
+  if (pull !== "missing" && pull !== "never") throw new Error(`refusing pull policy ${JSON.stringify(pull)}: "missing" (podman's default) or "never"`);
   const args = [
     "run",
     "--rm",
@@ -221,6 +222,15 @@ export function buildArgs({ image, limits, workdir, net = "none", cmd, runtime =
     // handling in ways that make a hung agent harder to kill.
     "--network",
     net,
+    // AN IMAGE NAMED BY THE AGENT-EDITABLE FILE IS NEVER PULLED BY THE RUN.
+    // `podman run` pulls a missing image on the host, from whatever registry
+    // the name says, with whatever the name carries: a host fetch around the
+    // egress proxy in one line of devcontainer.json (independent security
+    // review, E-5, round 5). environment.mjs resolveImage asks for "never"
+    // for an image from a workspace devcontainer; the operator pulls it by
+    // hand, having read the name. An --image the operator gave, or a file
+    // outside the workspace, keeps podman's default.
+    ...(pull === "never" ? ["--pull=never"] : []),
   ];
   // A NULL LIMIT MEANS THE KERNEL CANNOT ENFORCE IT HERE, and the caller has
   // already been told (checkLimits sets exactly null). Passing the flag anyway
@@ -415,7 +425,7 @@ if (isEntry) {
     if (!image) {
       console.error(
         dev?.build?.dockerfile
-          ? "no image: devcontainer.json builds one; run `node bin/environment.mjs image` and pass the tag it prints as --image"
+          ? "no image: devcontainer.json builds one. `node bin/environment.mjs image` builds it under the same rule a run has (a workspace Dockerfile needs `--accept-build <digest>` once; the refusal prints it), then pass the tag it prints as --image"
           : "no image: give --image or set `image` in devcontainer.json",
       );
       process.exit(2);

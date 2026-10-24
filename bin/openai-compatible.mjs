@@ -339,7 +339,7 @@ const systemPrompt = (containerised, skills) =>
  * file, toolUse }, never throws for an outcome (a failed or killed run is a
  * result), and throws only when nothing could run at all.
  */
-export async function openaiCompatibleAdapter({ workspace, prompt, policy, paths, warnings, HarnessError, imageFor }) {
+export async function openaiCompatibleAdapter({ workspace, prompt, policy, paths, warnings, HarnessError, imageFor, devcontainerFor }) {
   if (!policy.endpoint) throw new HarnessError('adapter "openai-compatible" needs policy.endpoint, e.g. http://localhost:11434/v1');
   if (!policy.model) throw new HarnessError('adapter "openai-compatible" needs policy.model; the server serves more than one');
   const url = `${String(policy.endpoint).replace(/\/+$/, "")}/chat/completions`;
@@ -378,11 +378,14 @@ export async function openaiCompatibleAdapter({ workspace, prompt, policy, paths
     );
     ex = hostExecutor(workspace);
   } else {
-    const dev = readDevcontainer(policy.devcontainer);
+    // The workspace's devcontainer, not the current directory's (E-5, round 5:
+    // harness.mjs cliAdapter says why). One resolved path for every reader.
+    const devPath = devcontainerFor(workspace, policy);
+    const dev = readDevcontainer(devPath);
     const limits = toLimits(dev);
     // The file can lower a ceiling; it cannot raise it past the operator's, or the host (E-1).
-    warnings.push(...capLimits(limits, { maxMemory: policy.maxMemory, maxCpus: policy.maxCpus, source: policy.devcontainer }));
-    const { image, imageId, built } = imageFor(policy, dev, warnings, { workspace });
+    warnings.push(...capLimits(limits, { maxMemory: policy.maxMemory, maxCpus: policy.maxCpus, source: devPath }));
+    const { image, imageId, built, pull } = imageFor({ ...policy, devcontainer: devPath }, dev, warnings, { workspace });
     for (const m of checkLimits(["memory", "cpus", "pids"], delegatedControllers().controllers)) {
       limits[m.limit] = null;
       warnings.push(`not limiting ${m.limit} — no "${m.controller}" cgroup controller is delegated, so the flag is omitted. This run is NOT bounded on ${m.limit}.`);
@@ -390,7 +393,7 @@ export async function openaiCompatibleAdapter({ workspace, prompt, policy, paths
     // Kept alive by a shell loop, not `sleep infinity`, which BusyBox images
     // do not all accept; the image only needs a POSIX sh for the tools anyway.
     const name = `caretaker-${policy.runId}`;
-    const base = buildArgs({ image, limits, workdir: workspace, net: policy.net, cmd: ["sh", "-c", "while :; do sleep 3600; done"], runtime: policy.sandbox });
+    const base = buildArgs({ image, limits, workdir: workspace, net: policy.net, cmd: ["sh", "-c", "while :; do sleep 3600; done"], runtime: policy.sandbox, pull });
     if (base[0] !== "run") throw new HarnessError(`sandbox.buildArgs no longer starts with "run"`);
     const args = ["run", "-d", "--name", name, ...policy.extraRunFlags, ...base.slice(1)];
     const started = spawnSync(policy.sandbox, args, { encoding: "utf8", timeout: 120_000 });
