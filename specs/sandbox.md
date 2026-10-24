@@ -98,11 +98,15 @@ outside the workspace. A symlink is judged by where it lands.
 on the host regardless are held.** A `RUN` with the host's network would reach
 the internet with the repo as its context, around the egress proxy the run
 itself is held to, so the build runs with `--network none`. That flag covers
-`RUN` only (podman-build(1)): `ADD <url>` and the `FROM` pull happen on the
-host, from a Dockerfile the agent can edit. So the Dockerfile is read before
-the build: `ADD` with a URL is refused (`BUILD_FETCHES`), and `FROM` is held
-to docker.io and localhost, a variable `FROM` nothing resolves included. A
-build that downloads packages is given a network per run on the command line
+`RUN` only (podman-build(1)): `ADD <url>` and every image pull (`FROM`,
+`COPY --from=`, `RUN --mount=…,from=`) happen on the host, from a Dockerfile
+the agent can edit. So the Dockerfile is read before the build, by its own
+line rules (comments, continuations, the escape directive, heredocs, the JSON
+form): `ADD` with a URL is refused (`BUILD_FETCHES`), and every pulled image
+must be written out in full to docker.io or localhost. An unqualified name
+goes wherever the host's `registries.conf` points, so it is refused rather
+than guessed, as is a name a variable leaves unresolved. A build that
+downloads packages is given a network per run on the command line
 (`--build-network`), never in a settings file; that lifts both checks and the
 run says so. The residual is the base-image name itself, which still reaches
 docker.io.

