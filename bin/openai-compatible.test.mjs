@@ -319,12 +319,35 @@ const policy = (model, over = {}) => ({ adapter: "openai-compatible", endpoint: 
   const byName = await runArchived(workspace(), "x", policy("byname", { apiKeyEnv: "OAC_BY_NAME" }), { stateDir: join(TMP, "state-byname"), secrets: { OAC_BY_NAME: ODD } });
   ok("a key given only by name (--secret) reaches the adapter, without an export", byName.verdict.state === "completed" && seen.filter((s) => s.model === "byname").every((s) => s.auth === `Bearer ${ODD}`), JSON.stringify(byName.verdict.state));
   process.env.OAC_EXPORTED = ODD;
-  scripts.exported = [say([call("run", { command: "printenv OAC_EXPORTED" })]), say(null, null, `the key is ${ODD} and base64 ${Buffer.from(ODD).toString("base64")}`)];
+  // Round 2: the model also WRITES the key into a file, so it is in the diff.
+  scripts.exported = [
+    say([call("run", { command: "printenv OAC_EXPORTED" }), call("write_file", { path: "leak.txt", content: `k=${ODD}\nb=${Buffer.from(ODD).toString("base64")}\n` })]),
+    say(null, null, `the key is ${ODD} and base64 ${Buffer.from(ODD).toString("base64")}`),
+  ];
   const exp = await runArchived(workspace(), "x", policy("exported", { apiKeyEnv: "OAC_EXPORTED" }), { stateDir: join(TMP, "state-exported"), secrets: {} });
   const dir = join(TMP, "state-exported", "runs", exp.verdict.runId);
-  const archived = readdirSync(dir).map((f) => readFileSync(join(dir, f), "utf8")).join("\n");
+  const files = Object.fromEntries(readdirSync(dir).map((f) => [f, readFileSync(join(dir, f), "utf8")]));
+  const archived = Object.values(files).join("\n");
   ok("a key that reached the adapter through the environment is still redacted everywhere in the archive: the policy named it", !archived.includes(ODD) && !archived.includes(Buffer.from(ODD).toString("base64")), [...archived.matchAll(/sk-proj-[^\s"]{0,20}/g)].map((m) => m[0]).join(","));
+  ok("…including diff.patch, which the browser is served and the next run's prompt is pasted (round 2)", files["diff.patch"]?.includes("leak.txt") && !files["diff.patch"].includes(ODD) && /\[redacted:OAC_EXPORTED/.test(files["diff.patch"]), (files["diff.patch"] ?? "").slice(0, 300));
   delete process.env.OAC_EXPORTED;
+  // Round 2: a library caller may give policy.env one value while process.env
+  // holds another; the adapter sends the first and the host shell prints the
+  // second. Both are named, so both are redacted.
+  // Neither value has a known shape: only naming can redact them.
+  const A = "qq-unshaped-policy-env-value-ABCDEFGHIJ-0123456789";
+  const B = "zz-not-a-known-shape-ABCDEFGHIJ-0123456789-xyz";
+  process.env.OAC_TWO = B;
+  // The model relays what a server echoed back (a 401 body quoting the header).
+  scripts.two = [say([call("run", { command: "printenv OAC_TWO" })]), say(null, null, `the server said: unknown key ${A}`)];
+  // The library caller's way: the value is in policy.env itself, not in the
+  // `secrets` option that runArchived would also hand the redactor.
+  const two = await runArchived(workspace(), "x", policy("two", { apiKeyEnv: "OAC_TWO", env: { OAC_TWO: A } }), { stateDir: join(TMP, "state-two"), secrets: {} });
+  const twoDir = join(TMP, "state-two", "runs", two.verdict.runId);
+  const twoArchive = readdirSync(twoDir).map((f) => readFileSync(join(twoDir, f), "utf8")).join("\n");
+  ok("with two values for one name, the --secret value is the one sent", seen.filter((s) => s.model === "two").every((s) => s.auth === `Bearer ${A}`));
+  ok("…and BOTH values are redacted from the archive", !twoArchive.includes(A) && !twoArchive.includes(B), twoArchive.match(/zz-not|sk-proj-AAAA/g)?.join(",") ?? "");
+  delete process.env.OAC_TWO;
 }
 
 /* ------------------------------------------------------- the tool fixture */

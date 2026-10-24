@@ -277,6 +277,12 @@ try {
       ok(`an OpenAI-shaped key with _ and - is caught by net two: ${k.slice(0, 14)}…`, !stranger(`token ${k} here`).includes(k), stranger(`token ${k} here`));
     }
     ok("…and a short sk- prefix on an ordinary word still is not", stranger("sk-test and sk-proj-short").includes("sk-proj-short"));
+    // Round 2: with `-` in the body and no left edge, a slug like this read as
+    // `ta` + a key, and 30 real paths under /srv/projects were mangled.
+    for (const s of ["task-4-sql-validation-simple.js", "desk-mount-bracket-v2-final-render.png", "risk-assessment-2026-q3-draft.md"]) {
+      ok(`an ordinary slug containing "sk-" mid-word is left alone: ${s}`, stranger(`see ${s} here`) === `see ${s} here`, stranger(`see ${s} here`));
+    }
+    ok("…while the same key after a word boundary is still caught", !stranger("(sk-proj-ab_cd-EF_gh-IJ_kl-MN_op-QR_st-UV_wx-YZ01)").includes("sk-proj-ab_cd"));
   }
 
   /* -------------------------------------------- redaction of a whole event */
