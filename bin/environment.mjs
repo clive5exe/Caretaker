@@ -87,20 +87,14 @@ export function buildTag(devcontainerPath) {
  * run itself is held to. A RUN that downloads needs `buildNetwork`, given per
  * run on the command line and named in the run's warnings.
  *
- * `podman build --network` covers RUN ONLY (podman-build(1)). Two fetches
- * happen on the host regardless, from an agent-editable Dockerfile, so the
- * Dockerfile is read before the build and both are held (independent
- * security re-review, E-5, reproduced to the argv):
- *   - `ADD <url>` is refused: it would send whatever the URL carries to
- *     whoever answers it, with no proxy in the way.
- *   - every image the build pulls (`FROM`, `COPY --from=`, `RUN --mount
- *     from=`) must be written out in full to docker.io or localhost: the
- *     base-image pull is the one host fetch a build needs, and the registry
- *     it goes to is bounded. An unqualified name, or one a variable leaves
- *     unresolved, is refused rather than guessed (checkDockerfile).
- * A named build network lifts both, because the operator has opened the
- * build's network on the command line and the run already says so. The
- * residual is the base-image name itself, which still reaches docker.io.
+ * `podman build --network` covers RUN ONLY (podman-build(1)): `ADD <url>` and
+ * every image pull (`FROM`, `COPY --from=`, `RUN --mount from=`) happen on
+ * the host regardless, from a Dockerfile the agent could have edited. What
+ * holds that is not a check of the file's text, which four rounds of review
+ * got past, but acceptance: resolveImage builds a Dockerfile inside the
+ * workspace only when a human has accepted its digest (BUILD_NOT_ACCEPTED
+ * otherwise). checkDockerfile reads the file for what it would fetch, as
+ * advice printed with the refusal, so the human accepts knowing.
  */
 export function buildArgv(dev, devcontainerPath, { network = "none", workspace = null } = {}) {
   const base = dirname(resolve(devcontainerPath));
@@ -117,15 +111,6 @@ export function buildArgv(dev, devcontainerPath, { network = "none", workspace =
       );
     }
   }
-  if (network === "none" && existsSync(dockerfile)) {
-    const fetches = checkDockerfile(readFileSync(dockerfile, "utf8"), { args: b.args ?? {} });
-    if (fetches.length) {
-      throw new EnvironmentError(
-        "BUILD_FETCHES",
-        `${dockerfile}: the build would fetch on the host, outside its --network none and around the egress proxy: ${fetches.join("; ")}. Use COPY, a docker.io or localhost base image, or name a build network per run.`,
-      );
-    }
-  }
   const args = ["build", "--network", network, "-t", buildTag(devcontainerPath), "-f", dockerfile];
   for (const [k, v] of Object.entries(b.args ?? {})) args.push("--build-arg", `${k}=${v}`);
   if (b.target) args.push("--target", String(b.target));
@@ -138,16 +123,21 @@ export const BASE_IMAGE_REGISTRIES = new Set(["docker.io", "localhost"]);
 
 /**
  * The fetches a Dockerfile would make ON THE HOST, as a list of findings
- * (empty when there are none). podman-build(1) names four places an image or
- * URL is fetched outside the RUN network: `FROM`, `COPY --from=<image>`,
- * `RUN --mount=...,from=<image>` and `ADD <url>` (including its JSON form).
- * Every image so named must be written out in full to a registry in
- * BASE_IMAGE_REGISTRIES: an unqualified name (`node:22`) goes wherever the
- * host's registries.conf points, which on an enterprise host is not docker.io
- * (independent security review, round 3), so it is refused rather than
- * guessed at. A stage, by alias or index, is not a pull. `args` are the build
- * args the devcontainer declares; `ARG NAME=default` above a FROM and the
- * `${X:-default}` forms resolve; a variable nothing sets is refused.
+ * (empty when it finds none). THIS IS ADVICE, NOT A CONTROL: it is printed
+ * with a BUILD_NOT_ACCEPTED refusal so the human who accepts the build knows
+ * what they are accepting, and recorded in the run's warnings afterwards.
+ * Four rounds of independent review got past every version of it (heredoc
+ * detection, shell quoting, ENV shadowing ARG, ONBUILD, the escape directive's
+ * scope), which is why acceptance of the digest is the control instead.
+ *
+ * podman-build(1) names four places an image or URL is fetched outside the
+ * RUN network: `FROM`, `COPY --from=<image>`, `RUN --mount=...,from=<image>`
+ * and `ADD <url>` (including its JSON form). An image not written out in full
+ * to a registry in BASE_IMAGE_REGISTRIES is reported: an unqualified name
+ * (`node:22`) goes wherever the host's registries.conf points. A stage, by
+ * alias or index, is not a pull. `args` are the build args the devcontainer
+ * declares; `ARG NAME=default` above a FROM and the `${X:-default}` forms
+ * resolve; a variable nothing sets is reported.
  */
 export function checkDockerfile(text, { args = {} } = {}) {
   const findings = [];
@@ -267,7 +257,28 @@ export function checkDockerfile(text, { args = {} } = {}) {
  * The image for a run. `policy.image` wins; then devcontainer `image`; then
  * devcontainer `build`, built now. Returns { image, built, warnings }.
  */
-export function resolveImage({ image = null, dev, devcontainerPath, runtime = "podman", exec, buildNetwork = "none", workspace = null }) {
+/**
+ * What a human accepts when they accept a build: the Dockerfile's bytes and
+ * the devcontainer's whole `build` section (args feed ARG, which feeds FROM;
+ * context and target choose what is built). sha256, hex. Null when there is
+ * no Dockerfile to read yet, which the build itself will then report.
+ */
+export function buildDigest(dev, devcontainerPath) {
+  const base = dirname(resolve(devcontainerPath));
+  const b = dev?.build ?? {};
+  const df = resolve(base, String(b.dockerfile ?? "Dockerfile"));
+  if (!existsSync(df)) return null;
+  const h = createHash("sha256");
+  h.update(readFileSync(df));
+  h.update("\0");
+  h.update(JSON.stringify({ dockerfile: b.dockerfile ?? null, context: b.context ?? null, args: b.args ?? null, target: b.target ?? null }));
+  return h.digest("hex");
+}
+
+/** Is this devcontainer file one the agent could have edited: inside the workspace? */
+export const agentEditable = (devcontainerPath, workspace) => Boolean(workspace) && within(dirname(resolve(devcontainerPath)), workspace);
+
+export function resolveImage({ image = null, dev, devcontainerPath, runtime = "podman", exec, buildNetwork = "none", workspace = null, acceptBuilds = [] }) {
   const warnings = [];
   const features = Object.keys(dev?.features ?? {});
   if (features.length) {
@@ -281,8 +292,48 @@ export function resolveImage({ image = null, dev, devcontainerPath, runtime = "p
   if (dev?.build?.dockerfile) {
     const run = exec ?? defaultExec(runtime);
     const args = buildArgv(dev, devcontainerPath, { network: buildNetwork, workspace });
+    /*
+     * AN AGENT-EDITED DOCKERFILE IS NOT BUILT UNTIL A HUMAN ACCEPTS IT.
+     *
+     * The build runs on the host, as the operator, from a file in the
+     * workspace that the last run's agent could have written. Four rounds of
+     * independent review found a way past every check that read the file
+     * (context escapes, ADD URLs, COPY --from, heredocs, quoting, ONBUILD,
+     * ENV shadowing ARG): a parser of someone else's grammar is a claim, not
+     * a control. So the control is the one that needs no parser: the digest
+     * of the Dockerfile and the build section must be on the accepted list,
+     * which lives outside the workspace and grows only by the operator's
+     * `--accept-build <digest>`. The refusal prints the digest and what the
+     * reader found, so the human accepts with their eyes open. A file the
+     * operator keeps outside the workspace was never the agent's, and needs
+     * no acceptance. The residual is a human accepting without reading.
+     */
+    const digest = buildDigest(dev, devcontainerPath);
+    if (agentEditable(devcontainerPath, workspace) && digest !== null && !acceptBuilds.includes(digest)) {
+      let found = [];
+      try {
+        found = checkDockerfile(readFileSync(resolve(dirname(resolve(devcontainerPath)), dev.build.dockerfile), "utf8"), { args: dev.build.args ?? {} });
+      } catch {
+        /* the reader is advice; the digest is the control */
+      }
+      throw new EnvironmentError(
+        "BUILD_NOT_ACCEPTED",
+        `${devcontainerPath} builds an image from a Dockerfile inside the workspace, which the last run's agent could have edited, and this version has not been accepted. ` +
+          `Read ${resolve(dirname(resolve(devcontainerPath)), dev.build.dockerfile)}, then accept it once with --accept-build ${digest}. ` +
+          (found.length ? `What it would fetch on the host: ${found.join("; ")}.` : "The reader found no host fetch in it, which is advice, not proof."),
+      );
+    }
     if (buildNetwork !== "none") {
       warnings.push(`the image was built with network "${buildNetwork}": its Dockerfile is in the workspace, where an agent can edit it, and its RUN steps were not held to the egress allowlist`);
+    }
+    if (digest !== null && agentEditable(devcontainerPath, workspace)) {
+      let found = [];
+      try {
+        found = checkDockerfile(readFileSync(resolve(dirname(resolve(devcontainerPath)), dev.build.dockerfile), "utf8"), { args: dev.build.args ?? {} });
+      } catch {
+        /* advice only */
+      }
+      warnings.push(`image built from an accepted workspace Dockerfile, digest ${digest.slice(0, 12)}…${found.length ? `; the reader notes it would fetch on the host: ${found.join("; ")}` : ""}`);
     }
     const r = run(args);
     if (r.status !== 0) {

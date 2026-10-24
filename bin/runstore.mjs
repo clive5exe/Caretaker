@@ -36,6 +36,9 @@
  *        [--sandbox podman|none] [--net NET] [--timeout MS]
  *        [--max-memory SIZE] [--max-cpus N]             the most devcontainer.json may declare (E-1);
  *                                                       default 2gb and 2, the file can only lower them
+ *        [--accept-build DIGEST]                        accept a workspace Dockerfile for building (E-5);
+ *                                                       a BUILD_NOT_ACCEPTED refusal prints the digest,
+ *                                                       and the acceptance is kept in the state dir
  *        [--egress host,host [--egress-network NET]]   per-run proxy, log in the archive (C-5)
  *        [--skills yes]                                 stage the config's skills for the run (S-1)
  *        [--steer web]                                  answer its questions and message it from the
@@ -367,7 +370,7 @@ if (isEntry) {
     "workspace", "prompt-file", "prompt", "config", "state-dir", "task", "parent", "secret",
     "adapter", "cli", "model", "sandbox", "net", "timeout", "image", "egress", "egress-network",
     "endpoint", "api-key-env", "max-turns", "skills", "harness-config", "build-network", "steer",
-    "events-dir", "max-memory", "max-cpus",
+    "events-dir", "max-memory", "max-cpus", "accept-build",
   ]);
   const flags = { secret: [] };
   for (let i = 0; i < argv.length; i++) {
@@ -420,6 +423,28 @@ if (isEntry) {
       const { load: loadHarnessSettings, policyFlags, policyFor } = await import("./harness-config.mjs");
       const { policy } = policyFor("builder", loadHarnessSettings({ path: flags["harness-config"], workspace }), policyFlags(flags));
       policy.events ??= eventsDirFromFlags();
+      // E-5: the accepted-builds list lives in the state dir, outside the
+      // workspace (checkStateDir), and grows only by --accept-build. The
+      // run gets the whole list; the refusal that asks for a digest prints it.
+      {
+        const file = join(stateDirFromFlags(), "accepted-builds.json");
+        let accepted = [];
+        try {
+          accepted = JSON.parse(readFileSync(file, "utf8"));
+          if (!Array.isArray(accepted)) accepted = [];
+        } catch {
+          /* none yet */
+        }
+        for (const d of policy.acceptBuilds ?? []) {
+          if (!accepted.includes(d)) {
+            accepted.push(d);
+            mkdirSync(dirname(file), { recursive: true });
+            writeFileSync(file, `${JSON.stringify(accepted, null, 2)}\n`);
+            console.error(`[runstore] accepted build ${d.slice(0, 12)}… recorded in ${file}`);
+          }
+        }
+        policy.acceptBuilds = accepted;
+      }
       // --skills yes: stage the project's configured skills (S-1) into a fresh
       // directory OUTSIDE the workspace, for this run only.
       if (flags.skills === "yes") {
