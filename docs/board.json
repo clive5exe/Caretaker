@@ -367,7 +367,7 @@
           "title": "Container runner: podman, resource limits, repo bind-mount",
           "owner": "backend",
           "est": "1d",
-          "status": "todo",
+          "status": "done",
           "deps": [
             "P-1"
           ],
@@ -456,7 +456,16 @@
                 }
               ]
             }
-          }
+          },
+          "completed": "2026-10-24",
+          "transitions": [
+            {
+              "cmd": "done",
+              "by": "ghost",
+              "at": "2026-10-24T16:17:46.586Z",
+              "via": "cli"
+            }
+          ]
         },
         {
           "id": "E-2",
