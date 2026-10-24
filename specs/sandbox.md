@@ -94,11 +94,18 @@ the file is in it, which is the agent-editable case; its own project (the
 parent of its `.devcontainer/`) when the operator points a run at a file
 outside the workspace. A symlink is judged by where it lands.
 
-**The build has no network.** A build's `RUN` steps would otherwise reach the
-internet with the repo as their context, around the egress proxy the run
-itself is held to. The base image still pulls; a build that downloads packages
-is given a network per run on the command line (`--build-network`), never in a
-settings file, and the run says so.
+**The build's `RUN` steps have no network, and the two fetches podman makes
+on the host regardless are held.** A `RUN` with the host's network would reach
+the internet with the repo as its context, around the egress proxy the run
+itself is held to, so the build runs with `--network none`. That flag covers
+`RUN` only (podman-build(1)): `ADD <url>` and the `FROM` pull happen on the
+host, from a Dockerfile the agent can edit. So the Dockerfile is read before
+the build: `ADD` with a URL is refused (`BUILD_FETCHES`), and `FROM` is held
+to docker.io and localhost, a variable `FROM` nothing resolves included. A
+build that downloads packages is given a network per run on the command line
+(`--build-network`), never in a settings file; that lifts both checks and the
+run says so. The residual is the base-image name itself, which still reaches
+docker.io.
 
 Devcontainer `features` are not installed by this runner; that is the
 devcontainer CLI's job. They are named in a warning rather than skipped.

@@ -81,12 +81,25 @@ export function buildTag(devcontainerPath) {
  * The workspace is never the bound for a file that is not in it, because a
  * build context must contain its own Dockerfile's neighbours to be useful.
  *
- * THE BUILD HAS NO NETWORK unless one is named. A build's RUN steps are a
- * container too: with the host's network they would reach the internet with
- * the repo as their build context, around the egress proxy the run itself is
- * held to. The base image is still pulled (podman fetches it, not the build
- * container); a RUN that downloads needs `buildNetwork`, given per run on the
- * command line and named in the run's warnings.
+ * THE BUILD'S RUN STEPS HAVE NO NETWORK unless one is named. A build's RUN
+ * steps are a container too: with the host's network they would reach the
+ * internet with the repo as their build context, around the egress proxy the
+ * run itself is held to. A RUN that downloads needs `buildNetwork`, given per
+ * run on the command line and named in the run's warnings.
+ *
+ * `podman build --network` covers RUN ONLY (podman-build(1)). Two fetches
+ * happen on the host regardless, from an agent-editable Dockerfile, so the
+ * Dockerfile is read before the build and both are held (independent
+ * security re-review, E-5, reproduced to the argv):
+ *   - `ADD <url>` is refused: it would send whatever the URL carries to
+ *     whoever answers it, with no proxy in the way.
+ *   - `FROM` is held to docker.io and localhost: the base-image pull is the
+ *     one host fetch a build needs, and the registry it goes to is bounded.
+ *     A FROM that cannot be resolved (a variable no ARG or build arg sets)
+ *     is refused rather than guessed.
+ * A named build network lifts both, because the operator has opened the
+ * build's network on the command line and the run already says so. The
+ * residual is the base-image name itself, which still reaches docker.io.
  */
 export function buildArgv(dev, devcontainerPath, { network = "none", workspace = null } = {}) {
   const base = dirname(resolve(devcontainerPath));
@@ -103,11 +116,73 @@ export function buildArgv(dev, devcontainerPath, { network = "none", workspace =
       );
     }
   }
+  if (network === "none" && existsSync(dockerfile)) {
+    const fetches = checkDockerfile(readFileSync(dockerfile, "utf8"), { args: b.args ?? {} });
+    if (fetches.length) {
+      throw new EnvironmentError(
+        "BUILD_FETCHES",
+        `${dockerfile}: the build would fetch on the host, outside its --network none and around the egress proxy: ${fetches.join("; ")}. Use COPY, a docker.io or localhost base image, or name a build network per run.`,
+      );
+    }
+  }
   const args = ["build", "--network", network, "-t", buildTag(devcontainerPath), "-f", dockerfile];
   for (const [k, v] of Object.entries(b.args ?? {})) args.push("--build-arg", `${k}=${v}`);
   if (b.target) args.push("--target", String(b.target));
   args.push(context);
   return args;
+}
+
+/** Registries a base image may be pulled from with no build network named. */
+export const BASE_IMAGE_REGISTRIES = new Set(["docker.io", "localhost"]);
+
+/**
+ * The fetches a Dockerfile would make ON THE HOST, as a list of findings
+ * (empty when there are none): `ADD` with a URL source, and `FROM` an image
+ * outside BASE_IMAGE_REGISTRIES. `args` are the build args the devcontainer
+ * declares; an `ARG NAME=default` above a FROM also resolves. A stage alias
+ * (`FROM x AS build`, then `FROM build`) is not a pull. Comments and line
+ * continuations are handled; a heredoc is not parsed, and an ADD inside one
+ * is not an instruction podman would run either.
+ */
+export function checkDockerfile(text, { args = {} } = {}) {
+  const findings = [];
+  const vars = { ...Object.fromEntries(Object.entries(args).map(([k, v]) => [k, String(v)])) };
+  const stages = new Set();
+  const lines = String(text ?? "")
+    .replace(/\\\r?\n/g, " ")
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l && !l.startsWith("#"));
+  const expand = (s) => s.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)(?::[-+][^}]*)?\}|\$([A-Za-z_][A-Za-z0-9_]*)/g, (m, a, b) => vars[a ?? b] ?? m);
+  for (const line of lines) {
+    const [instr, ...rest] = line.split(/\s+/);
+    const op = instr.toUpperCase();
+    if (op === "ARG") {
+      const m = /^([A-Za-z_][A-Za-z0-9_]*)(?:=(.*))?$/.exec(rest.join(" "));
+      if (m && m[2] !== undefined && !(m[1] in vars)) vars[m[1]] = m[2].replace(/^"(.*)"$/, "$1");
+    } else if (op === "FROM") {
+      const words = rest.filter((w) => !w.startsWith("--"));
+      const image = expand(words[0] ?? "");
+      const asIdx = words.findIndex((w) => w.toUpperCase() === "AS");
+      if (asIdx !== -1 && words[asIdx + 1]) stages.add(words[asIdx + 1].toLowerCase());
+      if (!image) findings.push("FROM names no image");
+      else if (/\$/.test(image)) findings.push(`FROM ${words[0]} cannot be resolved: no ARG or build arg sets it`);
+      else if (stages.has(image.toLowerCase()) || image.toLowerCase() === "scratch") continue;
+      else {
+        const first = image.split("/")[0];
+        const registry = image.includes("/") && (first.includes(".") || first.includes(":") || first === "localhost") ? first.replace(/:\d+$/, "") : "docker.io";
+        if (!BASE_IMAGE_REGISTRIES.has(registry)) findings.push(`FROM ${image} pulls from ${registry}`);
+      }
+    } else if (op === "ADD") {
+      const words = rest.filter((w) => !w.startsWith("--"));
+      const srcs = words.length > 1 ? words.slice(0, -1) : words;
+      for (const s of srcs) {
+        const v = expand(s);
+        if (/^[a-z][a-z0-9+.-]*:\/\//i.test(v) || /^git@/i.test(v)) findings.push(`ADD ${s} fetches a URL`);
+      }
+    }
+  }
+  return findings;
 }
 
 /**
