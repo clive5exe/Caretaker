@@ -114,7 +114,7 @@
           "title": "A spec schema the environment can be derived from",
           "owner": "architect",
           "est": "1d",
-          "status": "todo",
+          "status": "done",
           "deps": [],
           "spec": "docs/architecture.md",
           "ac": "a spec carries a structured block declaring runtime, services and external hosts, with prose below it, and a parser turns that block into an image spec and an egress allowlist without a human editing either",
@@ -152,7 +152,16 @@
               ],
               "note": "Independent security review (fresh agent, not the builder): attacked parseSpec offline with 90 crafted hosts: wildcards (*, *.x.com, ?.com), bare TLDs, CIDR, ports, schemes, userinfo, flags (--allow, -x, --allow=evil.com), shell ($(id), backticks, ; | &), whitespace/tab/NUL/U+2028 splits, confusables (Cyrillic, fullwidth, ideographic stop, ZWSP, Kelvin sign, long s: /i without /u admits none), underscores, leading/trailing/double dots, 64-char labels. All refused by HOST at spec.mjs:63 and dropped at :91-96 before any consumer. Accepted entries (plain names, .suffix, IP literals, host.containers.internal) each match only themselves at egress.mjs:55-62; .example.com does not match evilexample.com. Consumers: netns.mjs:183 passes --allow as one spawn argv element (no shell); environment.mjs:276-277 re-checks HOST and :285,289 shell-quote before sh, so the reason at spec.mjs:60-61 is true as stated. devcontainer tricks (image node:22,evil.com; feature python:3 evil.com) imply only known registries. Notes, not fails: IP literals incl. 169.254.169.254/10.x and podman's host.containers.internal pass HOST, so a spec can declare a LAN/host route explicitly (declared, not widened); extractBlock :44-47 takes the first fenced spec at column 0, so an example block nested in a 4-backtick fence above the real one wins (authoring hazard, same trust as editing the real block); at run time the allowlist comes from --egress via runstore.mjs:291, not from the spec."
             }
-          }
+          },
+          "completed": "2026-10-24",
+          "transitions": [
+            {
+              "cmd": "done",
+              "by": "ghost",
+              "at": "2026-10-24T20:58:57.351Z",
+              "via": "cli"
+            }
+          ]
         },
         {
           "id": "P-2",
@@ -322,7 +331,7 @@
           "title": "Podman is the assumption; missing means install it",
           "owner": "devops",
           "est": "4h",
-          "status": "todo",
+          "status": "done",
           "deps": [],
           "spec": "docs/decisions/0001-build-the-egress-layer.md",
           "ac": "the runner uses podman; if it is absent the tool offers the correct install command for the platform and runs it on confirmation; Docker is used ONLY when explicitly asked for, and that run prints what the weaker isolation means",
@@ -360,7 +369,16 @@
               ],
               "note": "Independent security review (fresh agent, not the builder): attacked the runtime choice offline, since podman cannot start here (newuidmap refused). With a fake docker first on PATH and podman broken, 'sandbox.mjs run' and 'detect' exit 1 naming podman and print 'docker IS present, and is not used automatically' (sandbox.mjs:288-305, :337-341); 'run --runtime docker' prints the root-daemon WARNING before the argv reaches docker (:266, :355, reproduced: the fake docker received the argv after the warning); 'install' with y on a non-tty stdin installs nothing (:312-315); offerInstall runs the command only on /^y(es)?$/i (:65); parseFlags refuses '--net=', \"--net ''\", '---net', a stray '--' and '--runtime lxc'. Comments checked and true: :37-39 (printed, never run unasked), :86-91 (docker never chosen implicitly). CI 40101849309 (b3c6824; the reviewed blobs are identical to main by gh api contents sha) log 1381-1437 green. Residual, not security: a broken-but-installed podman is reported as 'not found' (:88 vs :294)."
             }
-          }
+          },
+          "completed": "2026-10-24",
+          "transitions": [
+            {
+              "cmd": "done",
+              "by": "ghost",
+              "at": "2026-10-24T20:58:57.530Z",
+              "via": "cli"
+            }
+          ]
         },
         {
           "id": "E-1",
@@ -508,7 +526,7 @@
           "title": "Prove the sandbox by attacking it",
           "owner": "security",
           "est": "1d",
-          "status": "todo",
+          "status": "done",
           "deps": [
             "E-2"
           ],
@@ -555,7 +573,16 @@
               ],
               "note": "Independent security review (fresh agent, not the builder): podman cannot start here (newuidmap refused), so the live attacks are read from CI run 40101849309 on b3c6824, whose reviewed files are blob-identical to main (gh api contents sha). Every ac attack has its command and real output in that log. (a) 1405-1407: '$ for p in /nope /etc/caretaker-escape /usr/bin/caretaker-escape /work/../caretaker-escape; do touch \"$p\" 2>&1 && echo \"WROTE $p\"; done; echo DONE' -> 'touch: /work/../caretaker-escape: Read-only file system / DONE', PASS. (b) 1408-1410: awk doubling a string under a 64 MiB ceiling -> 'EXIT=137 / oom_kill 1', PASS. (c) 1120-1122: '$ curl -sS https://1.1.1.1/ ...' -> 'exit 7: curl: (7) Failed to connect to 1.1.1.1:443 after 0 ms: Could not connect to server / HTTP_STATUS=000', no name lookup involved; 1114-1116 evil.example through the proxy 'CONNECT tunnel failed, response 403'; 1123-1128 a file POSTed through the proxy 403 and straight to the raw IP no route; 1129-1131 sibling container 'Failed to connect to 10.89.2.2:80'; 1132-1134 host.containers.internal:42427 unreachable; 1136 'DNS on the internal network never forwards'. (d) 1411-1414: the socket hunt (named paths, find / -type s, curl --unix-socket _ping) prints no SOCKET line, and the control with a socket mounted at /run/podman/podman.sock finds it, PASS. Predicates read: netns.mjs:404 fails the raw-IP attack on any 'Could not resolve' or HTTP status; sandbox.test.mjs:193 needs 'Read-only' and no WROTE line; :217 needs no SOCKET and no OK line, and :208's echo makes OK matchable (reviewer's point, confirmed). Comments: netns.mjs:15-24 quotes 'Network unreachable' from podman 5.8.2 where CI's podman 4.9.3 says 'Could not connect to server'; the header names its box and version, and both are the same missing route, so it is not a wrong reason. Residuals, not fails: the log keeps only an attack's last two output lines and the JSON report is not uploaded from CI (reviewer noted); and attack (b) proves the ceiling binds within a run, while the ceiling itself can be removed from the agent-writable devcontainer.json with no warning, which I have recorded as E-1's security fail, not as a gap in these attacks."
             }
-          }
+          },
+          "completed": "2026-10-24",
+          "transitions": [
+            {
+              "cmd": "done",
+              "by": "ghost",
+              "at": "2026-10-24T20:58:57.694Z",
+              "via": "cli"
+            }
+          ]
         },
         {
           "id": "E-4",
@@ -2037,7 +2064,7 @@
           "title": "serve: binding, token, host/origin checks, CSP, files",
           "owner": "security",
           "est": "1d",
-          "status": "doing",
+          "status": "done",
           "deps": [
             "C-1"
           ],
@@ -2074,7 +2101,16 @@
               ],
               "note": "Independent security review (fresh agent, not the builder): started startServer on a scratch repo (port 0) and attacked it over node:http and raw sockets. Host (serve.mjs:417): LOCALHOST, 127.1, 0x7f000001, [::ffff:127.0.0.1], user@, trailing .evil, zero-padded port, no port, HTTP/1.0 without Host, absolute-form request line with Host evil, duplicate Host with evil first: all 421. Cookie gate (:424-427): /board.html and /api/* 401 without the cookie via /./, //, backslash, %62oard, %00, /api/.., HEAD and OPTIONS; the 200s on //api/v1/snapshot, /%61pi/..., /API/..., /BOARD.HTML are the app shell (body checked), never the board or JSON. Cookie compare (:170-180): wrong case name, quoted value, upper-case hex, trailing =, value+x, second Cookie header, bad-then-good duplicate: all 401. /auth (:419-422): upper-case token, token%00, t[]=, second t= all 403; cookie is HttpOnly; SameSite=Strict; Path=/, 302 to / with Referrer-Policy no-referrer. POST (:428-432): Origin with suffix .evil, path, HTTP://, list ok,evil and evil,ok (header and raw duplicates), file://, null; CT jsonx, Application/JSON, multipart; X-Caretaker 01/true: all refused; no ACAO on any response so the preflight that X-Caretaker forces fails. Static (:203-205): ..%2f one and two levels, %2e%2e, double-encoded, %5c, %c0%ae, /%2fetc%2fpasswd, assets%2f..: nothing outside dist served; 500 on malformed UTF-8 leaks only 'URI malformed'. CSP (:160) on 200/302/401/403/404/405/413/421/500 and SSE; board.html served under CSP sandbox (:442). Run files: realpath under the archive (readmodel.mjs:536-553), from=-5/1e12/NaN clamp. Token not in argv/environ (serve.test). Two records, neither browser-reachable: (1) the AC says 'one-time token' but /auth?t= replays for the life of the process and the cookie value IS the token, as TECH.md 332 specifies; code (serve.mjs:19), TECH.md 328 and GettingStarted.tsx:64 all say 'printed once', which is true, so correct the AC wording or consume the token on first use; (2) serveStatic's prefix check is lexical, so a symlink planted inside dist (web/dist, gitignored, inside the dogfood workspace) is followed out of it (/leak.txt served my outside file); run files use realpath, static should too."
             }
-          }
+          },
+          "completed": "2026-10-24",
+          "transitions": [
+            {
+              "cmd": "done",
+              "by": "ghost",
+              "at": "2026-10-24T20:58:57.855Z",
+              "via": "cli"
+            }
+          ]
         },
         {
           "id": "W-2",
@@ -2166,7 +2202,7 @@
           "title": "command endpoint over core only",
           "owner": "security",
           "est": "4h",
-          "status": "doing",
+          "status": "done",
           "deps": [
             "W-1",
             "C-6"
@@ -2203,7 +2239,16 @@
               ],
               "note": "Independent security review (fresh agent, not the builder): over HTTP against startServer on a scratch repo. Verdicts and internals unreachable: cmd reviewer/qa/security/recordVerdict/mutate/build/transition/command/save/__proto__/constructor/toString/hasOwnProperty, case and whitespace variants, and non-string cmd or non-object body all 400 at serve.mjs:406 / readmodel.mjs:825 (COMMANDS :37); nothing reaches recordVerdict. Core refusals verbatim as 409: done on an auth-keyword task lacking security returned {refused:{missing:['security (money/auth/isolation)']}}, done with reviewer fail {missing:['reviewer']}, pr javascript: 'pr needs an http(s) url', spec-approve with no spec 'has no spec file to review'; a task id with encoded traversal is 404. Identity: by/via in args or body are ignored; every record carries by=operator(cfg) (config operator, else the server's OS user) and via:web, verified for ask and for all five transitions start/todo/note/block/done via board.mjs:654; the same note from the CLI records via:cli, so the two are distinguishable. Lock: 25 parallel notes all landed and the board still parses (board.mutate). Honest answer to 'bypasses commandsFor': yes, three transitions core accepts that commandsFor (lifecycle.mjs:148-174) does not offer: done on a done task re-stamps completed to today, start on a dropped task reopens it with the dropped record left in place, block on a done task deletes completed. transition() at board.mjs:630-654 has no closed() guard, unlike the C-6 facts; identical on the CLI, so the endpoint adds no capability, but lifecycle.mjs:139-140's 'core checks again on the click' is not true for those three. Cosmetic: args as string/array/null or text as an object is accepted and stores '' or '[object Object]'."
             }
-          }
+          },
+          "completed": "2026-10-24",
+          "transitions": [
+            {
+              "cmd": "done",
+              "by": "ghost",
+              "at": "2026-10-24T20:58:58.024Z",
+              "via": "cli"
+            }
+          ]
         },
         {
           "id": "W-5",
